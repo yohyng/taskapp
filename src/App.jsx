@@ -1162,14 +1162,16 @@ function App() {
           </section>
         )}
 
-        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]", mobileView === "calendar" && "hidden md:grid")}> 
+        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]", mobileView === "calendar" && "hidden md:grid")}>
           <section
             className={classNames(
               "min-w-0 gap-2 pb-1",
-              mobileView === "board" ? "grid md:contents" : "hidden md:contents",
+              mobileView === "board"
+                ? leftPanelHorizontal ? "grid md:col-span-full" : "grid md:contents"
+                : leftPanelHorizontal ? "hidden md:block md:col-span-full" : "hidden md:contents",
               "grid-cols-1"
             )}
-          > 
+          >
             <div className={classNames("gap-2 md:min-h-[560px] xl:min-h-[660px]", mobileView === "board" ? "flex" : "hidden md:flex", leftPanelHorizontal ? "flex-row items-start" : "min-h-[420px] flex-col")}>
               <div className={classNames(leftPanelHorizontal ? "min-w-[200px] flex-1" : "w-full")}>
                 <InboxTray
