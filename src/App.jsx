@@ -420,6 +420,7 @@ function App() {
         const target = taskMap.get(dst.id);
         const dragged = taskMap.get(src.id);
         if (target && dragged && target.parentId !== src.id) {
+          if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
           upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
           setToast(`親子化：「${target.title}」の子タスクにしました`);
           return;
@@ -435,6 +436,7 @@ function App() {
         const target = taskMap.get(dst.id);
         const dragged = taskMap.get(src.id);
         if (target && dragged && target.parentId !== src.id) {
+          if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
           upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
           setToast(`親子化：「${target.title}」の子タスクにしました`);
           return;
@@ -471,6 +473,7 @@ function App() {
         upsertTask({ id: src.id, parentId: null, category: droppedOn.category, project: droppedOn.project });
         setToast(`移動：${droppedOn.category} / ${droppedOn.project} の並列タスクにしました`);
       } else {
+        if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
         upsertTask({ id: src.id, parentId: dst.id, category: droppedOn.category, project: droppedOn.project });
         setToast(`親子化：「${droppedOn.title}」の子タスクにしました`);
       }
@@ -964,6 +967,7 @@ function App() {
       return;
     }
 
+    if (taskDepth(parent.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
     upsertTask({ id, parentId: parent.id, category: parent.category, project: parent.project });
     setToast(`親子化：「${parent.title}」の子タスクにしました`);
   }
@@ -971,6 +975,18 @@ function App() {
   function tasksForCategory(category) {
     return filteredTasks.filter((task) => task.category === category);
   }
+
+  function taskDepth(id) {
+    let depth = 0;
+    let current = taskMap.get(id);
+    while (current?.parentId && depth < 10) {
+      depth++;
+      current = taskMap.get(current.parentId);
+    }
+    return depth;
+  }
+
+  const MAX_DEPTH = 3;
 
   function rootTasksForProject(category, project) {
     return tasksForCategory(category).filter((task) => task.project === project && !task.parentId);
