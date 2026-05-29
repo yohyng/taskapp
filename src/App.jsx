@@ -9,6 +9,7 @@ import {
   useDroppable,
   useDraggable,
   closestCenter,
+  rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem } from "./lib/db";
@@ -33,6 +34,17 @@ import {
   Trash2,
   CheckSquare,
 } from "lucide-react";
+
+// タスクレベルのドロップゾーンをカラム全体より優先する衝突検知
+function taskFirstCollision(args) {
+  const taskTypes = ["task-in-today", "task-in-weekly", "task", "tray"];
+  const taskContainers = args.droppableContainers.filter(
+    (c) => taskTypes.includes(c.data.current?.type)
+  );
+  const taskHits = closestCenter({ ...args, droppableContainers: taskContainers });
+  if (taskHits.length > 0) return taskHits;
+  return closestCenter(args);
+}
 
 const DEFAULT_CATEGORIES = [
   { key: "NOMLAB", label: "NOMLAB PJ", tone: "rose" },
@@ -1122,7 +1134,7 @@ function App() {
   }, []);
 
   return (
-    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
