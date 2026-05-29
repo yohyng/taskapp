@@ -303,17 +303,22 @@ function App() {
   const [notionDbId, setNotionDbId] = useState(() => localStorage.getItem("taskspace-notion-dbid") || "");
   const [notionSyncing, setNotionSyncing] = useState(false);
   const [notionLastSync, setNotionLastSync] = useState(() => localStorage.getItem("taskspace-notion-last-sync") || "");
+  const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
 
-  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } });
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } });
   const sensors = useSensors(pointerSensor, touchSensor);
 
   function handleDragStart({ active }) {
     setActiveDrag(active.data.current || null);
+    // long-press context menu timer をキャンセル（ドラッグ開始と競合するため）
+    if (typeof window.__taskspaceLongPressCancel === "function") {
+      window.__taskspaceLongPressCancel();
+    }
   }
 
   function handleDragEnd({ active, over }) {
@@ -998,11 +1003,19 @@ function App() {
     const v = Math.min(1.5, Math.max(0.6, val));
     setZoom(v);
     localStorage.setItem("taskspace-zoom", String(v));
+    document.documentElement.style.fontSize = `${v * 16}px`;
   }
+
+  // 初期zoom適用
+  useEffect(() => {
+    document.documentElement.style.fontSize = `${zoom * 16}px`;
+    return () => { document.documentElement.style.fontSize = ""; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ zoom }}>
+    <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
@@ -1041,8 +1054,11 @@ function App() {
 
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">表示</div>
-                    <button onClick={() => setShowDone((v) => !v)} className={classNames("w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
+                    <button onClick={() => setShowDone((v) => !v)} className={classNames("mb-1.5 w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
                       {showDone ? "✓ 完了タスクを表示中" : "完了タスクを非表示中"}
+                    </button>
+                    <button onClick={() => { const v = !leftPanelHorizontal; setLeftPanelHorizontal(v); localStorage.setItem("taskspace-left-horizontal", String(v)); }} className={classNames("w-full rounded border px-2 py-1.5 text-left text-xs transition", leftPanelHorizontal ? "border-sky-400/30 bg-sky-400/10 text-sky-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
+                      {leftPanelHorizontal ? "✓ TRAY/Today/Weekly 横並び" : "TRAY/Today/Weekly 横並び"}
                     </button>
                   </div>
 
@@ -1154,15 +1170,18 @@ function App() {
               "grid-cols-1"
             )}
           > 
-            <div className={classNames("flex min-h-[420px] flex-col gap-2 md:min-h-[560px] xl:min-h-[660px]", mobileView === "board" ? "flex" : "hidden md:flex")}> 
-              <InboxTray
-                items={inboxItems}
-                updateInboxItem={updateInboxItem}
-                removeInboxItem={removeInboxItem}
-                moveInboxItem={moveInboxItem}
-                addInboxItem={addInboxItem}
-              />
+            <div className={classNames("gap-2 md:min-h-[560px] xl:min-h-[660px]", mobileView === "board" ? "flex" : "hidden md:flex", leftPanelHorizontal ? "flex-row items-start" : "min-h-[420px] flex-col")}>
+              <div className={classNames(leftPanelHorizontal ? "min-w-[200px] flex-1" : "w-full")}>
+                <InboxTray
+                  items={inboxItems}
+                  updateInboxItem={updateInboxItem}
+                  removeInboxItem={removeInboxItem}
+                  moveInboxItem={moveInboxItem}
+                  addInboxItem={addInboxItem}
+                />
+              </div>
               <TodayColumn
+                wrapClass={leftPanelHorizontal ? "min-w-[200px] flex-1" : ""}
                 todayTasks={todayTasks}
                 collapsed={collapsed}
                 setCollapsed={setCollapsed}
@@ -1183,7 +1202,7 @@ function App() {
                 addTask={addTask}
               />
               <WeeklyColumn
-                className="flex flex-1"
+                className={classNames("flex", leftPanelHorizontal ? "min-w-[200px] flex-1" : "flex-1")}
                 collapsed={collapsed}
                 setCollapsed={setCollapsed}
                 weeklyRoots={weeklyRoots}
@@ -1274,6 +1293,7 @@ function TodayColumn({
   defaultCategory,
   defaultProject,
   addTask,
+  wrapClass = "",
 }) {
   const [draft, setDraft] = useState("");
   const { setNodeRef: todayDropRef, isOver: isTodayOver } = useDroppable({ id: "today-column", data: { type: "today" } });
@@ -1286,7 +1306,7 @@ function TodayColumn({
   }
 
   return (
-    <aside ref={todayDropRef} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2 transition", isTodayOver && "border-cyan-300/50 bg-cyan-500/[0.07]", collapsed["column:today"] && "min-h-0")}>
+    <aside ref={todayDropRef} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2 transition", isTodayOver && "border-cyan-300/50 bg-cyan-500/[0.07]", collapsed["column:today"] && "min-h-0", wrapClass)}>
       <div className="mb-2 flex items-center justify-between gap-2 border-b border-cyan-200/10 pb-1.5">
         <button
           onClick={() => setCollapsed((prev) => ({ ...prev, ["column:today"]: !prev["column:today"] }))}
@@ -1783,14 +1803,22 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
       longPressActive.current = true;
       setContextMenu({ x, y });
     }, 600);
+    // dnd-kit の dragStart からキャンセルできるよう登録
+    window.__taskspaceLongPressCancel = () => {
+      clearTimeout(longPressTimer.current);
+      longPressActive.current = false;
+    };
   }
 
   function handlePointerUp() {
     clearTimeout(longPressTimer.current);
+    window.__taskspaceLongPressCancel = null;
   }
 
-  function handlePointerMove() {
+  function handlePointerMove(e) {
+    // 指が少し動いたらlong-pressキャンセル（ドラッグ優先）
     clearTimeout(longPressTimer.current);
+    window.__taskspaceLongPressCancel = null;
   }
 
   // dnd-kit hooks
