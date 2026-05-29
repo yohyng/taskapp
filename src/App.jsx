@@ -1,122 +1,1865 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import './App.css'
+import React, { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import {
+  ChevronDown,
+  ChevronRight,
+  ChevronLeft,
+  Circle,
+  CheckCircle2,
+  CalendarDays,
+  Plus,
+  Search,
+  Columns3,
+  ListTree,
+  GripVertical,
+  X,
+  RotateCcw,
+  Undo2,
+  Redo2,
+  Settings2,
+  Trash2,
+} from "lucide-react";
 
-function App() {
-  const [count, setCount] = useState(0)
+const DEFAULT_CATEGORIES = [
+  { key: "NOMLAB", label: "NOMLAB PJ", tone: "rose" },
+  { key: "NOMURA", label: "NOMURA PJ", tone: "purple" },
+  { key: "PRIVATE", label: "PRIVATE PJ", tone: "blue" },
+];
 
-  return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+const DEFAULT_PROJECT_RULES = {
+  "NOMLAB::空間デザイン試論": {
+    recurrence: "weekly",
+    recurrenceDay: 3,
+    recurrenceStart: "",
+    recurrenceEnd: "",
+  },
+};
 
-      <div className="ticks"></div>
+const DEFAULT_PROJECT_ORDER = {};
+const NO_CATEGORY_LABEL = "---";
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+const TONES = ["rose", "purple", "blue", "amber", "green", "cyan", "orange", "neutral"];
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
+const TONE_MAP = {
+  rose: {
+    tag: "bg-rose-500/20 text-rose-200 border-rose-400/25",
+    panel: "bg-rose-500/7 border-rose-400/15",
+    accent: "text-rose-300",
+    add: "border-rose-300/25 text-rose-200 hover:bg-rose-400/10",
+  },
+  purple: {
+    tag: "bg-purple-500/20 text-purple-200 border-purple-400/25",
+    panel: "bg-purple-500/7 border-purple-400/15",
+    accent: "text-purple-300",
+    add: "border-purple-300/25 text-purple-200 hover:bg-purple-400/10",
+  },
+  blue: {
+    tag: "bg-sky-500/20 text-sky-200 border-sky-400/25",
+    panel: "bg-sky-500/7 border-sky-400/15",
+    accent: "text-sky-300",
+    add: "border-sky-300/25 text-sky-200 hover:bg-sky-400/10",
+  },
+  amber: {
+    tag: "bg-amber-500/20 text-amber-200 border-amber-400/25",
+    panel: "bg-amber-500/7 border-amber-400/15",
+    accent: "text-amber-300",
+    add: "border-amber-300/25 text-amber-200 hover:bg-amber-400/10",
+  },
+  green: {
+    tag: "bg-emerald-500/20 text-emerald-200 border-emerald-400/25",
+    panel: "bg-emerald-500/7 border-emerald-400/15",
+    accent: "text-emerald-300",
+    add: "border-emerald-300/25 text-emerald-200 hover:bg-emerald-400/10",
+  },
+  cyan: {
+    tag: "bg-cyan-500/20 text-cyan-200 border-cyan-400/25",
+    panel: "bg-cyan-500/7 border-cyan-400/15",
+    accent: "text-cyan-300",
+    add: "border-cyan-300/25 text-cyan-200 hover:bg-cyan-400/10",
+  },
+  orange: {
+    tag: "bg-orange-500/20 text-orange-200 border-orange-400/25",
+    panel: "bg-orange-500/7 border-orange-400/15",
+    accent: "text-orange-300",
+    add: "border-orange-300/25 text-orange-200 hover:bg-orange-400/10",
+  },
+  neutral: {
+    tag: "bg-neutral-500/20 text-neutral-200 border-neutral-400/25",
+    panel: "bg-neutral-500/7 border-neutral-400/15",
+    accent: "text-neutral-300",
+    add: "border-neutral-300/25 text-neutral-200 hover:bg-neutral-400/10",
+  },
+};
+
+const SAMPLE_TASKS = [
+  // NOMLAB PJ
+  { id: "n1", title: "全体スケジュール", category: "NOMLAB", project: "空間デザイン試論", status: "未着手", thisWeek: false, parentId: null, memo: "スクショのトグル名をProjectとして登録。プロジェクト単位で毎週水曜に作業日", dueDate: "2026-05-29" },
+  { id: "n2", title: "植物アプローチ資料作成", category: "NOMLAB", project: "現象", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n3", title: "新しいプリンターでテスト", category: "NOMLAB", project: "Shiki", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n4", title: "複雑な形状テストで作ってみる", category: "NOMLAB", project: "Shiki", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n5", title: "HPを空間系に変更", category: "NOMLAB", project: "torinome", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n6", title: "AND対応→", category: "NOMLAB", project: "torinome", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n7", title: "DSAのSHOPリスト作成", category: "NOMLAB", project: "空間シンクタンク", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n8", title: "DSAの画像全部ダウンロード", category: "NOMLAB", project: "空間ゆらぎ/AI", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "2026-05-31" },
+  { id: "n9", title: "空間の動画解析可能かやってみる", category: "NOMLAB", project: "空間ゆらぎ/AI", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n10", title: "ラジオ企画", category: "NOMLAB", project: "選書企画・コラム", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n11", title: "年内テーマ検討", category: "NOMLAB", project: "選書企画・コラム", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "n12", title: "鍋コラム清書", category: "NOMLAB", project: "選書企画・コラム", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+
+  // NOMURA PJ
+  { id: "m1", title: "次回定例に向けてプロト作成", category: "NOMURA", project: "DESIGNART2026", status: "未着手", thisWeek: false, parentId: null, memo: "親タスク。下に実制作タスクを配置", dueDate: "2026-05-30" },
+  { id: "m2", title: "スタッフとワイヤーと下地", category: "NOMURA", project: "DESIGNART2026", status: "未着手", thisWeek: false, parentId: "m1", memo: "", dueDate: "" },
+  { id: "m3", title: "3Dプリントでオスメス作っておく", category: "NOMURA", project: "DESIGNART2026", status: "未着手", thisWeek: false, parentId: "m1", memo: "", dueDate: "" },
+  { id: "m4", title: "会場選定", category: "NOMURA", project: "DESIGNART2026", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m5", title: "芝浦工大トーク関連", category: "NOMURA", project: "歓びと感動学", status: "未着手", thisWeek: false, parentId: null, memo: "親タスク", dueDate: "" },
+  { id: "m6", title: "かずさん人事連絡待ち", category: "NOMURA", project: "歓びと感動学", status: "未着手", thisWeek: false, parentId: "m5", memo: "", dueDate: "" },
+  { id: "m7", title: "人事と連携したノムラのプレゼンにもなるような立て付けにする", category: "NOMURA", project: "歓びと感動学", status: "未着手", thisWeek: false, parentId: "m5", memo: "", dueDate: "" },
+  { id: "m8", title: "感動学資料まとめ", category: "NOMURA", project: "歓びと感動学", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m9", title: "訂正シール確認→確認後酒井さん連絡", category: "NOMURA", project: "歓びと感動学", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m10", title: "なんとなくひきこもりと空間フォロー", category: "NOMURA", project: "学校空間リサーチ", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m11", title: "ノムラの空間、竣工実績ベースに読み解いて、それを教育空間にパラフレーズするなら、のシステムというか資料作成しておくといいかも", category: "NOMURA", project: "学校空間リサーチ", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m12", title: "記憶と脳の書籍読んでおく", category: "NOMURA", project: "記憶と空間リサーチ", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m13", title: "Akariyaサンプル待ち", category: "NOMURA", project: "Other", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "m14", title: "8月伊藤亜紗さん？連絡", category: "NOMURA", project: "Other", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+
+  // PRIVATE PJ
+  { id: "p1", title: "婚姻届は7月19日提出に向けて調整", category: "PRIVATE", project: "結婚回り", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "2026-07-19" },
+  { id: "p2", title: "結婚指輪刻印をティファニーに送る", category: "PRIVATE", project: "結婚回り", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "p3", title: "ゲンロン9月に提出", category: "PRIVATE", project: "結婚回り", status: "未着手", thisWeek: false, parentId: null, memo: "親タスク", dueDate: "" },
+  { id: "p4", title: "社外活動申請", category: "PRIVATE", project: "結婚回り", status: "未着手", thisWeek: false, parentId: "p3", memo: "", dueDate: "" },
+  { id: "p5", title: "6月6日の落款前とあと予定検討する", category: "PRIVATE", project: "京都西陣関連", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "2026-06-06" },
+  { id: "p6", title: "6月4日定例に向けて資料作る", category: "PRIVATE", project: "GEA", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "2026-06-04" },
+  { id: "p7", title: "SCOOP受け取りしたい", category: "PRIVATE", project: "GEA", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "p8", title: "ラグジュアリーとはなにか？", category: "PRIVATE", project: "被蜜空間研究", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+  { id: "p9", title: "ムードボードについて調べておく", category: "PRIVATE", project: "被蜜空間研究", status: "未着手", thisWeek: false, parentId: null, memo: "", dueDate: "" },
+
+  // Weekly Task column
+  { id: "w1", title: "クリーニング受け取り", category: "PRIVATE", project: "Other", status: "未着手", thisWeek: true, parentId: null, memo: "Weekly Taskから取り込み", dueDate: "" },
+  { id: "w2", title: "経費精算", category: "PRIVATE", project: "経費精算", status: "未着手", thisWeek: true, parentId: null, memo: "親タスク。Weekly Taskに表示", dueDate: "" },
+  { id: "w3", title: "会議交際費申請", category: "PRIVATE", project: "経費精算", status: "未着手", thisWeek: true, parentId: "w2", memo: "", dueDate: "" },
+  { id: "w4", title: "風HDMI無線登録", category: "PRIVATE", project: "経費精算", status: "未着手", thisWeek: true, parentId: "w2", memo: "", dueDate: "" },
+  { id: "w5", title: "タクシー登録", category: "PRIVATE", project: "経費精算", status: "未着手", thisWeek: true, parentId: "w2", memo: "", dueDate: "" },
+  { id: "w6", title: "AVPレンズ登録", category: "PRIVATE", project: "経費精算", status: "未着手", thisWeek: true, parentId: "w2", memo: "", dueDate: "" },
+  { id: "w7", title: "ニンジャマスク買うといいかも", category: "PRIVATE", project: "Other", status: "未着手", thisWeek: true, parentId: null, memo: "", dueDate: "" },
+  { id: "w8", title: "SIC訪問の件→いったん未来創研メンバーとミラノメンバーに聞く。先着10名でスケジューリングする→それ次第候補日作成で、須藤さん連絡", category: "NOMURA", project: "Other", status: "未着手", thisWeek: true, parentId: null, memo: "", dueDate: "" },
+  { id: "w9", title: "ゲンロン編集部配本？", category: "PRIVATE", project: "Other", status: "未着手", thisWeek: true, parentId: null, memo: "", dueDate: "" },
+  { id: "w10", title: "ToDo", category: "PRIVATE", project: "Other", status: "未着手", thisWeek: true, parentId: null, memo: "", dueDate: "" },
+];
+
+const SAMPLE_INBOX = [
+  {
+    id: "in1",
+    title: "Notionから来た未分類メモ：展示会場の候補を確認",
+    source: "Notion Inbox DB",
+    createdAt: "2026-05-28",
+  },
+  {
+    id: "in2",
+    title: "Notionから来た未分類メモ：ラフスケッチを整理",
+    source: "Notion Inbox DB",
+    createdAt: "2026-05-28",
+  },
+];
+
+const STORAGE_KEY = "notion-like-taskdb-prototype-v4";
+
+function uid() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) return crypto.randomUUID();
+  return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
-export default App
+function classNames(...items) {
+  return items.filter(Boolean).join(" ");
+}
+
+function toneClasses(tone) {
+  return TONE_MAP[tone] || TONE_MAP.neutral;
+}
+
+function normalizeTitle(title) {
+  return title.trim().replace(/\s+/g, " ");
+}
+
+function toDateKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function projectKey(category, project) {
+  return `${category}::${project}`;
+}
+
+function getNthWeekdayDate(year, month, weekday, nth) {
+  if (nth === -1) {
+    const last = new Date(year, month + 1, 0);
+    const diff = (last.getDay() - weekday + 7) % 7;
+    return last.getDate() - diff;
+  }
+  const first = new Date(year, month, 1);
+  const offset = (weekday - first.getDay() + 7) % 7;
+  return 1 + offset + (nth - 1) * 7;
+}
+
+function dayDiff(aKey, bKey) {
+  const a = new Date(`${aKey}T00:00:00`);
+  const b = new Date(`${bKey}T00:00:00`);
+  return Math.floor((b - a) / 86400000);
+}
+
+function matchesProjectRule(rule, date) {
+  if (!rule || !rule.recurrence || rule.recurrence === "none") return false;
+  const key = toDateKey(date);
+  if (rule.recurrenceStart && key < rule.recurrenceStart) return false;
+  if (rule.recurrenceEnd && key > rule.recurrenceEnd) return false;
+
+  const day = date.getDay();
+  if (rule.recurrence === "daily") return true;
+  if (rule.recurrence === "weekdays") return day >= 1 && day <= 5;
+  if (rule.recurrence === "weekly") return Number(rule.recurrenceDay ?? 1) === day;
+  if (rule.recurrence === "biweekly") {
+    const start = rule.recurrenceStart || toDateKey(new Date());
+    return Number(rule.recurrenceDay ?? 1) === day && dayDiff(start, key) >= 0 && Math.floor(dayDiff(start, key) / 7) % 2 === 0;
+  }
+  if (rule.recurrence === "monthlyDate") return date.getDate() === Number(rule.recurrenceDate ?? 1);
+  if (rule.recurrence === "monthlyNthWeekday") {
+    const targetDate = getNthWeekdayDate(date.getFullYear(), date.getMonth(), Number(rule.recurrenceDay ?? 1), Number(rule.recurrenceWeek ?? 1));
+    return date.getDate() === targetDate;
+  }
+  return false;
+}
+
+function projectLabelFromKey(key) {
+  const [category, ...rest] = key.split("::");
+  return { category, project: rest.join("::") };
+}
+
+function normalizeTask(task) {
+  return {
+    dueDate: "",
+    today: false,
+    todayOrder: null,
+    weeklyOrder: null,
+    recurrence: "none",
+    recurrenceDay: null,
+    recurrenceEnd: "",
+    memo: "",
+    status: "未着手",
+    thisWeek: false,
+    parentId: null,
+    ...task,
+  };
+}
+
+function App() {
+  const [boot] = useState(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return { tasks: SAMPLE_TASKS, categories: DEFAULT_CATEGORIES, projectRules: DEFAULT_PROJECT_RULES, projectOrder: DEFAULT_PROJECT_ORDER, inboxItems: SAMPLE_INBOX };
+      const parsed = JSON.parse(raw);
+      return {
+        tasks: (parsed.tasks || SAMPLE_TASKS).map(normalizeTask),
+        categories: parsed.categories || DEFAULT_CATEGORIES,
+        projectRules: parsed.projectRules || DEFAULT_PROJECT_RULES,
+        projectOrder: parsed.projectOrder || DEFAULT_PROJECT_ORDER,
+        inboxItems: parsed.inboxItems || SAMPLE_INBOX,
+      };
+    } catch {
+      return { tasks: SAMPLE_TASKS, categories: DEFAULT_CATEGORIES, projectRules: DEFAULT_PROJECT_RULES, projectOrder: DEFAULT_PROJECT_ORDER, inboxItems: SAMPLE_INBOX };
+    }
+  });
+
+  const [tasks, setTasks] = useState(boot.tasks);
+  const [categories, setCategories] = useState(boot.categories);
+  const [projectRules, setProjectRules] = useState(boot.projectRules || DEFAULT_PROJECT_RULES);
+  const [projectOrder, setProjectOrder] = useState(boot.projectOrder || DEFAULT_PROJECT_ORDER);
+  const [inboxItems, setInboxItems] = useState(boot.inboxItems || SAMPLE_INBOX);
+  const [search, setSearch] = useState("");
+  const [showDone, setShowDone] = useState(true);
+  const [weeklyFlat, setWeeklyFlat] = useState(false);
+  const [selectedTaskId, setSelectedTaskId] = useState(null);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [quickMemo, setQuickMemo] = useState("");
+  const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
+  const [quickProject, setQuickProject] = useState("空間シンクタンク");
+  const [collapsed, setCollapsed] = useState({});
+  const [toast, setToast] = useState("列編集とカレンダーを追加しました");
+  const [history, setHistory] = useState({ past: [], future: [] });
+  const [showColumnsPanel, setShowColumnsPanel] = useState(false);
+  const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
+  const [mobileView, setMobileView] = useState("board");
+
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, categories, projectRules, projectOrder, inboxItems }));
+  }, [tasks, categories, projectRules, projectOrder, inboxItems]);
+
+  const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const categoryMap = useMemo(() => new Map(categories.map((cat) => [cat.key, cat])), [categories]);
+
+  function categoryTone(categoryKey) {
+    return toneClasses(categoryMap.get(categoryKey)?.tone || "neutral");
+  }
+
+  const projectsByCategory = useMemo(() => {
+    const result = {};
+    categories.forEach((cat) => {
+      const projects = tasks.filter((task) => task.category === cat.key && task.project).map((task) => task.project);
+      const uniqueProjects = Array.from(new Set(projects));
+      const order = projectOrder[cat.key] || [];
+      result[cat.key] = uniqueProjects.sort((a, b) => {
+        const ai = order.indexOf(a);
+        const bi = order.indexOf(b);
+        if (ai !== -1 || bi !== -1) return (ai === -1 ? 9999 : ai) - (bi === -1 ? 9999 : bi);
+        return a.localeCompare(b, "ja");
+      });
+    });
+    return result;
+  }, [tasks, categories, projectOrder]);
+
+  const filteredTasks = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return tasks.filter((task) => {
+      if (!showDone && task.status === "完了") return false;
+      if (!q) return true;
+      const parent = task.parentId ? taskMap.get(task.parentId)?.title : "";
+      return [task.title, task.category, task.project, task.status, task.memo, task.dueDate, parent]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [tasks, search, showDone, taskMap]);
+
+  const selectedTask = selectedTaskId ? taskMap.get(selectedTaskId) : null;
+
+  function collectDescendantIds(parentId, sourceTasks = tasks) {
+    const directChildren = sourceTasks.filter((task) => task.parentId === parentId);
+    return directChildren.flatMap((child) => [child.id, ...collectDescendantIds(child.id, sourceTasks)]);
+  }
+
+  function collectAncestorIds(taskId, sourceTasks = tasks) {
+    const current = sourceTasks.find((task) => task.id === taskId);
+    if (!current?.parentId) return [];
+    return [current.parentId, ...collectAncestorIds(current.parentId, sourceTasks)];
+  }
+
+  function snapshot() {
+    return { tasks, categories, projectRules, projectOrder, inboxItems };
+  }
+
+  function commitState(updater) {
+    const current = snapshot();
+    const next = typeof updater === "function" ? updater(current) : updater;
+    if (JSON.stringify(current) === JSON.stringify(next)) return false;
+    setHistory((prev) => ({ past: [...prev.past.slice(-49), current], future: [] }));
+    setTasks(next.tasks);
+    setCategories(next.categories);
+    setProjectRules(next.projectRules || {});
+    setProjectOrder(next.projectOrder || {});
+    setInboxItems(next.inboxItems || []);
+    return true;
+  }
+
+  function commitTasks(updater) {
+    commitState((current) => ({ ...current, tasks: typeof updater === "function" ? updater(current.tasks) : updater }));
+  }
+
+  function undo() {
+    if (!history.past.length) return;
+    const previous = history.past[history.past.length - 1];
+    setHistory((prev) => ({ past: prev.past.slice(0, -1), future: [snapshot(), ...prev.future].slice(0, 50) }));
+    setTasks(previous.tasks);
+    setCategories(previous.categories);
+    setProjectRules(previous.projectRules || {});
+    setProjectOrder(previous.projectOrder || {});
+    setInboxItems(previous.inboxItems || []);
+    setToast("Undoしました");
+  }
+
+  function redo() {
+    if (!history.future.length) return;
+    const next = history.future[0];
+    setHistory((prev) => ({ past: [...prev.past.slice(-49), snapshot()], future: prev.future.slice(1) }));
+    setTasks(next.tasks);
+    setCategories(next.categories);
+    setProjectRules(next.projectRules || {});
+    setProjectOrder(next.projectOrder || {});
+    setInboxItems(next.inboxItems || []);
+    setToast("Redoしました");
+  }
+
+  useEffect(() => {
+    function handleKeyDown(event) {
+      const isMod = event.metaKey || event.ctrlKey;
+      if (!isMod) return;
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (["input", "textarea", "select"].includes(tag)) return;
+      const key = event.key.toLowerCase();
+      if (key === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      }
+      if ((key === "z" && event.shiftKey) || key === "y") {
+        event.preventDefault();
+        redo();
+      }
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [history, tasks, categories]);
+
+  function upsertTask(patch) {
+    commitTasks((prev) => prev.map((task) => (task.id === patch.id ? normalizeTask({ ...task, ...patch }) : task)));
+  }
+
+  function addTask({ title, category, project, parentId = null, thisWeek = false, dueDate = "" }) {
+    const clean = normalizeTitle(title);
+    if (!clean) return null;
+    const parent = parentId ? taskMap.get(parentId) : null;
+    const inheritedCategory = parent?.category || category || categories[0]?.key || "NOMLAB";
+    const inheritedProject = parent?.project || project || "未分類";
+    const newTask = normalizeTask({
+      id: uid(),
+      title: clean,
+      category: inheritedCategory,
+      project: inheritedProject,
+      status: "未着手",
+      thisWeek,
+      parentId,
+      memo: parent ? `「${parent.title}」の子タスクとして追加` : "",
+      dueDate,
+    });
+    commitTasks((prev) => [newTask, ...prev]);
+    setSelectedTaskId(newTask.id);
+    setToast(parent ? "子タスクを追加：親のCategory / Projectを継承しました" : "タスクを追加しました");
+    return newTask;
+  }
+
+  function addQuickMemo() {
+    const task = addTask({ title: quickMemo, category: quickCategory, project: quickProject });
+    if (task) setQuickMemo("");
+  }
+
+  function addInboxItem(title) {
+    const clean = normalizeTitle(title);
+    if (!clean) return;
+    commitState((current) => ({
+      ...current,
+      inboxItems: [
+        {
+          id: uid(),
+          title: clean,
+          source: "Local Tray",
+          createdAt: toDateKey(new Date()),
+        },
+        ...(current.inboxItems || []),
+      ],
+    }));
+    setToast("未決定トレイに追加しました");
+  }
+
+  function acceptInboxItem(id, category = "", project = "", patch = {}, options = {}) {
+    const item = inboxItems.find((entry) => entry.id === id);
+    if (!item) return;
+    const isPlain = !category && !project;
+    const newTask = normalizeTask({
+      id: uid(),
+      title: item.title,
+      category,
+      project,
+      status: "未着手",
+      thisWeek: false,
+      parentId: null,
+      memo: isPlain ? `Plain task from ${item.source || "Inbox"}` : `Imported from ${item.source || "Inbox"}`,
+      dueDate: "",
+      plain: isPlain,
+      ...patch,
+    });
+    commitState((current) => ({
+      ...current,
+      tasks: [newTask, ...current.tasks],
+      inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
+    }));
+    if (options.selectAfter) setSelectedTaskId(newTask.id);
+    setToast(isPlain ? "カテゴリなしタスクとして追加しました" : `${category} / ${project} に受け入れました`);
+    return newTask;
+  }
+
+  function updateInboxItem(id, patch) {
+    commitState((current) => ({
+      ...current,
+      inboxItems: (current.inboxItems || []).map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)),
+    }));
+  }
+
+  function removeInboxItem(id) {
+    commitState((current) => ({
+      ...current,
+      inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
+    }));
+    setToast("TRAYから削除しました");
+  }
+
+  function moveInboxItem(dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return;
+    commitState((current) => {
+      const list = [...(current.inboxItems || [])];
+      const from = list.findIndex((entry) => entry.id === dragId);
+      const to = list.findIndex((entry) => entry.id === targetId);
+      if (from < 0 || to < 0) return current;
+      const [moved] = list.splice(from, 1);
+      list.splice(to, 0, moved);
+      return { ...current, inboxItems: list };
+    });
+    setToast("TRAY内で並び替えました");
+  }
+
+  function toggleDone(task) {
+    upsertTask({ id: task.id, status: task.status === "完了" ? "未着手" : "完了" });
+  }
+
+  function toggleWeek(task) {
+    const nextValue = !task.thisWeek;
+    const relatedIds = nextValue
+      ? [task.id, ...collectAncestorIds(task.id), ...collectDescendantIds(task.id)]
+      : [task.id, ...collectDescendantIds(task.id)];
+
+    commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id) ? { ...item, thisWeek: nextValue } : item)));
+    setToast(nextValue ? "親子構造ごとWeekly Taskに表示しました" : "親子構造ごとWeekly Taskから外しました");
+  }
+
+  function removeTask(id) {
+    commitTasks((prev) => prev.map((task) => (task.parentId === id ? { ...task, parentId: null } : task)).filter((task) => task.id !== id));
+    if (selectedTaskId === id) setSelectedTaskId(null);
+    setToast("タスクを削除しました");
+  }
+
+  function resetDemo() {
+    commitState({ tasks: SAMPLE_TASKS, categories: DEFAULT_CATEGORIES, projectRules: DEFAULT_PROJECT_RULES, projectOrder: DEFAULT_PROJECT_ORDER, inboxItems: SAMPLE_INBOX });
+    setSelectedTaskId(null);
+    setSelectedProject(null);
+    setToast("サンプルデータに戻しました");
+  }
+
+  function addColumn() {
+    const key = normalizeTitle(newColumn.key).toUpperCase().replace(/\s+/g, "_");
+    if (!key || categories.some((cat) => cat.key === key)) {
+      setToast("列キーが空、または重複しています");
+      return;
+    }
+    commitState((current) => ({
+      ...current,
+      categories: [...current.categories, { key, label: newColumn.label || `${key} PJ`, tone: newColumn.tone }],
+    }));
+    setQuickCategory(key);
+    setNewColumn({ key: "NEW", label: "NEW PJ", tone: "green" });
+    setToast("列を追加しました");
+  }
+
+  function updateColumn(key, patch) {
+    commitState((current) => ({
+      ...current,
+      categories: current.categories.map((cat) => (cat.key === key ? { ...cat, ...patch } : cat)),
+    }));
+  }
+
+  function updateProjectRule(category, project, patch) {
+    const key = projectKey(category, project);
+    commitState((current) => ({
+      ...current,
+      projectRules: {
+        ...(current.projectRules || {}),
+        [key]: {
+          recurrence: "none",
+          recurrenceDay: null,
+          recurrenceStart: "",
+          recurrenceEnd: "",
+          recurrenceDate: 1,
+          recurrenceWeek: 1,
+          ...((current.projectRules || {})[key] || {}),
+          ...patch,
+        },
+      },
+    }));
+  }
+
+  function removeColumn(key) {
+    if (categories.length <= 1) {
+      setToast("列は最低1つ必要です");
+      return;
+    }
+    const fallback = categories.find((cat) => cat.key !== key)?.key;
+    commitState((current) => {
+      const nextProjectRules = {};
+      Object.entries(current.projectRules || {}).forEach(([ruleKey, rule]) => {
+        const info = projectLabelFromKey(ruleKey);
+        if (info.category !== key) nextProjectRules[ruleKey] = rule;
+      });
+      return {
+        categories: current.categories.filter((cat) => cat.key !== key),
+        tasks: current.tasks.map((task) => (task.category === key ? { ...task, category: fallback } : task)),
+        projectRules: nextProjectRules,
+        projectOrder: Object.fromEntries(Object.entries(current.projectOrder || {}).filter(([categoryKey]) => categoryKey !== key)),
+        inboxItems: current.inboxItems || [],
+      };
+    });
+    if (quickCategory === key) setQuickCategory(fallback);
+    setToast(`列を削除しました。属していたタスクは ${fallback} に移動しました`);
+  }
+
+  function moveColumn(dragKey, targetKey) {
+    if (!dragKey || !targetKey || dragKey === targetKey) return;
+    commitState((current) => {
+      const from = current.categories.findIndex((cat) => cat.key === dragKey);
+      const to = current.categories.findIndex((cat) => cat.key === targetKey);
+      if (from < 0 || to < 0) return current;
+      const nextCategories = [...current.categories];
+      const [moved] = nextCategories.splice(from, 1);
+      nextCategories.splice(to, 0, moved);
+      return { ...current, categories: nextCategories };
+    });
+    setToast(`${dragKey} を ${targetKey} の位置へ移動しました`);
+  }
+
+  function moveProject(category, dragProject, targetProject) {
+    if (!category || !dragProject || !targetProject || dragProject === targetProject) return;
+    const currentProjects = projectsByCategory[category] || [];
+    const from = currentProjects.indexOf(dragProject);
+    const to = currentProjects.indexOf(targetProject);
+    if (from < 0 || to < 0) return;
+
+    const nextProjects = [...currentProjects];
+    const [moved] = nextProjects.splice(from, 1);
+    nextProjects.splice(to, 0, moved);
+
+    commitState((current) => ({
+      ...current,
+      projectOrder: {
+        ...(current.projectOrder || {}),
+        [category]: nextProjects,
+      },
+    }));
+    setToast(`${dragProject} を移動しました`);
+  }
+
+  function moveWeeklyTask(dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return;
+    const weeklyList = weeklyTasks.map((task) => task.id);
+    const from = weeklyList.indexOf(dragId);
+    const to = weeklyList.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+
+    const nextIds = [...weeklyList];
+    const [moved] = nextIds.splice(from, 1);
+    nextIds.splice(to, 0, moved);
+
+    commitTasks((prev) =>
+      prev.map((task) => {
+        const index = nextIds.indexOf(task.id);
+        return index === -1 ? task : { ...task, weeklyOrder: index + 1 };
+      })
+    );
+    setToast("Weekly内で上下に並び替えました");
+  }
+
+  function moveTodayTask(dragId, targetId) {
+    if (!dragId || !targetId || dragId === targetId) return;
+    const todayList = todayTasks.map((task) => task.id);
+    const from = todayList.indexOf(dragId);
+    const to = todayList.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+
+    const nextIds = [...todayList];
+    const [moved] = nextIds.splice(from, 1);
+    nextIds.splice(to, 0, moved);
+
+    commitTasks((prev) =>
+      prev.map((task) => {
+        const index = nextIds.indexOf(task.id);
+        return index === -1 ? task : { ...task, todayOrder: index + 1 };
+      })
+    );
+    setToast("Today内で上下に並び替えました");
+  }
+
+  function handleDropOnProject(event, category, project) {
+    event.preventDefault();
+    const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+    if (inboxId) {
+      acceptInboxItem(inboxId, category, project);
+      return;
+    }
+
+    const id = event.dataTransfer.getData("task/id");
+    if (!id) return;
+    const task = taskMap.get(id);
+    if (!task) return;
+    upsertTask({ id, category, project, parentId: null });
+    setToast(task.parentId ? `親子解除：${category} / ${project} の並列タスクにしました` : `移動：${category} / ${project} に変更しました`);
+  }
+
+  function handleDropOnWeekly(event) {
+    event.preventDefault();
+    const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+    if (inboxId) {
+      acceptInboxItem(inboxId, "", "", { thisWeek: true, plain: true });
+      setToast("TRAYからWeeklyにカテゴリなしタスクとして追加しました");
+      return;
+    }
+
+    const id = event.dataTransfer.getData("task/id");
+    if (!id) return;
+    const relatedIds = [id, ...collectAncestorIds(id), ...collectDescendantIds(id)];
+    commitTasks((prev) => prev.map((task) => (relatedIds.includes(task.id) ? { ...task, thisWeek: true } : task)));
+    setToast("親子構造ごとWeekly Taskに追加しました");
+  }
+
+  function handleDropOnToday(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+    if (inboxId) {
+      acceptInboxItem(inboxId, "", "", { today: true, plain: true });
+      setToast("TRAYからTodayにカテゴリなしタスクとして追加しました。今日のカレンダーにも表示されます");
+      return;
+    }
+
+    const id = event.dataTransfer.getData("task/id");
+    if (!id) return;
+    upsertTask({ id, today: true });
+    setToast("Todayに追加しました。今日のカレンダーにも表示されます");
+  }
+
+  function handleDropOnTask(event, parent) {
+    event.preventDefault();
+    event.stopPropagation();
+    const id = event.dataTransfer.getData("task/id");
+    if (!id || id === parent.id) return;
+    const target = taskMap.get(id);
+    if (!target || parent.parentId === id) return;
+
+    const movedAcrossProject = target.category !== parent.category || target.project !== parent.project;
+    if (movedAcrossProject) {
+      upsertTask({ id, parentId: null, category: parent.category, project: parent.project });
+      setToast(`移動：${parent.category} / ${parent.project} の並列タスクにしました`);
+      return;
+    }
+
+    upsertTask({ id, parentId: parent.id, category: parent.category, project: parent.project });
+    setToast(`親子化：「${parent.title}」の子タスクにしました`);
+  }
+
+  function tasksForCategory(category) {
+    return filteredTasks.filter((task) => task.category === category);
+  }
+
+  function rootTasksForProject(category, project) {
+    return tasksForCategory(category).filter((task) => task.project === project && !task.parentId);
+  }
+
+  function childrenOf(parentId) {
+    return filteredTasks.filter((task) => task.parentId === parentId);
+  }
+
+  const weeklyTasks = useMemo(() => {
+    return filteredTasks
+      .filter((task) => task.thisWeek)
+      .sort((a, b) => {
+        const ao = typeof a.weeklyOrder === "number" ? a.weeklyOrder : 999999;
+        const bo = typeof b.weeklyOrder === "number" ? b.weeklyOrder : 999999;
+        if (ao !== bo) return ao - bo;
+        return (a.category || "").localeCompare(b.category || "", "ja") || (a.project || "").localeCompare(b.project || "", "ja") || a.title.localeCompare(b.title, "ja");
+      });
+  }, [filteredTasks]);
+
+  const todayTasks = useMemo(() => {
+    return filteredTasks
+      .filter((task) => task.today)
+      .sort((a, b) => {
+        const ao = typeof a.todayOrder === "number" ? a.todayOrder : 999999;
+        const bo = typeof b.todayOrder === "number" ? b.todayOrder : 999999;
+        if (ao !== bo) return ao - bo;
+        return (a.category || "").localeCompare(b.category || "", "ja") || (a.project || "").localeCompare(b.project || "", "ja") || a.title.localeCompare(b.title, "ja");
+      });
+  }, [filteredTasks]);
+
+  const weeklyRoots = weeklyFlat
+    ? weeklyTasks
+    : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
+
+  return (
+    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+      <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
+        <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
+          <div className="mr-3 flex items-baseline gap-2">
+            <h1 className="text-xl font-semibold tracking-tight">Task Space</h1>
+            <span className="text-[11px] text-neutral-500">single DB / flexible columns</span>
+          </div>
+
+          <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5">
+            <Search className="h-3.5 w-3.5 text-neutral-500" />
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="検索" className="w-full bg-transparent text-xs outline-none placeholder:text-neutral-600" />
+          </div>
+
+          <input value={quickMemo} onChange={(event) => setQuickMemo(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addQuickMemo()} placeholder="Quick add" className="w-full rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-56" />
+          <select value={quickCategory} onChange={(event) => { const next = event.target.value; setQuickCategory(next); setQuickProject(projectsByCategory[next]?.[0] || "未分類"); }} className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
+            {categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}
+          </select>
+          <input value={quickProject} onChange={(event) => setQuickProject(event.target.value)} placeholder="Project" className="w-[calc(100vw-160px)] rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-40" />
+          <button onClick={addQuickMemo} className="rounded-md bg-white px-2 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-neutral-200">Add</button>
+
+          <button onClick={() => setShowColumnsPanel((value) => !value)} className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-white/[0.07]"><Settings2 className="h-3.5 w-3.5" />Columns</button>
+          <button onClick={() => setShowDone((value) => !value)} className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Done</button>
+          <button onClick={undo} disabled={!history.past.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Undo</button>
+          <button onClick={redo} disabled={!history.future.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Redo</button>
+          <button onClick={resetDemo} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RotateCcw className="h-3.5 w-3.5" /></button>
+        </header>
+
+        <nav className="grid grid-cols-3 gap-1 md:hidden">
+          {[
+            ["board", "Board"],
+            ["weekly", "Weekly"],
+            ["calendar", "Calendar"],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setMobileView(key)}
+              className={classNames(
+                "rounded-md border px-2 py-2 text-xs transition",
+                mobileView === key ? "border-white/25 bg-white/12 text-neutral-100" : "border-white/10 bg-white/[0.03] text-neutral-500"
+              )}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+
+        {showColumnsPanel && (
+          <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="text-xs font-semibold text-neutral-300">Columns / Category Settings</div>
+              <button onClick={() => setShowColumnsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-4 w-4" /></button>
+            </div>
+            <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-4">
+              {categories.map((cat) => (
+                <div key={cat.key} className="grid grid-cols-[1fr_1.1fr_88px_24px] gap-1 rounded-md border border-white/5 bg-black/15 p-1">
+                  <input value={cat.key} disabled className="rounded border border-white/5 bg-black/25 px-2 py-1 text-[11px] text-neutral-500 outline-none" />
+                  <input value={cat.label} onChange={(event) => updateColumn(cat.key, { label: event.target.value })} className="rounded border border-white/5 bg-black/25 px-2 py-1 text-[11px] outline-none" />
+                  <select value={cat.tone} onChange={(event) => updateColumn(cat.key, { tone: event.target.value })} className="rounded border border-white/5 bg-black/25 px-1 py-1 text-[11px] outline-none">
+                    {TONES.map((tone) => <option key={tone}>{tone}</option>)}
+                  </select>
+                  <button onClick={() => removeColumn(cat.key)} className="rounded border border-red-300/10 text-red-200/50 hover:bg-red-400/10"><Trash2 className="mx-auto h-3.5 w-3.5" /></button>
+                </div>
+              ))}
+            </div>
+            <div className="mt-2 grid gap-1 md:grid-cols-[120px_1fr_100px_60px]">
+              <input value={newColumn.key} onChange={(event) => setNewColumn((prev) => ({ ...prev, key: event.target.value }))} placeholder="KEY" className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" />
+              <input value={newColumn.label} onChange={(event) => setNewColumn((prev) => ({ ...prev, label: event.target.value }))} placeholder="Label" className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" />
+              <select value={newColumn.tone} onChange={(event) => setNewColumn((prev) => ({ ...prev, tone: event.target.value }))} className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
+                {TONES.map((tone) => <option key={tone}>{tone}</option>)}
+              </select>
+              <button onClick={addColumn} className="rounded bg-white px-2 py-1.5 text-xs font-medium text-neutral-950">Add</button>
+            </div>
+          </section>
+        )}
+
+        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]", mobileView === "calendar" && "hidden md:grid")}> 
+          <section
+            className={classNames(
+              "min-w-0 gap-2 pb-1",
+              mobileView === "board" ? "grid md:contents" : "hidden md:contents",
+              "grid-cols-1"
+            )}
+          > 
+            <div className={classNames("flex min-h-[420px] flex-col gap-2 md:min-h-[560px] xl:min-h-[660px]", mobileView === "board" ? "flex" : "hidden md:flex")}> 
+              <InboxTray
+                items={inboxItems}
+                updateInboxItem={updateInboxItem}
+                removeInboxItem={removeInboxItem}
+                moveInboxItem={moveInboxItem}
+                addInboxItem={addInboxItem}
+              />
+              <TodayColumn
+                todayTasks={todayTasks}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+handleDropOnToday={handleDropOnToday}
+                moveTodayTask={moveTodayTask}
+                acceptInboxItem={acceptInboxItem}
+                defaultCategory={quickCategory}
+                defaultProject={quickProject}
+              />
+              <WeeklyColumn
+                className="flex flex-1"
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                weeklyRoots={weeklyRoots}
+                weeklyFlat={weeklyFlat}
+                setWeeklyFlat={setWeeklyFlat}
+                childrenOf={childrenOf}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+                handleDropOnWeekly={handleDropOnWeekly}
+                moveWeeklyTask={moveWeeklyTask}
+              />
+            </div>
+            {categories.map((cat) => (
+              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} />
+            ))}
+          </section>
+
+          <WeeklyColumn
+            className={mobileView === "weekly" ? "flex md:hidden" : "hidden"}
+            collapsed={collapsed}
+            setCollapsed={setCollapsed}
+            weeklyRoots={weeklyRoots}
+            weeklyFlat={weeklyFlat}
+            setWeeklyFlat={setWeeklyFlat}
+            childrenOf={childrenOf}
+            taskMap={taskMap}
+            categoryTone={categoryTone}
+            upsertTask={upsertTask}
+            removeTask={removeTask}
+            toggleDone={toggleDone}
+            toggleWeek={toggleWeek}
+            selectedTaskId={selectedTaskId}
+            setSelectedTaskId={setSelectedTaskId}
+            handleDropOnTask={handleDropOnTask}
+            handleDropOnWeekly={handleDropOnWeekly}
+            moveWeeklyTask={moveWeeklyTask}
+          />
+        </main>
+
+        <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block")}>
+          <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+        </div>
+
+        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} onClose={() => setSelectedProject(null)} />
+
+        <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
+
+        <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
+      </div>
+    </div>
+  );
+}
+
+function TodayColumn({
+  todayTasks,
+  collapsed,
+  setCollapsed,
+  taskMap,
+  categoryTone,
+  upsertTask,
+  removeTask,
+  toggleDone,
+  toggleWeek,
+  selectedTaskId,
+  setSelectedTaskId,
+  handleDropOnTask,
+  handleDropOnToday,
+  moveTodayTask,
+  acceptInboxItem,
+  defaultCategory,
+  defaultProject,
+}) {
+  return (
+    <aside onDragOver={(event) => event.preventDefault()} onDrop={handleDropOnToday} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2", collapsed["column:today"] && "min-h-0")}>
+      <div className="mb-2 flex items-center justify-between gap-2 border-b border-cyan-200/10 pb-1.5">
+        <button
+          onClick={() => setCollapsed((prev) => ({ ...prev, ["column:today"]: !prev["column:today"] }))}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-cyan-200"
+        >
+          {collapsed["column:today"] ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+          <CalendarDays className="h-3.5 w-3.5" />
+          <h2 className="text-sm font-semibold">Today</h2>
+          <span className="rounded-full border border-cyan-200/15 px-1.5 py-0.5 text-[10px] text-cyan-100/45">{todayTasks.length}</span>
+        </button>
+      </div>
+      {!collapsed["column:today"] && (
+        <div className="flex flex-col gap-0.5">
+          <AnimatePresence initial={false}>
+            {todayTasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                depth={0}
+                children={[]}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+moveWeeklyTask={(dragId, targetId, source) => {
+                  if (source === "inbox") {
+                    acceptInboxItem(dragId, "", "", { today: true, plain: true });
+                    return;
+                  }
+                  if (todayTasks.some((item) => item.id === dragId)) {
+                    moveTodayTask(dragId, targetId);
+                  } else {
+                    upsertTask({ id: dragId, today: true });
+                  }
+                }}
+                compact
+              />
+            ))}
+          </AnimatePresence>
+          {todayTasks.length === 0 && <div className="rounded-md border border-dashed border-cyan-200/20 p-3 text-center text-xs text-cyan-100/50">今日のタスクはまだありません。</div>}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function WeeklyColumn({
+  className = "",
+  collapsed,
+  setCollapsed,
+  weeklyRoots,
+  weeklyFlat,
+  setWeeklyFlat,
+  childrenOf,
+  taskMap,
+  categoryTone,
+  upsertTask,
+  removeTask,
+  toggleDone,
+  toggleWeek,
+  selectedTaskId,
+  setSelectedTaskId,
+  handleDropOnTask,
+  handleDropOnWeekly,
+  moveWeeklyTask,
+}) {
+  return (
+    <aside onDragOver={(event) => event.preventDefault()} onDrop={handleDropOnWeekly} className={classNames("flex-col rounded-lg border border-amber-400/20 bg-amber-500/[0.035] p-2", collapsed["column:weekly"] ? "min-h-0" : "min-h-[260px] md:min-h-[360px] xl:min-h-[430px]", className)}>
+      <div className="mb-2 flex items-center justify-between gap-2 border-b border-amber-200/10 pb-1.5">
+        <button
+          onClick={() => setCollapsed((prev) => ({ ...prev, ["column:weekly"]: !prev["column:weekly"] }))}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left text-amber-200"
+        >
+          {collapsed["column:weekly"] ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+          <CalendarDays className="h-3.5 w-3.5" />
+          <h2 className="text-sm font-semibold">Weekly</h2>
+          <span className="rounded-full border border-amber-200/15 px-1.5 py-0.5 text-[10px] text-amber-100/45">{weeklyRoots.length}</span>
+        </button>
+        {!collapsed["column:weekly"] && (
+          <button onClick={() => setWeeklyFlat((value) => !value)} className="rounded border border-amber-200/15 bg-black/20 px-1.5 py-1 text-[10px] text-amber-100/70 transition hover:bg-amber-100/10" title="子タスク表示切替">{weeklyFlat ? <Columns3 className="h-3.5 w-3.5" /> : <ListTree className="h-3.5 w-3.5" />}</button>
+        )}
+      </div>
+      {!collapsed["column:weekly"] && (
+        <div className="flex flex-col gap-0.5">
+          <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact />)}</AnimatePresence>
+          {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
+        </div>
+      )}
+    </aside>
+  );
+}
+
+function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem }) {
+  const [open, setOpen] = useState(true);
+  const [draft, setDraft] = useState("");
+
+  function submitDraft() {
+    addInboxItem(draft);
+    setDraft("");
+  }
+
+  return (
+    <div className="w-full rounded-lg border border-neutral-400/15 bg-neutral-500/[0.055] p-2">
+      <button onClick={() => setOpen((value) => !value)} className="mb-2 flex w-full items-center justify-between gap-2 border-b border-white/10 pb-1.5 text-left">
+        <div className="flex min-w-0 items-center gap-2">
+          {open ? <ChevronDown className="h-4 w-4 text-neutral-500" /> : <ChevronRight className="h-4 w-4 text-neutral-500" />}
+          <span className="truncate text-sm font-semibold text-neutral-300">TRAY</span>
+          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-500">{items.length}</span>
+        </div>
+        <span className="text-[10px] text-neutral-600">Notion</span>
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-1 pr-1">
+            {items.length === 0 ? (
+              <div className="rounded-md border border-dashed border-white/10 p-3 text-center text-xs text-neutral-600">TRAY is empty</div>
+            ) : (
+              items.map((item) => (
+                <TrayItem
+                  key={item.id}
+                  item={item}
+                  updateInboxItem={updateInboxItem}
+                  removeInboxItem={removeInboxItem}
+                  moveInboxItem={moveInboxItem}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="border-t border-white/10 pt-2">
+            <div className="flex gap-1">
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => event.key === "Enter" && submitDraft()}
+                placeholder="Add to TRAY"
+                className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600"
+              />
+              <button onClick={submitDraft} className="rounded bg-white px-2 py-1.5 text-xs font-medium text-neutral-950">Add</button>
+            </div>
+            <p className="mt-1 text-[10px] text-neutral-600">プロジェクトへドラッグすると、そのProjectのTaskとして受け入れます。</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(item.title);
+  const [isOver, setIsOver] = useState(false);
+
+  useEffect(() => {
+    setDraft(item.title);
+  }, [item.id, item.title]);
+
+  function commitTitle() {
+    const clean = normalizeTitle(draft);
+    if (!clean) {
+      setDraft(item.title);
+      setEditing(false);
+      return;
+    }
+    if (clean !== item.title) updateInboxItem(item.id, { title: clean });
+    setEditing(false);
+  }
+
+  function cancelTitle() {
+    setDraft(item.title);
+    setEditing(false);
+  }
+
+  return (
+    <div
+      draggable={!editing}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("inbox/id", item.id);
+        event.dataTransfer.setData("application/x-tray-item", item.id);
+        event.dataTransfer.setData("text/plain", `tray:${item.id}`);
+      }}
+      onDragOver={(event) => {
+        if (event.dataTransfer.types.includes("inbox/id") || event.dataTransfer.types.includes("application/x-tray-item")) {
+          event.preventDefault();
+          setIsOver(true);
+        }
+      }}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={(event) => {
+        const dragId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+        if (dragId) {
+          event.preventDefault();
+          event.stopPropagation();
+          setIsOver(false);
+          moveInboxItem(dragId, item.id);
+        }
+      }}
+      className={classNames(
+        "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
+        isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10"
+      )}
+    >
+      <div className="flex items-start gap-2">
+        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-700 opacity-0 transition group-hover:opacity-100" />
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <input
+              value={draft}
+              autoFocus
+              onClick={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              onChange={(event) => setDraft(event.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  commitTitle();
+                  event.currentTarget.blur();
+                }
+                if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
+                  event.preventDefault();
+                  removeInboxItem(item.id);
+                  return;
+                }
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  cancelTitle();
+                  event.currentTarget.blur();
+                }
+              }}
+              className="w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] text-neutral-200 outline-none focus:border-white/35"
+            />
+          ) : (
+            <button
+              onClick={() => setEditing(true)}
+              className="block w-full break-words text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
+            >
+              {item.title}
+            </button>
+          )}
+          <div className="mt-1 text-[10px] text-neutral-600">{item.source} / {item.createdAt}</div>
+        </div>
+      </div>
+      <div className="mt-2 flex items-center justify-end gap-1">
+        <span className="text-[10px] text-neutral-600">drag to project / reorder</span>
+      </div>
+    </div>
+  );
+}
+
+function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules }) {
+  const tone = toneClasses(category.tone);
+  const [newProject, setNewProject] = useState("");
+  const [showProjectInput, setShowProjectInput] = useState(false);
+  const columnKey = `column:${category.key}`;
+  const isColumnCollapsed = collapsed[columnKey];
+  const effectiveProjects = projects.length ? projects : ["未分類"];
+
+  function createProject() {
+    const clean = normalizeTitle(newProject);
+    if (!clean) return;
+    addTask({ title: "新規タスク", category: category.key, project: clean });
+    setNewProject("");
+    setShowProjectInput(false);
+  }
+
+  return (
+    <div
+      className={classNames("w-full rounded-lg border p-2", isColumnCollapsed ? "min-h-0" : "min-h-[420px] md:min-h-[560px] xl:min-h-[660px]", tone.panel)}
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        const dragKey = event.dataTransfer.getData("category/key");
+        if (dragKey) {
+          event.preventDefault();
+          moveColumn(dragKey, category.key);
+        }
+      }}
+    >
+      <div
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("category/key", category.key);
+          event.dataTransfer.setData("text/plain", category.key);
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("category/key") || event.dataTransfer.types.includes("text/plain")) {
+            event.preventDefault();
+          }
+        }}
+        onDrop={(event) => {
+          const dragKey = event.dataTransfer.getData("category/key");
+          if (dragKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            moveColumn(dragKey, category.key);
+          }
+        }}
+        className="mb-2 flex cursor-grab items-center justify-between gap-2 border-b border-white/10 pb-1.5 active:cursor-grabbing"
+      >
+        <button
+          onClick={() => setCollapsed((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left"
+        >
+          <GripVertical className="h-3.5 w-3.5 shrink-0 text-neutral-600 hover:text-neutral-300" />
+          {isColumnCollapsed ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+          <span className={classNames("truncate text-sm font-semibold", tone.accent)}>{category.label}</span>
+          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-500">{projects.length}</span>
+        </button>
+        <button
+          onClick={(event) => {
+            event.stopPropagation();
+            if (isColumnCollapsed) setCollapsed((prev) => ({ ...prev, [columnKey]: false }));
+            setShowProjectInput((value) => !value);
+          }}
+          className={classNames("rounded border px-1.5 py-1 text-[10px] transition", tone.add)}
+        >
+          <Plus className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      {!isColumnCollapsed && showProjectInput && (
+        <div className="mb-2 flex gap-1">
+          <input value={newProject} onChange={(event) => setNewProject(event.target.value)} onKeyDown={(event) => event.key === "Enter" && createProject()} placeholder="新しいProject" className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1 text-xs outline-none placeholder:text-neutral-600" />
+          <button onClick={createProject} className="rounded bg-white px-2 py-1 text-xs font-medium text-neutral-950">作成</button>
+        </div>
+      )}
+      {!isColumnCollapsed && (
+        <div className="flex flex-col gap-2">
+          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProjectGroup({ category, project, roots, childrenOf, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules }) {
+  const [newTitle, setNewTitle] = useState("");
+  const [isOver, setIsOver] = useState(false);
+  const key = `${category}:${project}`;
+  const isCollapsed = collapsed[key];
+  const tone = categoryTone(category);
+  const rule = projectRules?.[projectKey(category, project)];
+
+  function create() {
+    const task = addTask({ title: newTitle || "新規タスク", category, project });
+    if (task) setNewTitle("");
+  }
+
+  return (
+    <div
+      className={classNames(
+        "rounded-md border px-1.5 py-1 transition",
+        isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10"
+      )}
+      onDragOver={(event) => event.preventDefault()}
+      onDragEnter={() => setIsOver(true)}
+      onDragLeave={() => setIsOver(false)}
+      onDrop={(event) => {
+        setIsOver(false);
+        const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+        if (inboxId) {
+          event.preventDefault();
+          event.stopPropagation();
+          handleDropOnProject(event, category, project);
+          return;
+        }
+
+        const projectDrag = event.dataTransfer.getData("project/key");
+        if (projectDrag) {
+          event.preventDefault();
+          event.stopPropagation();
+          const info = projectLabelFromKey(projectDrag);
+          if (info.category === category) moveProject(category, info.project, project);
+          return;
+        }
+        handleDropOnProject(event, category, project);
+      }}
+    >
+      <button
+        draggable
+        onDragStart={(event) => {
+          event.stopPropagation();
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("project/key", projectKey(category, project));
+          event.dataTransfer.setData("text/plain", projectKey(category, project));
+        }}
+        onClick={() => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))}
+        className="mb-1 flex w-full cursor-grab items-center justify-between gap-2 text-left active:cursor-grabbing"
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {isCollapsed ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+          <span
+            onClick={(event) => {
+              event.stopPropagation();
+              setSelectedTaskId(null);
+              setSelectedProject({ category, project });
+            }}
+            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline", tone.accent)}
+            title="Project settings"
+          >
+            {rule?.recurrence && rule.recurrence !== "none" ? "↻ " : ""}{project}
+          </span>
+        </div>
+        <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
+      </button>
+      {!isCollapsed && (
+        <div className="flex flex-col gap-0.5">
+          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} children={childrenOf(task.id)} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} />)}</AnimatePresence>
+          <div className="mt-1 flex gap-1">
+            <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="このProjectに追加" className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20" />
+            <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false }) {
+  const hasChildren = children.length > 0;
+  const isCollapsed = collapsed[task.id];
+  const selected = selectedTaskId === task.id;
+  const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
+  const [titleDraft, setTitleDraft] = useState(task.title);
+
+  useEffect(() => {
+    setTitleDraft(task.title);
+  }, [task.id, task.title]);
+
+  function commitTitle() {
+    const clean = normalizeTitle(titleDraft);
+    if (!clean) {
+      setTitleDraft(task.title);
+      return;
+    }
+    if (clean !== task.title) upsertTask({ id: task.id, title: clean });
+  }
+
+  function cancelTitle() {
+    setTitleDraft(task.title);
+  }
+
+  return (
+    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0 }}>
+      <div
+        draggable
+        onDragStart={(event) => {
+          event.dataTransfer.effectAllowed = "move";
+          event.dataTransfer.setData("task/id", task.id);
+        }}
+        onDragOver={(event) => event.preventDefault()}
+        onDrop={(event) => {
+          if (compact && moveWeeklyTask) {
+            event.preventDefault();
+            event.stopPropagation();
+            const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
+            if (inboxId) {
+              moveWeeklyTask(inboxId, task.id, "inbox");
+              return;
+            }
+            const id = event.dataTransfer.getData("task/id");
+            if (id) moveWeeklyTask(id, task.id, "task");
+            return;
+          }
+          handleDropOnTask(event, task);
+        }}
+        onClick={() => setSelectedTaskId(task.id)}
+        className={classNames(
+          "group rounded-md border px-1.5 py-1 transition",
+          selected ? "border-white/35 bg-white/[0.07]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45"
+        )}
+      >
+        <div className="flex items-start gap-1.5">
+          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-700 opacity-0 transition group-hover:opacity-100" />
+          <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
+          {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
+          <div className="min-w-0 flex-1">
+            {selected ? (
+              <input
+                value={titleDraft}
+                autoFocus
+                onClick={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={commitTitle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitTitle();
+                    event.currentTarget.blur();
+                  }
+                  if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
+                    event.preventDefault();
+                    removeTask(task.id);
+                    return;
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelTitle();
+                    event.currentTarget.blur();
+                  }
+                }}
+                className={classNames(
+                  "w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
+                  task.status === "完了" && "line-through"
+                )}
+              />
+            ) : (
+              <div className={classNames("break-words text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}>{task.title}</div>
+            )}
+            {compact && (
+              <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-neutral-500">
+                {task.category || task.project ? (
+                  <>
+                    <span>{task.category || NO_CATEGORY_LABEL}</span>
+                    {task.project && <><span>/</span><span>{task.project}</span></>}
+                  </>
+                ) : (
+                  <span>{NO_CATEGORY_LABEL}</span>
+                )}
+                {parent && <span>・親: {parent.title}</span>}
+                {task.dueDate && <span>・{task.dueDate}</span>}
+              </div>
+            )}
+          </div>
+          <button onClick={(event) => { event.stopPropagation(); toggleWeek(task); }} className={classNames("shrink-0 rounded border px-1.5 py-0.5 text-[9px] transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 text-neutral-500 hover:text-amber-100")}>Week</button>
+        </div>
+      </div>
+      {hasChildren && !isCollapsed && (
+        <div className={classNames("flex flex-col gap-0.5", compact && "ml-2 border-l border-amber-200/10 pl-2")}>
+          {children.map((child) => (
+            <TaskCard
+              key={child.id}
+              task={child}
+              taskMap={taskMap}
+              children={[]}
+              categoryTone={categoryTone}
+              depth={depth + 1}
+              collapsed={collapsed}
+              setCollapsed={setCollapsed}
+              upsertTask={upsertTask}
+              removeTask={removeTask}
+              toggleDone={toggleDone}
+              toggleWeek={toggleWeek}
+              selectedTaskId={selectedTaskId}
+              setSelectedTaskId={setSelectedTaskId}
+              handleDropOnTask={handleDropOnTask}
+              compact={compact}
+              moveWeeklyTask={moveWeeklyTask}
+            />
+          ))}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setSelectedTaskId, setSelectedProject }) {
+  const [open, setOpen] = useState(true);
+  const first = new Date(month.getFullYear(), month.getMonth(), 1);
+  const start = new Date(first);
+  start.setDate(first.getDate() - first.getDay());
+  const days = Array.from({ length: 42 }, (_, i) => {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    return d;
+  });
+  const tasksByDate = useMemo(() => {
+    const map = {};
+    days.forEach((date) => {
+      const key = toDateKey(date);
+      map[key] = [];
+      tasks.forEach((task) => {
+        const exactDate = task.dueDate === key;
+        const todayMatch = task.today && key === toDateKey(new Date());
+        const weeklyMatch = task.recurrence === "weekly" && Number(task.recurrenceDay) === date.getDay();
+        const beforeEnd = !task.recurrenceEnd || key <= task.recurrenceEnd;
+        if ((exactDate || todayMatch || (weeklyMatch && beforeEnd)) && !map[key].some((item) => item.id === task.id)) {
+          map[key].push({ type: "task", ...task, calendarFromToday: todayMatch });
+        }
+      });
+      Object.entries(projectRules || {}).forEach(([ruleKey, rule]) => {
+        const info = projectLabelFromKey(ruleKey);
+        const ruleMatch = matchesProjectRule(rule, date);
+        if (ruleMatch) {
+          const projectTasks = tasks
+            .filter((task) => task.category === info.category && task.project === info.project)
+            .sort((a, b) => {
+              if (!a.parentId && b.parentId) return -1;
+              if (a.parentId && !b.parentId) return 1;
+              return a.title.localeCompare(b.title, "ja");
+            });
+          map[key].push({
+            type: "project",
+            id: `project-${ruleKey}-${key}`,
+            category: info.category,
+            project: info.project,
+            title: info.project,
+            tasks: projectTasks,
+          });
+        }
+      });
+    });
+    return map;
+  }, [tasks, projectRules, month]);
+  const monthLabel = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+  const todayKey = toDateKey(new Date());
+
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+        <button onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 text-left text-sm font-semibold text-neutral-300">
+          {open ? <ChevronDown className="h-4 w-4 text-neutral-500" /> : <ChevronRight className="h-4 w-4 text-neutral-500" />}
+          <CalendarDays className="h-4 w-4" />
+          Calendar
+          <span className="text-[11px] text-neutral-500">{monthLabel}</span>
+        </button>
+        <div className="flex items-center gap-1">
+          <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))} className="rounded border border-white/10 px-1.5 py-1 text-neutral-400 hover:bg-white/10"><ChevronLeft className="h-4 w-4" /></button>
+          <button onClick={() => setMonth(new Date())} className="rounded border border-white/10 px-2 py-1 text-[11px] text-neutral-400 hover:bg-white/10">Today</button>
+          <button onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))} className="rounded border border-white/10 px-1.5 py-1 text-neutral-400 hover:bg-white/10"><ChevronRight className="h-4 w-4" /></button>
+        </div>
+      </div>
+      {open && (
+      <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 text-[10px] md:text-xs">
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="bg-neutral-950 px-2 py-1 text-[10px] font-medium text-neutral-500">{day}</div>)}
+        {days.map((d) => {
+          const key = toDateKey(d);
+          const list = tasksByDate[key] || [];
+          const inMonth = d.getMonth() === month.getMonth();
+          const isToday = key === todayKey;
+          return (
+            <div
+              key={key}
+              className={classNames(
+                "min-h-[96px] bg-neutral-950 p-1 align-top md:min-h-[140px] md:p-1.5",
+                !inMonth && "opacity-35",
+                isToday && "relative ring-2 ring-cyan-300/60 ring-inset bg-cyan-300/[0.055]"
+              )}
+            >
+              <div className={classNames("mb-1 flex items-center justify-between gap-1 text-[10px]", isToday ? "text-cyan-100" : "text-neutral-500")}>
+                <span className={classNames(isToday && "rounded-full bg-cyan-300/20 px-1.5 py-0.5 font-semibold text-cyan-100")}>{d.getDate()}</span>
+                {isToday && <span className="rounded-full border border-cyan-200/25 px-1.5 py-0.5 text-[9px] font-medium text-cyan-100">Today</span>}
+              </div>
+              <div className="flex flex-col gap-1">
+                {list.map((item) => (
+                  item.type === "project" ? (
+                    <div key={item.id} className={classNames("rounded border p-1 text-[10px]", categoryTone(item.category).tag)}>
+                      <button
+                        onClick={() => {
+                          setSelectedTaskId(null);
+                          setSelectedProject({ category: item.category, project: item.project });
+                        }}
+                        className="block w-full whitespace-normal break-words text-left font-semibold leading-snug"
+                      >
+                        ↻ {item.title}
+                      </button>
+                      <div className="mt-1 flex flex-col gap-0.5 border-l border-current/25 pl-1.5">
+                        {(item.tasks || []).map((task) => (
+                          <button
+                            key={task.id}
+                            onClick={() => setSelectedTaskId(task.id)}
+                            className="whitespace-normal break-words rounded bg-black/15 px-1 py-0.5 text-left leading-snug opacity-90 hover:bg-black/25"
+                          >
+                            {task.parentId ? "↳ " : "・"}{task.title}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      key={item.id}
+                      onClick={() => setSelectedTaskId(item.id)}
+                      className={classNames("whitespace-normal break-words rounded border px-1.5 py-0.5 text-left text-[10px] leading-snug", categoryTone(item.category || "").tag)}
+                    >
+                      {item.calendarFromToday ? "Today / " : item.recurrence === "weekly" ? "↻ " : ""}{item.title}
+                    </button>
+                  )
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      )}
+    </section>
+  );
+}
+
+function ProjectInspector({ selectedProject, projectRules, updateProjectRule, onClose }) {
+  if (!selectedProject) return null;
+  const { category, project } = selectedProject;
+  const key = projectKey(category, project);
+  const rule = projectRules?.[key] || { recurrence: "none", recurrenceDay: null, recurrenceEnd: "" };
+
+  return (
+    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
+      <div className="mb-5 flex items-start justify-between gap-4">
+        <div className="min-w-0">
+          <div className="text-xs text-neutral-500">Project</div>
+          <h2 className="truncate text-2xl font-semibold tracking-tight">{project}</h2>
+          <p className="mt-2 text-xs text-neutral-500">{category} / project-level schedule</p>
+        </div>
+        <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button>
+      </div>
+
+      <div className="space-y-3">
+        <PropertyRow label="Repeat">
+          <div className="grid min-w-0 gap-2">
+            <select
+              value={rule.recurrence || "none"}
+              onChange={(event) => {
+                const recurrence = event.target.value;
+                const defaults = {
+                  recurrence,
+                  recurrenceDay: ["weekly", "biweekly", "monthlyNthWeekday"].includes(recurrence) ? Number(rule.recurrenceDay ?? 3) : null,
+                  recurrenceStart: recurrence === "biweekly" ? (rule.recurrenceStart || toDateKey(new Date())) : (rule.recurrenceStart || ""),
+                  recurrenceDate: recurrence === "monthlyDate" ? Number(rule.recurrenceDate ?? 1) : (rule.recurrenceDate ?? 1),
+                  recurrenceWeek: recurrence === "monthlyNthWeekday" ? Number(rule.recurrenceWeek ?? 1) : (rule.recurrenceWeek ?? 1),
+                };
+                updateProjectRule(category, project, defaults);
+              }}
+              className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+            >
+              <option value="none">なし</option>
+              <option value="daily">毎日</option>
+              <option value="weekdays">平日</option>
+              <option value="weekly">毎週</option>
+              <option value="biweekly">隔週</option>
+              <option value="monthlyDate">毎月・日付指定</option>
+              <option value="monthlyNthWeekday">毎月・第n曜日</option>
+            </select>
+
+            {["weekly", "biweekly", "monthlyNthWeekday"].includes(rule.recurrence) && (
+              <select
+                value={Number(rule.recurrenceDay ?? 3)}
+                onChange={(event) => updateProjectRule(category, project, { recurrenceDay: Number(event.target.value) })}
+                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+              >
+                <option value={0}>日曜</option>
+                <option value={1}>月曜</option>
+                <option value={2}>火曜</option>
+                <option value={3}>水曜</option>
+                <option value={4}>木曜</option>
+                <option value={5}>金曜</option>
+                <option value={6}>土曜</option>
+              </select>
+            )}
+
+            {rule.recurrence === "biweekly" && (
+              <input
+                type="date"
+                value={rule.recurrenceStart || ""}
+                onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
+                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                title="隔週の起点日"
+              />
+            )}
+
+            {rule.recurrence === "monthlyDate" && (
+              <input
+                type="number"
+                min="1"
+                max="31"
+                value={Number(rule.recurrenceDate ?? 1)}
+                onChange={(event) => updateProjectRule(category, project, { recurrenceDate: Number(event.target.value) })}
+                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                placeholder="毎月の日付"
+              />
+            )}
+
+            {rule.recurrence === "monthlyNthWeekday" && (
+              <select
+                value={Number(rule.recurrenceWeek ?? 1)}
+                onChange={(event) => updateProjectRule(category, project, { recurrenceWeek: Number(event.target.value) })}
+                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+              >
+                <option value={1}>第1</option>
+                <option value={2}>第2</option>
+                <option value={3}>第3</option>
+                <option value={4}>第4</option>
+                <option value={-1}>最終</option>
+              </select>
+            )}
+
+            {rule.recurrence !== "none" && (
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                <input
+                  type="date"
+                  value={rule.recurrenceStart || ""}
+                  onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
+                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                  title="開始日"
+                />
+                <input
+                  type="date"
+                  value={rule.recurrenceEnd || ""}
+                  onChange={(event) => updateProjectRule(category, project, { recurrenceEnd: event.target.value })}
+                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                  title="終了日"
+                />
+              </div>
+            )}
+          </div>
+        </PropertyRow>
+      </div>
+
+      <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs leading-5 text-neutral-400">
+        Project単位のRepeatは、タスクとは別にカレンダーへ表示されます。タスク単位のRepeatもそのまま使えます。
+      </div>
+    </aside>
+  );
+}
+
+function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTask, removeTask, addTask, onClose }) {
+  const [subTitle, setSubTitle] = useState("");
+  if (!task) return null;
+  const parent = task.parentId ? taskMap.get(task.parentId) : null;
+  const siblingProjects = projectsByCategory[task.category] || [];
+  function createSubTask() {
+    const created = addTask({ title: subTitle, parentId: task.id });
+    if (created) setSubTitle("");
+  }
+  return (
+    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
+      <div className="mb-5 flex items-start justify-between gap-4"><div className="min-w-0"><input value={task.title} onChange={(event) => upsertTask({ id: task.id, title: event.target.value })} className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none" /><p className="mt-2 text-xs text-neutral-500">同一TaskDB内の1レコード</p></div><button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button></div>
+      <div className="space-y-3">
+        <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
+        <PropertyRow label="Project"><input value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} list="project-options" placeholder={task.category ? "Project" : NO_CATEGORY_LABEL} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600" /><datalist id="project-options">{siblingProjects.map((project) => <option key={project} value={project} />)}</datalist></PropertyRow>
+        <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
+        <PropertyRow label="Due"><input type="date" value={task.dueDate || ""} onChange={(event) => upsertTask({ id: task.id, dueDate: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none" /></PropertyRow>
+        <PropertyRow label="Repeat">
+          <div className="grid min-w-0 gap-2">
+            <select value={task.recurrence || "none"} onChange={(event) => upsertTask({ id: task.id, recurrence: event.target.value, recurrenceDay: event.target.value === "weekly" ? Number(task.recurrenceDay ?? 3) : null })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none">
+              <option value="none">なし</option>
+              <option value="weekly">毎週</option>
+            </select>
+            {task.recurrence === "weekly" && (
+              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                <select value={Number(task.recurrenceDay ?? 3)} onChange={(event) => upsertTask({ id: task.id, recurrenceDay: Number(event.target.value) })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none">
+                  <option value={0}>日曜</option>
+                  <option value={1}>月曜</option>
+                  <option value={2}>火曜</option>
+                  <option value={3}>水曜</option>
+                  <option value={4}>木曜</option>
+                  <option value={5}>金曜</option>
+                  <option value={6}>土曜</option>
+                </select>
+                <input type="date" value={task.recurrenceEnd || ""} onChange={(event) => upsertTask({ id: task.id, recurrenceEnd: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none" title="繰り返し終了日" />
+              </div>
+            )}
+          </div>
+        </PropertyRow>
+        <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, today: !task.today })} className={classNames("w-full rounded-xl border px-3 py-2 text-left text-sm transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.today ? "今日やる" : "今日ではない"}</button></PropertyRow>
+        <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !task.thisWeek })} className={classNames("w-full rounded-xl border px-3 py-2 text-left text-sm transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.thisWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
+        <PropertyRow label="Parent"><div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-neutral-300">{parent ? parent.title : "親なし"}</div></PropertyRow>
+        <PropertyRow label="Memo"><textarea value={task.memo || ""} onChange={(event) => upsertTask({ id: task.id, memo: event.target.value })} placeholder="メモ" rows={5} className="w-full resize-none rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm leading-6 outline-none placeholder:text-neutral-600" /></PropertyRow>
+      </div>
+      <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="mb-3 text-sm font-medium text-neutral-200">子タスクを追加</div><p className="mb-3 text-xs leading-5 text-neutral-500">親アイテムに紐づき、Category / Projectを継承します。</p><div className="flex gap-2"><input value={subTitle} onChange={(event) => setSubTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && createSubTask()} placeholder="子タスク名" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600" /><button onClick={createSubTask} className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-neutral-950">追加</button></div></div>
+      <button onClick={() => removeTask(task.id)} className="mt-5 w-full rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-3 text-sm text-red-100 transition hover:bg-red-400/15">Delete Task</button>
+    </aside>
+  );
+}
+
+function PropertyRow({ label, children }) {
+  return (
+    <div className="grid min-w-0 grid-cols-1 items-start gap-1 sm:grid-cols-[92px_minmax(0,1fr)] sm:gap-3">
+      <div className="pt-1 text-xs font-medium text-neutral-500 sm:pt-2">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
+export default App;
