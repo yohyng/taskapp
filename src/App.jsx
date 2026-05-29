@@ -1527,6 +1527,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
       ref={setRefs}
       {...trayDragListeners}
       {...trayDragAttrs}
+      style={{ touchAction: "none" }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
@@ -1564,12 +1565,12 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
               className="w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] text-neutral-200 outline-none focus:border-white/35"
             />
           ) : (
-            <button
+            <div
               onClick={() => setEditing(true)}
               className="block w-full break-words text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
-            </button>
+            </div>
           )}
           <div className="mt-1 text-[10px] text-neutral-600">{item.source} / {item.createdAt}</div>
         </div>
@@ -1859,6 +1860,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
         ref={setRefs}
         {...taskDragListeners}
         {...taskDragAttrs}
+        style={{ touchAction: "none" }}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
