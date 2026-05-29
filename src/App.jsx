@@ -44,7 +44,6 @@ function addTombstone(key, id) {
     const s = new Set(JSON.parse(localStorage.getItem(key) || '[]'))
     s.add(id)
     localStorage.setItem(key, JSON.stringify([...s]))
-    console.log('[tombstone] added', key, id, [...s])
   } catch {}
 }
 
@@ -550,6 +549,12 @@ function App() {
   // Supabase load が完了するまで保存を抑制するフラグ
   const supabaseReadyRef = useRef(false);
 
+  const [syncLog, setSyncLog] = useState([]);
+  function addSyncLog(msg) {
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setSyncLog((prev) => [`${time} ${msg}`, ...prev].slice(0, 20));
+  }
+
   // Save to localStorage immediately, Supabase debounced (load完了後のみ)
   const supabaseSaveTimer = useRef(null);
   useEffect(() => {
@@ -560,6 +565,7 @@ function App() {
       supabaseSaveTimer.current = setTimeout(() => {
         const deletedTaskIds = [...getTombstoneSet(TOMBSTONE_TASKS_KEY)]
         const deletedTrayIds = [...getTombstoneSet(TOMBSTONE_TRAY_KEY)]
+        if (deletedTaskIds.length || deletedTrayIds.length) addSyncLog(`💾 保存時削除 task:${deletedTaskIds.length}件 tray:${deletedTrayIds.length}件`)
         saveToSupabase({ ...data, deletedTaskIds, deletedTrayIds })
       }, 1500);
     }
@@ -573,7 +579,7 @@ function App() {
       if (remote.tasks !== undefined) {
         const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
         const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
-        if (deletedTasks.size) console.log('[tombstone] filtering tasks on load', [...deletedTasks], 'remote has them?', [...deletedTasks].map(id => remoteTaskIds.has(id)))
+        if (deletedTasks.size) addSyncLog(`🔍 tombstone ${[...deletedTasks].length}件 remote残存:${[...deletedTasks].filter(id => remoteTaskIds.has(id)).length}件`)
         pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
         setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
       }
@@ -597,6 +603,7 @@ function App() {
     const unsubscribe = subscribeRealtime({
       onTaskChange: () => {
         if (!supabaseReadyRef.current) return;
+        addSyncLog('📡 Realtime: タスク変更受信');
         loadFromSupabase().then((remote) => {
           if (remote?.tasks !== undefined) {
             const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
@@ -606,6 +613,7 @@ function App() {
       },
       onTrayChange: () => {
         if (!supabaseReadyRef.current) return;
+        addSyncLog('📡 Realtime: TRAY変更受信');
         loadFromSupabase().then((remote) => {
           if (remote?.inboxItems !== undefined) {
             const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
@@ -858,11 +866,12 @@ function App() {
 
   function removeInboxItem(id) {
     addTombstone(TOMBSTONE_TRAY_KEY, id);
+    addSyncLog(`🗑 TRAY削除 id=${id.slice(0,8)}`);
     commitState((current) => ({
       ...current,
       inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
     }));
-    dbDeleteTrayItem(id);
+    dbDeleteTrayItem(id).then(() => addSyncLog(`✓ TRAY Supabase DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ TRAY DELETE失敗: ${e?.message}`));
     setToast("TRAYから削除しました");
   }
 
@@ -896,8 +905,9 @@ function App() {
 
   function removeTask(id) {
     addTombstone(TOMBSTONE_TASKS_KEY, id);
+    addSyncLog(`🗑 タスク削除 id=${id.slice(0,8)}`);
     commitTasks((prev) => prev.map((task) => (task.parentId === id ? { ...task, parentId: null } : task)).filter((task) => task.id !== id));
-    dbDeleteTask(id);
+    dbDeleteTask(id).then(() => addSyncLog(`✓ タスク Supabase DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
     if (selectedTaskId === id) setSelectedTaskId(null);
     setToast("タスクを削除しました");
   }
@@ -1425,6 +1435,19 @@ function App() {
                         {realtimeStatus === "SUBSCRIBED" ? "リアルタイム同期中" : realtimeStatus === "disabled" ? "Supabase 未設定" : realtimeStatus === "TIMED_OUT" ? "タイムアウト" : realtimeStatus === "CHANNEL_ERROR" ? "接続エラー" : "接続中…"}
                       </span>
                     </div>
+                    {syncLog.length > 0 && (
+                      <div className="mt-2">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="text-[10px] text-neutral-600">同期ログ</span>
+                          <button onClick={() => setSyncLog([])} className="text-[10px] text-neutral-600 hover:text-neutral-400">クリア</button>
+                        </div>
+                        <div className="max-h-32 overflow-y-auto rounded border border-white/[0.07] bg-black/30 p-1.5 font-mono">
+                          {syncLog.map((line, i) => (
+                            <div key={i} className="text-[10px] leading-5 text-neutral-500">{line}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 border-t border-white/10 pt-3">
