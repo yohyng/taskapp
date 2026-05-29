@@ -1091,17 +1091,33 @@ function App() {
     document.documentElement.style.zoom = String(v);
   }
 
+  function applyFontSize(v) {
+    let el = document.getElementById('ts-fontsize-style');
+    if (!el) { el = document.createElement('style'); el.id = 'ts-fontsize-style'; document.head.appendChild(el); }
+    el.textContent = [
+      `.text-\\[9px\\]  { font-size: ${9  * v}px !important; }`,
+      `.text-\\[10px\\] { font-size: ${10 * v}px !important; }`,
+      `.text-\\[11px\\] { font-size: ${11 * v}px !important; }`,
+      `.text-\\[12\\.5px\\] { font-size: ${12.5 * v}px !important; }`,
+      `.text-xs   { font-size: ${Math.round(12 * v)}px !important; }`,
+      `.text-sm   { font-size: ${Math.round(14 * v)}px !important; }`,
+      `.text-base { font-size: ${Math.round(16 * v)}px !important; }`,
+      `.text-xl   { font-size: ${Math.round(20 * v)}px !important; }`,
+      `.text-2xl  { font-size: ${Math.round(24 * v)}px !important; }`,
+    ].join('\n');
+  }
+
   function changeFontSize(val) {
     const v = Math.min(1.5, Math.max(0.7, val));
     setFontSize(v);
     localStorage.setItem("taskspace-fontsize", String(v));
-    document.documentElement.style.fontSize = `${v * 100}%`;
+    applyFontSize(v);
   }
 
   // 初期zoom・fontsize適用
   useEffect(() => {
     document.documentElement.style.zoom = String(zoom);
-    document.documentElement.style.fontSize = `${fontSize * 100}%`;
+    applyFontSize(fontSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
