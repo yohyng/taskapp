@@ -575,7 +575,8 @@ function App() {
   useEffect(() => {
     loadFromSupabase().then((remote) => {
       supabaseReadyRef.current = true;
-      if (!remote) return;
+      if (!remote) { addSyncLog('⚠ Supabase読込失敗（local使用）'); return; }
+      addSyncLog(`✅ Supabase読込完了 task:${(remote.tasks||[]).length}件 tray:${(remote.inboxItems||[]).length}件`);
       if (remote.tasks !== undefined) {
         const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
         const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
@@ -1435,19 +1436,20 @@ function App() {
                         {realtimeStatus === "SUBSCRIBED" ? "リアルタイム同期中" : realtimeStatus === "disabled" ? "Supabase 未設定" : realtimeStatus === "TIMED_OUT" ? "タイムアウト" : realtimeStatus === "CHANNEL_ERROR" ? "接続エラー" : "接続中…"}
                       </span>
                     </div>
-                    {syncLog.length > 0 && (
-                      <div className="mt-2">
-                        <div className="mb-1 flex items-center justify-between">
-                          <span className="text-[10px] text-neutral-600">同期ログ</span>
-                          <button onClick={() => setSyncLog([])} className="text-[10px] text-neutral-600 hover:text-neutral-400">クリア</button>
-                        </div>
-                        <div className="max-h-32 overflow-y-auto rounded border border-white/[0.07] bg-black/30 p-1.5 font-mono">
-                          {syncLog.map((line, i) => (
-                            <div key={i} className="text-[10px] leading-5 text-neutral-500">{line}</div>
-                          ))}
-                        </div>
+                    <div className="mt-2">
+                      <div className="mb-1 flex items-center justify-between">
+                        <span className="text-[10px] text-neutral-600">同期ログ（最新5件）</span>
+                        {syncLog.length > 0 && <button onClick={() => setSyncLog([])} className="text-[10px] text-neutral-600 hover:text-neutral-400">クリア</button>}
                       </div>
-                    )}
+                      <div className="rounded border border-white/[0.07] bg-black/30 p-1.5 font-mono">
+                        {syncLog.length === 0
+                          ? <div className="text-[10px] leading-5 text-neutral-700">（まだログなし）</div>
+                          : syncLog.slice(0, 5).map((line, i) => (
+                            <div key={i} className="text-[10px] leading-5 text-neutral-500">{line}</div>
+                          ))
+                        }
+                      </div>
+                    </div>
                   </div>
 
                   <div className="mt-3 border-t border-white/10 pt-3">
