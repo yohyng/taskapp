@@ -258,6 +258,7 @@ function normalizeTask(task) {
     status: "未着手",
     thisWeek: false,
     parentId: null,
+    archived: false,
     ...task,
   };
 }
@@ -468,6 +469,7 @@ function App() {
   const filteredTasks = useMemo(() => {
     const q = search.trim().toLowerCase();
     return tasks.filter((task) => {
+      if (task.archived) return false;
       if (!showDone && task.status === "完了") return false;
       if (!q) return true;
       const parent = task.parentId ? taskMap.get(task.parentId)?.title : "";
@@ -680,6 +682,13 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.parentId === id ? { ...task, parentId: null } : task)).filter((task) => task.id !== id));
     if (selectedTaskId === id) setSelectedTaskId(null);
     setToast("タスクを削除しました");
+  }
+
+  function archiveAll() {
+    const doneIds = new Set(tasks.filter((t) => t.status === "完了" && !t.archived).map((t) => t.id));
+    if (!doneIds.size) { setToast("完了タスクがありません"); return; }
+    commitState((current) => ({ ...current, tasks: current.tasks.map((t) => doneIds.has(t.id) ? { ...t, archived: true, today: false, thisWeek: false } : t) }));
+    setToast(`${doneIds.size}件をアーカイブしました`);
   }
 
   function resetDemo() {
@@ -945,20 +954,21 @@ function App() {
             <span className="text-[11px] text-neutral-500">single DB / flexible columns</span>
           </div>
 
-          <div className="flex min-w-[220px] flex-1 items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5">
+          <div className="hidden min-w-[220px] flex-1 items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5 md:flex">
             <Search className="h-3.5 w-3.5 text-neutral-500" />
             <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="検索" className="w-full bg-transparent text-xs outline-none placeholder:text-neutral-600" />
           </div>
 
-          <input value={quickMemo} onChange={(event) => setQuickMemo(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addQuickMemo()} placeholder="Quick add" className="w-full rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-56" />
-          <select value={quickCategory} onChange={(event) => { const next = event.target.value; setQuickCategory(next); setQuickProject(projectsByCategory[next]?.[0] || "未分類"); }} className="rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
+          <input value={quickMemo} onChange={(event) => setQuickMemo(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addQuickMemo()} placeholder="Quick add" className="hidden w-full rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-56 md:block" />
+          <select value={quickCategory} onChange={(event) => { const next = event.target.value; setQuickCategory(next); setQuickProject(projectsByCategory[next]?.[0] || "未分類"); }} className="hidden rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none md:block">
             {categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}
           </select>
-          <input value={quickProject} onChange={(event) => setQuickProject(event.target.value)} placeholder="Project" className="w-[calc(100vw-160px)] rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-40" />
-          <button onClick={addQuickMemo} className="rounded-md bg-white px-2 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-neutral-200">Add</button>
+          <input value={quickProject} onChange={(event) => setQuickProject(event.target.value)} placeholder="Project" className="hidden w-[calc(100vw-160px)] rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-40 md:block" />
+          <button onClick={addQuickMemo} className="hidden rounded-md bg-white px-2 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-neutral-200 md:block">Add</button>
 
           <button onClick={() => setShowColumnsPanel((value) => !value)} className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-white/[0.07]"><Settings2 className="h-3.5 w-3.5" />Columns</button>
           <button onClick={() => setShowDone((value) => !value)} className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Done</button>
+          <button onClick={archiveAll} className="rounded-md border border-violet-400/30 bg-violet-500/10 px-2 py-1.5 text-xs text-violet-200 transition hover:bg-violet-500/20">Archive</button>
           <button onClick={undo} disabled={!history.past.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Undo</button>
           <button onClick={redo} disabled={!history.future.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Redo</button>
           <button onClick={resetDemo} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RotateCcw className="h-3.5 w-3.5" /></button>
@@ -1041,11 +1051,12 @@ function App() {
                 selectedTaskId={selectedTaskId}
                 setSelectedTaskId={setSelectedTaskId}
                 handleDropOnTask={handleDropOnTask}
-handleDropOnToday={handleDropOnToday}
+                handleDropOnToday={handleDropOnToday}
                 moveTodayTask={moveTodayTask}
                 acceptInboxItem={acceptInboxItem}
                 defaultCategory={quickCategory}
                 defaultProject={quickProject}
+                addTask={addTask}
               />
               <WeeklyColumn
                 className="flex flex-1"
@@ -1066,6 +1077,7 @@ handleDropOnToday={handleDropOnToday}
                 handleDropOnTask={handleDropOnTask}
                 handleDropOnWeekly={handleDropOnWeekly}
                 moveWeeklyTask={moveWeeklyTask}
+                addTask={addTask}
               />
             </div>
             {categories.map((cat) => (
@@ -1092,12 +1104,15 @@ handleDropOnToday={handleDropOnToday}
             handleDropOnTask={handleDropOnTask}
             handleDropOnWeekly={handleDropOnWeekly}
             moveWeeklyTask={moveWeeklyTask}
+            addTask={addTask}
           />
         </main>
 
         <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block")}>
           <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
         </div>
+
+        <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
 
         <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} onClose={() => setSelectedProject(null)} />
 
@@ -1134,8 +1149,18 @@ function TodayColumn({
   acceptInboxItem,
   defaultCategory,
   defaultProject,
+  addTask,
 }) {
+  const [draft, setDraft] = useState("");
   const { setNodeRef: todayDropRef, isOver: isTodayOver } = useDroppable({ id: "today-column", data: { type: "today" } });
+
+  function submitDraft() {
+    const title = draft.trim();
+    if (!title) return;
+    addTask({ title, category: "", project: "", today: true, plain: true });
+    setDraft("");
+  }
+
   return (
     <aside ref={todayDropRef} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2 transition", isTodayOver && "border-cyan-300/50 bg-cyan-500/[0.07]", collapsed["column:today"] && "min-h-0")}>
       <div className="mb-2 flex items-center justify-between gap-2 border-b border-cyan-200/10 pb-1.5">
@@ -1150,30 +1175,42 @@ function TodayColumn({
         </button>
       </div>
       {!collapsed["column:today"] && (
-        <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>
-            {todayTasks.map((task) => (
-              <TaskCard
-                key={task.id}
-                task={task}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                depth={0}
-                children={[]}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                compact
-              />
-            ))}
-          </AnimatePresence>
-          {todayTasks.length === 0 && <div className="rounded-md border border-dashed border-cyan-200/20 p-3 text-center text-xs text-cyan-100/50">今日のタスクはまだありません。</div>}
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-1">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitDraft()}
+              placeholder="Add to Today"
+              className="min-w-0 flex-1 rounded border border-cyan-300/15 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-cyan-100/30"
+            />
+            <button onClick={submitDraft} className="rounded border border-cyan-300/25 bg-cyan-500/10 px-2 py-1.5 text-xs text-cyan-200">Add</button>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <AnimatePresence initial={false}>
+              {todayTasks.map((task) => (
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  taskMap={taskMap}
+                  categoryTone={categoryTone}
+                  depth={0}
+                  children={[]}
+                  collapsed={collapsed}
+                  setCollapsed={setCollapsed}
+                  upsertTask={upsertTask}
+                  removeTask={removeTask}
+                  toggleDone={toggleDone}
+                  toggleWeek={toggleWeek}
+                  selectedTaskId={selectedTaskId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  handleDropOnTask={handleDropOnTask}
+                  compact
+                />
+              ))}
+            </AnimatePresence>
+            {todayTasks.length === 0 && <div className="rounded-md border border-dashed border-cyan-200/20 p-3 text-center text-xs text-cyan-100/50">今日のタスクはまだありません。</div>}
+          </div>
         </div>
       )}
     </aside>
@@ -1199,8 +1236,18 @@ function WeeklyColumn({
   handleDropOnTask,
   handleDropOnWeekly,
   moveWeeklyTask,
+  addTask,
 }) {
+  const [draft, setDraft] = useState("");
   const { setNodeRef: weeklyDropRef, isOver: isWeeklyOver } = useDroppable({ id: `weekly-column-${className || "main"}`, data: { type: "weekly" } });
+
+  function submitDraft() {
+    const title = draft.trim();
+    if (!title) return;
+    addTask({ title, category: "", project: "", thisWeek: true, plain: true });
+    setDraft("");
+  }
+
   return (
     <aside ref={weeklyDropRef} className={classNames("flex-col rounded-lg border border-amber-400/20 bg-amber-500/[0.035] p-2 transition", isWeeklyOver && "border-amber-300/50 bg-amber-500/[0.07]", collapsed["column:weekly"] ? "min-h-0" : "min-h-[260px] md:min-h-[360px] xl:min-h-[430px]", className)}>
       <div className="mb-2 flex items-center justify-between gap-2 border-b border-amber-200/10 pb-1.5">
@@ -1218,9 +1265,21 @@ function WeeklyColumn({
         )}
       </div>
       {!collapsed["column:weekly"] && (
-        <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact />)}</AnimatePresence>
-          {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
+        <div className="flex flex-col gap-1">
+          <div className="flex gap-1">
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && submitDraft()}
+              placeholder="Add to Weekly"
+              className="min-w-0 flex-1 rounded border border-amber-300/15 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-amber-100/30"
+            />
+            <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact />)}</AnimatePresence>
+            {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
+          </div>
         </div>
       )}
     </aside>
@@ -1249,6 +1308,16 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
 
       {open && (
         <div className="flex flex-col gap-2">
+          <div className="flex gap-1">
+            <input
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && submitDraft()}
+              placeholder="Add to TRAY"
+              className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600"
+            />
+            <button onClick={submitDraft} className="rounded bg-white px-2 py-1.5 text-xs font-medium text-neutral-950">Add</button>
+          </div>
           <div className="flex flex-col gap-1 pr-1">
             {items.length === 0 ? (
               <div className="rounded-md border border-dashed border-white/10 p-3 text-center text-xs text-neutral-600">TRAY is empty</div>
@@ -1263,20 +1332,6 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
                 />
               ))
             )}
-          </div>
-
-          <div className="border-t border-white/10 pt-2">
-            <div className="flex gap-1">
-              <input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => event.key === "Enter" && submitDraft()}
-                placeholder="Add to TRAY"
-                className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600"
-              />
-              <button onClick={submitDraft} className="rounded bg-white px-2 py-1.5 text-xs font-medium text-neutral-950">Add</button>
-            </div>
-            <p className="mt-1 text-[10px] text-neutral-600">プロジェクトへドラッグすると、そのProjectのTaskとして受け入れます。</p>
           </div>
         </div>
       )}
@@ -1745,6 +1800,62 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
         </div>
       )}
     </motion.div>
+  );
+}
+
+function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
+  const [open, setOpen] = useState(false);
+  const archivedTasks = tasks.filter((t) => t.archived);
+
+  function unarchive(id) {
+    upsertTask(id, { archived: false, status: "未着手" });
+  }
+
+  return (
+    <div className="mt-2 rounded-lg border border-violet-400/15 bg-violet-500/[0.03] p-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 border-b border-violet-200/10 pb-1.5 text-left"
+      >
+        {open ? <ChevronDown className="h-4 w-4 text-neutral-500" /> : <ChevronRight className="h-4 w-4 text-neutral-500" />}
+        <span className="text-sm font-semibold text-violet-200">Archive</span>
+        <span className="rounded-full border border-violet-200/15 px-1.5 py-0.5 text-[10px] text-violet-100/45">{archivedTasks.length}</span>
+        <span className="ml-auto text-[10px] text-violet-100/30">完了タスクの保管庫</span>
+      </button>
+      {open && (
+        <div className="mt-2 flex flex-col gap-0.5">
+          {archivedTasks.length === 0 ? (
+            <div className="rounded-md border border-dashed border-violet-200/15 p-4 text-center text-xs text-violet-100/40">アーカイブは空です</div>
+          ) : (
+            archivedTasks.map((task) => {
+              const tone = categoryTone(task.category);
+              return (
+                <div key={task.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs text-neutral-400 hover:bg-white/[0.03]">
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500/50" />
+                  <span className="min-w-0 flex-1 truncate line-through opacity-50">{task.title}</span>
+                  {task.category && (
+                    <span className={classNames("shrink-0 rounded border px-1.5 py-0.5 text-[10px]", tone.tag)}>{task.category}</span>
+                  )}
+                  {task.project && <span className="shrink-0 text-[10px] text-neutral-600">{task.project}</span>}
+                  <button
+                    onClick={() => unarchive(task.id)}
+                    className="shrink-0 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-500 hover:bg-white/[0.07] hover:text-neutral-300"
+                  >
+                    戻す
+                  </button>
+                  <button
+                    onClick={() => removeTask(task.id)}
+                    className="shrink-0 text-neutral-700 hover:text-red-400"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
