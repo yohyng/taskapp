@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   DndContext,
   DragOverlay,
-  PointerSensor,
+  MouseSensor,
   TouchSensor,
   useSensor,
   useSensors,
@@ -326,9 +326,9 @@ function App() {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
 
-  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
+  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 6 } });
   const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 10 } });
-  const sensors = useSensors(pointerSensor, touchSensor);
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   function handleDragStart({ active }) {
     setActiveDrag(active.data.current || null);
