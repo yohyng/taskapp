@@ -1977,9 +1977,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
   return (
     <div
       ref={setRefs}
-      {...(!selectMode ? trayDragListeners : {})}
       {...(!selectMode ? trayDragAttrs : {})}
-      style={{ touchAction: "none" }}
       onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
@@ -1995,7 +1993,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
             {isSelected && <div className="h-2 w-2 rounded-sm bg-sky-400" />}
           </div>
         ) : (
-          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-30 transition group-hover:opacity-100" />
+          <GripVertical {...trayDragListeners} style={{ touchAction: "none" }} className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-50 transition group-hover:opacity-100" />
         )}
         <div className="min-w-0 flex-1">
           {editing ? (
@@ -2308,7 +2306,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   }
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0, touchAction: "none" }}>
+    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0 }}>
       {contextMenu && projectsByCategory && categories && (
         <LongPressMenu
           x={contextMenu.x}
@@ -2322,9 +2320,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
       )}
       <div
         ref={setRefs}
-        {...(!selectMode ? taskDragListeners : {})}
         {...(!selectMode ? taskDragAttrs : {})}
-        style={{ touchAction: "none" }}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
@@ -2345,7 +2341,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               {isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
             </button>
           )}
-          {!selectMode && <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-600 opacity-30 transition group-hover:opacity-100" />}
+          {!selectMode && <GripVertical {...taskDragListeners} style={{ touchAction: "none" }} className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-50 transition group-hover:opacity-100" />}
           <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
           {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
           <div className="min-w-0 flex-1">
