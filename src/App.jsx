@@ -1980,7 +1980,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
       {...(!selectMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
       onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
-      style={{ userSelect: "none", WebkitUserSelect: "none" }}
+      style={{ userSelect: "none", WebkitUserSelect: "none", touchAction: isTrayDragging ? "none" : "auto" }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
@@ -2308,7 +2308,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   }
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0 }}>
+    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0, touchAction: isDragging ? "none" : "auto" }}>
       {contextMenu && projectsByCategory && categories && (
         <LongPressMenu
           x={contextMenu.x}
