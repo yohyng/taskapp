@@ -338,12 +338,23 @@ function App() {
     }
   }
 
-  function handleDragEnd({ active, over }) {
+  function handleDragEnd({ active, over, activatorEvent, delta }) {
     setActiveDrag(null);
     if (!over) return;
     const src = active.data.current;
     const dst = over.data.current;
     if (!src || !dst) return;
+
+    // over の rect の上半分か下半分かを判定（Today/Weekly 内の親子化判定用）
+    function isBottomHalf() {
+      if (!over.rect) return false;
+      const midY = over.rect.top + over.rect.height / 2;
+      // activatorEvent はドラッグ開始時のポインター位置、delta はその後の移動量
+      const pointerY = activatorEvent
+        ? (activatorEvent.clientY ?? activatorEvent.touches?.[0]?.clientY ?? midY) + (delta?.y ?? 0)
+        : midY;
+      return pointerY > midY;
+    }
 
     // Column header reorder
     if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
@@ -403,14 +414,32 @@ function App() {
       return;
     }
 
-    // Task reorder within Today
+    // Task reorder / parent-child within Today
     if (src.type === "task" && dst.type === "task-in-today" && src.id !== dst.id) {
+      if (isBottomHalf()) {
+        const target = taskMap.get(dst.id);
+        const dragged = taskMap.get(src.id);
+        if (target && dragged && target.parentId !== src.id) {
+          upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
+          setToast(`親子化：「${target.title}」の子タスクにしました`);
+          return;
+        }
+      }
       moveTodayTask(src.id, dst.id);
       return;
     }
 
-    // Task reorder within Weekly
+    // Task reorder / parent-child within Weekly
     if (src.type === "task" && dst.type === "task-in-weekly" && src.id !== dst.id) {
+      if (isBottomHalf()) {
+        const target = taskMap.get(dst.id);
+        const dragged = taskMap.get(src.id);
+        if (target && dragged && target.parentId !== src.id) {
+          upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
+          setToast(`親子化：「${target.title}」の子タスクにしました`);
+          return;
+        }
+      }
       moveWeeklyTask(src.id, dst.id);
       return;
     }
