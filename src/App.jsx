@@ -416,9 +416,16 @@ function App() {
 
     // Task reorder / parent-child within Today
     if (src.type === "task" && dst.type === "task-in-today" && src.id !== dst.id) {
+      const dragged = taskMap.get(src.id);
+      // 自分の親にドロップ → 並列化（親子解除）
+      if (dragged?.parentId === dst.id) {
+        const parent = taskMap.get(dst.id);
+        upsertTask({ id: src.id, parentId: parent?.parentId ?? null });
+        setToast("並列化：親子を解除しました");
+        return;
+      }
       if (isBottomHalf()) {
         const target = taskMap.get(dst.id);
-        const dragged = taskMap.get(src.id);
         if (target && dragged && target.parentId !== src.id) {
           if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
           upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
@@ -432,9 +439,16 @@ function App() {
 
     // Task reorder / parent-child within Weekly
     if (src.type === "task" && dst.type === "task-in-weekly" && src.id !== dst.id) {
+      const dragged = taskMap.get(src.id);
+      // 自分の親にドロップ → 並列化（親子解除）
+      if (dragged?.parentId === dst.id) {
+        const parent = taskMap.get(dst.id);
+        upsertTask({ id: src.id, parentId: parent?.parentId ?? null });
+        setToast("並列化：親子を解除しました");
+        return;
+      }
       if (isBottomHalf()) {
         const target = taskMap.get(dst.id);
-        const dragged = taskMap.get(src.id);
         if (target && dragged && target.parentId !== src.id) {
           if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
           upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
@@ -468,6 +482,12 @@ function App() {
       const dragged = taskMap.get(src.id);
       if (!droppedOn || !dragged) return;
       if (droppedOn.parentId === src.id) return; // avoid cycle
+      // 自分の親にドロップ → 並列化（親子解除）
+      if (dragged.parentId === dst.id) {
+        upsertTask({ id: src.id, parentId: droppedOn.parentId ?? null });
+        setToast("並列化：親子を解除しました");
+        return;
+      }
       const movedAcrossProject = dragged.category !== droppedOn.category || dragged.project !== droppedOn.project;
       if (movedAcrossProject) {
         upsertTask({ id: src.id, parentId: null, category: droppedOn.category, project: droppedOn.project });
@@ -2182,13 +2202,16 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                   }
                   if (event.key === "Tab") {
                     event.preventDefault();
+                    event.stopPropagation();
                     const titleClean = normalizeTitle(titleDraft);
-                    if (titleClean && titleClean !== task.title) upsertTask({ id: task.id, title: titleClean });
+                    const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
                     if (event.shiftKey) {
-                      // Shift+Tab: 1つ浅く
+                      // Shift+Tab: 1つ浅く（タイトル保存と同時に1回のupsertで）
                       if (task.parentId) {
                         const parent = taskMap.get(task.parentId);
-                        upsertTask({ id: task.id, parentId: parent?.parentId ?? null });
+                        upsertTask({ id: task.id, ...titlePatch, parentId: parent?.parentId ?? null });
+                      } else {
+                        if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
                       }
                     } else {
                       // Tab: 同じ project 内の直前の兄弟を親にする
@@ -2200,7 +2223,10 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                         );
                         const idx = siblings.findIndex((t) => t.id === task.id);
                         const prevSibling = siblings[idx - 1];
-                        if (prevSibling) upsertTask({ id: task.id, parentId: prevSibling.id });
+                        if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
+                        else if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
+                      } else {
+                        if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
                       }
                     }
                   }
