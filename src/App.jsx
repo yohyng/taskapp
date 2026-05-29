@@ -954,7 +954,7 @@ function App() {
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontSize: `${zoom * 100}%` }}>
+    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ zoom }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
