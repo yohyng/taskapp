@@ -35,6 +35,30 @@ import {
   CheckSquare,
 } from "lucide-react";
 
+// 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
+const TOMBSTONE_TASKS_KEY = 'ts-tombstone-tasks'
+const TOMBSTONE_TRAY_KEY = 'ts-tombstone-tray'
+
+function addTombstone(key, id) {
+  try {
+    const s = new Set(JSON.parse(localStorage.getItem(key) || '[]'))
+    s.add(id)
+    localStorage.setItem(key, JSON.stringify([...s]))
+  } catch {}
+}
+
+function getTombstoneSet(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')) } catch { return new Set() }
+}
+
+// Supabaseから削除が完了したIDはtombstoneから除去
+function pruneTombstones(key, remoteIdSet) {
+  try {
+    const remaining = [...getTombstoneSet(key)].filter(id => remoteIdSet.has(id))
+    localStorage.setItem(key, JSON.stringify(remaining))
+  } catch {}
+}
+
 // タスクレベルのドロップゾーンをカラム全体より優先する衝突検知
 function taskFirstCollision(args) {
   const taskTypes = ["task-in-today", "task-in-weekly", "task", "tray"];
@@ -541,11 +565,21 @@ function App() {
     loadFromSupabase().then((remote) => {
       supabaseReadyRef.current = true;
       if (!remote) return;
-      if (remote.tasks !== undefined) setTasks((remote.tasks || []).map(normalizeTask));
+      if (remote.tasks !== undefined) {
+        const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
+        const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
+        pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
+        setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
+      }
       if (remote.categories?.length) setCategories(remote.categories);
       if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
       if (Object.keys(remote.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
-      if (remote.inboxItems !== undefined) setInboxItems(remote.inboxItems || []);
+      if (remote.inboxItems !== undefined) {
+        const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
+        const remoteTrayIds = new Set((remote.inboxItems || []).map(i => i.id))
+        pruneTombstones(TOMBSTONE_TRAY_KEY, remoteTrayIds)
+        setInboxItems((remote.inboxItems || []).filter(i => !deletedTray.has(i.id)));
+      }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -558,13 +592,19 @@ function App() {
       onTaskChange: () => {
         if (!supabaseReadyRef.current) return;
         loadFromSupabase().then((remote) => {
-          if (remote?.tasks !== undefined) setTasks((remote.tasks || []).map(normalizeTask));
+          if (remote?.tasks !== undefined) {
+            const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
+            setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
+          }
         });
       },
       onTrayChange: () => {
         if (!supabaseReadyRef.current) return;
         loadFromSupabase().then((remote) => {
-          if (remote?.inboxItems !== undefined) setInboxItems(remote.inboxItems || []);
+          if (remote?.inboxItems !== undefined) {
+            const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
+            setInboxItems((remote.inboxItems || []).filter(i => !deletedTray.has(i.id)));
+          }
         });
       },
       onCategoryChange: () => {
@@ -811,6 +851,7 @@ function App() {
   }
 
   function removeInboxItem(id) {
+    addTombstone(TOMBSTONE_TRAY_KEY, id);
     commitState((current) => ({
       ...current,
       inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
@@ -848,6 +889,7 @@ function App() {
   }
 
   function removeTask(id) {
+    addTombstone(TOMBSTONE_TASKS_KEY, id);
     commitTasks((prev) => prev.map((task) => (task.parentId === id ? { ...task, parentId: null } : task)).filter((task) => task.id !== id));
     dbDeleteTask(id);
     if (selectedTaskId === id) setSelectedTaskId(null);
@@ -1211,7 +1253,7 @@ function App() {
 
   function bulkTrayDelete() {
     const count = selectedTrayIds.size;
-    selectedTrayIds.forEach((id) => dbDeleteTrayItem(id));
+    selectedTrayIds.forEach((id) => { addTombstone(TOMBSTONE_TRAY_KEY, id); dbDeleteTrayItem(id); });
     commitState((current) => ({
       ...current,
       inboxItems: (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)),
@@ -1239,7 +1281,7 @@ function App() {
   }
 
   function bulkDelete() {
-    selectedIds.forEach((id) => dbDeleteTask(id));
+    selectedIds.forEach((id) => { addTombstone(TOMBSTONE_TASKS_KEY, id); dbDeleteTask(id); });
     commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
     setToast(`${selectedIds.size}件を削除しました`);
     exitSelectMode();
