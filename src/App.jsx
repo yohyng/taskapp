@@ -2180,6 +2180,27 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                     cancelTitle();
                     event.currentTarget.blur();
                   }
+                  if (event.key === "Tab") {
+                    event.preventDefault();
+                    commitTitle();
+                    if (event.shiftKey) {
+                      // Shift+Tab: 階層を1つ浅く（親の親に付け替え、なければrootに）
+                      if (task.parentId) {
+                        const parent = taskMap.get(task.parentId);
+                        upsertTask({ id: task.id, parentId: parent?.parentId ?? null });
+                      }
+                    } else {
+                      // Tab: 直前の兄弟タスクを親にする（深さ制限チェック）
+                      if (depth < 3) {
+                        const siblings = childrenOf ? childrenOf(task.parentId) : [];
+                        const idx = siblings.findIndex((t) => t.id === task.id);
+                        const prevSibling = siblings[idx - 1];
+                        if (prevSibling) {
+                          upsertTask({ id: task.id, parentId: prevSibling.id });
+                        }
+                      }
+                    }
+                  }
                 }}
                 className={classNames(
                   "w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
