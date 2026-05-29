@@ -307,7 +307,7 @@ function App() {
   const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
   const [quickProject, setQuickProject] = useState("空間シンクタンク");
   const [collapsed, setCollapsed] = useState({});
-  const [toast, setToast] = useState("列編集とカレンダーを追加しました");
+  const [toast, setToast] = useState("");
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -522,24 +522,31 @@ function App() {
     }
   }
 
-  // Save to localStorage immediately, Supabase debounced
+  // Supabase load が完了するまで保存を抑制するフラグ
+  const supabaseReadyRef = useRef(false);
+
+  // Save to localStorage immediately, Supabase debounced (load完了後のみ)
   const supabaseSaveTimer = useRef(null);
   useEffect(() => {
     const data = { tasks, categories, projectRules, projectOrder, inboxItems };
     saveLocal(data);
-    clearTimeout(supabaseSaveTimer.current);
-    supabaseSaveTimer.current = setTimeout(() => saveToSupabase(data), 1500);
+    if (supabaseReadyRef.current) {
+      clearTimeout(supabaseSaveTimer.current);
+      supabaseSaveTimer.current = setTimeout(() => saveToSupabase(data), 1500);
+    }
   }, [tasks, categories, projectRules, projectOrder, inboxItems]);
 
-  // On mount: load from Supabase and override local state if data exists
+  // On mount: load from Supabase and override local state
   useEffect(() => {
     loadFromSupabase().then((remote) => {
+      supabaseReadyRef.current = true;
       if (!remote) return;
-      if (remote.tasks?.length) setTasks(remote.tasks.map(normalizeTask));
+      // tasks/inboxItems は空配列でも上書き（削除が反映されるように）
+      if (remote.tasks !== undefined) setTasks((remote.tasks || []).map(normalizeTask));
       if (remote.categories?.length) setCategories(remote.categories);
       if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
       if (Object.keys(remote.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
-      if (remote.inboxItems?.length) setInboxItems(remote.inboxItems);
+      if (remote.inboxItems !== undefined) setInboxItems(remote.inboxItems || []);
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
