@@ -44,6 +44,7 @@ function addTombstone(key, id) {
     const s = new Set(JSON.parse(localStorage.getItem(key) || '[]'))
     s.add(id)
     localStorage.setItem(key, JSON.stringify([...s]))
+    console.log('[tombstone] added', key, id, [...s])
   } catch {}
 }
 
@@ -556,7 +557,11 @@ function App() {
     saveLocal(data);
     if (supabaseReadyRef.current) {
       clearTimeout(supabaseSaveTimer.current);
-      supabaseSaveTimer.current = setTimeout(() => saveToSupabase(data), 1500);
+      supabaseSaveTimer.current = setTimeout(() => {
+        const deletedTaskIds = [...getTombstoneSet(TOMBSTONE_TASKS_KEY)]
+        const deletedTrayIds = [...getTombstoneSet(TOMBSTONE_TRAY_KEY)]
+        saveToSupabase({ ...data, deletedTaskIds, deletedTrayIds })
+      }, 1500);
     }
   }, [tasks, categories, projectRules, projectOrder, inboxItems]);
 
@@ -568,6 +573,7 @@ function App() {
       if (remote.tasks !== undefined) {
         const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
         const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
+        if (deletedTasks.size) console.log('[tombstone] filtering tasks on load', [...deletedTasks], 'remote has them?', [...deletedTasks].map(id => remoteTaskIds.has(id)))
         pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
         setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
       }

@@ -165,7 +165,7 @@ export async function loadFromSupabase() {
 
 // --- Supabase save (upsert everything) ---
 
-export async function saveToSupabase({ tasks, categories, projectRules, projectOrder, inboxItems }) {
+export async function saveToSupabase({ tasks, categories, projectRules, projectOrder, inboxItems, deletedTaskIds = [], deletedTrayIds = [] }) {
   if (!isSupabaseEnabled) return
   try {
     const orderRows = Object.entries(projectOrder).map(([category, projects]) => ({
@@ -173,13 +173,22 @@ export async function saveToSupabase({ tasks, categories, projectRules, projectO
       projects,
     }))
 
-    await Promise.all([
+    const promises = [
       supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' }),
       supabase.from('categories').upsert(categories.map(categoryToRow), { onConflict: 'id' }),
       supabase.from('project_rules').upsert(projectRulesToRows(projectRules), { onConflict: 'id' }),
       supabase.from('project_order').upsert(orderRows, { onConflict: 'category' }),
       supabase.from('tray_items').upsert(inboxItems.map(trayToRow), { onConflict: 'id' }),
-    ])
+    ]
+    if (deletedTaskIds.length) {
+      console.log('[db] deleting tombstoned tasks', deletedTaskIds)
+      promises.push(supabase.from('tasks').delete().in('id', deletedTaskIds))
+    }
+    if (deletedTrayIds.length) {
+      console.log('[db] deleting tombstoned tray items', deletedTrayIds)
+      promises.push(supabase.from('tray_items').delete().in('id', deletedTrayIds))
+    }
+    await Promise.all(promises)
   } catch (err) {
     console.error('[db] Supabase save exception', err)
   }
