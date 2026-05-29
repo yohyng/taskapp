@@ -2,7 +2,114 @@ import { supabase, isSupabaseEnabled } from './supabase'
 
 const STORAGE_KEY = 'notion-like-taskdb-prototype-v4'
 
-function loadLocal() {
+// --- camelCase <-> snake_case mappers ---
+
+function taskToRow(t) {
+  return {
+    id: t.id,
+    title: t.title ?? '',
+    category: t.category ?? '',
+    project: t.project ?? '',
+    status: t.status ?? '未着手',
+    today: t.today ?? false,
+    today_order: t.todayOrder ?? null,
+    this_week: t.thisWeek ?? false,
+    weekly_order: t.weeklyOrder ?? null,
+    parent_id: t.parentId ?? null,
+    memo: t.memo ?? '',
+    due_date: t.dueDate ?? '',
+    recurrence: t.recurrence ?? 'none',
+    recurrence_day: t.recurrenceDay ?? null,
+    recurrence_end: t.recurrenceEnd ?? '',
+    plain: t.plain ?? false,
+  }
+}
+
+function rowToTask(r) {
+  return {
+    id: r.id,
+    title: r.title,
+    category: r.category,
+    project: r.project,
+    status: r.status,
+    today: r.today,
+    todayOrder: r.today_order,
+    thisWeek: r.this_week,
+    weeklyOrder: r.weekly_order,
+    parentId: r.parent_id,
+    memo: r.memo,
+    dueDate: r.due_date,
+    recurrence: r.recurrence,
+    recurrenceDay: r.recurrence_day,
+    recurrenceEnd: r.recurrence_end,
+    plain: r.plain,
+  }
+}
+
+function categoryToRow(c, index) {
+  return {
+    id: c.key,
+    key: c.key,
+    label: c.label,
+    tone: c.tone,
+    sort_order: index,
+  }
+}
+
+function rowToCategory(r) {
+  return { key: r.key, label: r.label, tone: r.tone }
+}
+
+function projectRulesToRows(rules) {
+  return Object.entries(rules).map(([k, v]) => {
+    const [category, ...rest] = k.split('::')
+    return {
+      id: k,
+      category,
+      project: rest.join('::'),
+      recurrence: v.recurrence ?? 'none',
+      recurrence_day: v.recurrenceDay ?? null,
+      recurrence_date: v.recurrenceDate ?? null,
+      recurrence_week: v.recurrenceWeek ?? null,
+      recurrence_start: v.recurrenceStart ?? '',
+      recurrence_end: v.recurrenceEnd ?? '',
+    }
+  })
+}
+
+function rowsToProjectRules(rows) {
+  const rules = {}
+  for (const r of rows) {
+    const key = `${r.category}::${r.project}`
+    rules[key] = {
+      recurrence: r.recurrence,
+      recurrenceDay: r.recurrence_day,
+      recurrenceDate: r.recurrence_date,
+      recurrenceWeek: r.recurrence_week,
+      recurrenceStart: r.recurrence_start,
+      recurrenceEnd: r.recurrence_end,
+    }
+  }
+  return rules
+}
+
+function trayToRow(item, index) {
+  return {
+    id: item.id,
+    title: item.title,
+    source: item.source ?? '',
+    sort_order: index,
+    created_at: item.createdAt ?? '',
+  }
+}
+
+function rowToTray(r) {
+  return { id: r.id, title: r.title, source: r.source, createdAt: r.created_at }
+}
+
+// --- localStorage helpers ---
+
+export function loadLocal() {
   try {
     return JSON.parse(localStorage.getItem(STORAGE_KEY) || 'null')
   } catch {
@@ -10,23 +117,82 @@ function loadLocal() {
   }
 }
 
-function saveLocal(data) {
+export function saveLocal(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
-export async function loadData() {
-  if (isSupabaseEnabled) {
-    // TODO: implement Supabase load
-    // const { data } = await supabase.from('tasks').select('*')
-    console.log('[db] Supabase enabled but load not yet implemented, falling back to localStorage')
+// --- Supabase load (all tables at once) ---
+
+export async function loadFromSupabase() {
+  if (!isSupabaseEnabled) return null
+  try {
+    const [
+      { data: taskRows, error: e1 },
+      { data: catRows, error: e2 },
+      { data: ruleRows, error: e3 },
+      { data: orderRows, error: e4 },
+      { data: trayRows, error: e5 },
+    ] = await Promise.all([
+      supabase.from('tasks').select('*'),
+      supabase.from('categories').select('*').order('sort_order'),
+      supabase.from('project_rules').select('*'),
+      supabase.from('project_order').select('*'),
+      supabase.from('tray_items').select('*').order('sort_order'),
+    ])
+
+    if (e1 || e2 || e3 || e4 || e5) {
+      console.error('[db] Supabase load error', e1 || e2 || e3 || e4 || e5)
+      return null
+    }
+
+    const projectOrder = {}
+    for (const row of orderRows) {
+      projectOrder[row.category] = row.projects
+    }
+
+    return {
+      tasks: taskRows.map(rowToTask),
+      categories: catRows.map(rowToCategory),
+      projectRules: rowsToProjectRules(ruleRows),
+      projectOrder,
+      inboxItems: trayRows.map(rowToTray),
+    }
+  } catch (err) {
+    console.error('[db] Supabase load exception', err)
+    return null
   }
-  return loadLocal()
 }
 
-export async function saveData(data) {
-  saveLocal(data)
-  if (isSupabaseEnabled) {
-    // TODO: implement Supabase sync
-    console.log('[db] Supabase enabled but sync not yet implemented')
+// --- Supabase save (upsert everything) ---
+
+export async function saveToSupabase({ tasks, categories, projectRules, projectOrder, inboxItems }) {
+  if (!isSupabaseEnabled) return
+  try {
+    const orderRows = Object.entries(projectOrder).map(([category, projects]) => ({
+      category,
+      projects,
+    }))
+
+    await Promise.all([
+      supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' }),
+      supabase.from('categories').upsert(categories.map(categoryToRow), { onConflict: 'id' }),
+      supabase.from('project_rules').upsert(projectRulesToRows(projectRules), { onConflict: 'id' }),
+      supabase.from('project_order').upsert(orderRows, { onConflict: 'category' }),
+      supabase.from('tray_items').upsert(inboxItems.map(trayToRow), { onConflict: 'id' }),
+    ])
+  } catch (err) {
+    console.error('[db] Supabase save exception', err)
   }
+}
+
+// --- Delete helpers (for task/tray deletions) ---
+
+export async function deleteTask(id) {
+  if (!isSupabaseEnabled) return
+  await supabase.from('tasks').delete().eq('id', id)
+}
+
+export async function deleteTrayItem(id) {
+  if (!isSupabaseEnabled) return
+  await supabase.from('tray_items').delete().eq('id', id)
 }

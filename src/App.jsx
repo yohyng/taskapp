@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -252,15 +253,14 @@ function normalizeTask(task) {
 function App() {
   const [boot] = useState(() => {
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
+      const raw = loadLocal();
       if (!raw) return { tasks: SAMPLE_TASKS, categories: DEFAULT_CATEGORIES, projectRules: DEFAULT_PROJECT_RULES, projectOrder: DEFAULT_PROJECT_ORDER, inboxItems: SAMPLE_INBOX };
-      const parsed = JSON.parse(raw);
       return {
-        tasks: (parsed.tasks || SAMPLE_TASKS).map(normalizeTask),
-        categories: parsed.categories || DEFAULT_CATEGORIES,
-        projectRules: parsed.projectRules || DEFAULT_PROJECT_RULES,
-        projectOrder: parsed.projectOrder || DEFAULT_PROJECT_ORDER,
-        inboxItems: parsed.inboxItems || SAMPLE_INBOX,
+        tasks: (raw.tasks || SAMPLE_TASKS).map(normalizeTask),
+        categories: raw.categories || DEFAULT_CATEGORIES,
+        projectRules: raw.projectRules || DEFAULT_PROJECT_RULES,
+        projectOrder: raw.projectOrder || DEFAULT_PROJECT_ORDER,
+        inboxItems: raw.inboxItems || SAMPLE_INBOX,
       };
     } catch {
       return { tasks: SAMPLE_TASKS, categories: DEFAULT_CATEGORIES, projectRules: DEFAULT_PROJECT_RULES, projectOrder: DEFAULT_PROJECT_ORDER, inboxItems: SAMPLE_INBOX };
@@ -288,9 +288,27 @@ function App() {
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
 
+  // Save to localStorage immediately, Supabase debounced
+  const supabaseSaveTimer = useRef(null);
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ tasks, categories, projectRules, projectOrder, inboxItems }));
+    const data = { tasks, categories, projectRules, projectOrder, inboxItems };
+    saveLocal(data);
+    clearTimeout(supabaseSaveTimer.current);
+    supabaseSaveTimer.current = setTimeout(() => saveToSupabase(data), 1500);
   }, [tasks, categories, projectRules, projectOrder, inboxItems]);
+
+  // On mount: load from Supabase and override local state if data exists
+  useEffect(() => {
+    loadFromSupabase().then((remote) => {
+      if (!remote) return;
+      if (remote.tasks?.length) setTasks(remote.tasks.map(normalizeTask));
+      if (remote.categories?.length) setCategories(remote.categories);
+      if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
+      if (Object.keys(remote.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
+      if (remote.inboxItems?.length) setInboxItems(remote.inboxItems);
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const categoryMap = useMemo(() => new Map(categories.map((cat) => [cat.key, cat])), [categories]);
