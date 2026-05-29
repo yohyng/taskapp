@@ -625,10 +625,25 @@ function App() {
 
   useEffect(() => {
     function handleKeyDown(event) {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      const inInput = ["input", "textarea", "select"].includes(tag);
+
+      // Delete/Backspace で選択中アイテムを削除（input内では無効）
+      if (!inInput && (event.key === "Delete" || event.key === "Backspace")) {
+        if (selectedIds.size > 0 || selectedTrayIds.size > 0) {
+          event.preventDefault();
+          const count = selectedIds.size + selectedTrayIds.size;
+          if (selectedIds.size > 0) commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+          if (selectedTrayIds.size > 0) { [...selectedTrayIds].forEach((id) => removeInboxItem(id)); }
+          setToast(`${count}件を削除しました`);
+          exitSelectMode();
+          return;
+        }
+      }
+
       const isMod = event.metaKey || event.ctrlKey;
       if (!isMod) return;
-      const tag = document.activeElement?.tagName?.toLowerCase();
-      if (["input", "textarea", "select"].includes(tag)) return;
+      if (inInput) return;
       const key = event.key.toLowerCase();
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
@@ -641,7 +656,7 @@ function App() {
     }
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [history, tasks, categories]);
+  }, [history, tasks, categories, selectedIds, selectedTrayIds]);
 
   function upsertTask(patch) {
     commitTasks((prev) => prev.map((task) => (task.id === patch.id ? normalizeTask({ ...task, ...patch }) : task)));
