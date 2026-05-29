@@ -1269,13 +1269,17 @@ function App() {
   }
 
   function bulkTrayDelete() {
-    const count = selectedTrayIds.size;
-    selectedTrayIds.forEach((id) => { addTombstone(TOMBSTONE_TRAY_KEY, id); dbDeleteTrayItem(id); });
+    const ids = [...selectedTrayIds];
+    addSyncLog(`🗑 TRAY一括削除 ${ids.length}件`);
+    ids.forEach((id) => {
+      addTombstone(TOMBSTONE_TRAY_KEY, id);
+      dbDeleteTrayItem(id).then(() => addSyncLog(`✓ TRAY DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ TRAY DELETE失敗: ${e?.message}`));
+    });
     commitState((current) => ({
       ...current,
       inboxItems: (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)),
     }));
-    setToast(`${count}件を削除しました`);
+    setToast(`${ids.length}件を削除しました`);
     exitSelectMode();
   }
 
@@ -1298,9 +1302,14 @@ function App() {
   }
 
   function bulkDelete() {
-    selectedIds.forEach((id) => { addTombstone(TOMBSTONE_TASKS_KEY, id); dbDeleteTask(id); });
+    const ids = [...selectedIds];
+    addSyncLog(`🗑 タスク一括削除 ${ids.length}件`);
+    ids.forEach((id) => {
+      addTombstone(TOMBSTONE_TASKS_KEY, id);
+      dbDeleteTask(id).then(() => addSyncLog(`✓ タスク DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
+    });
     commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
-    setToast(`${selectedIds.size}件を削除しました`);
+    setToast(`${ids.length}件を削除しました`);
     exitSelectMode();
   }
 
