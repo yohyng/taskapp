@@ -346,23 +346,28 @@ function App() {
       return;
     }
 
-    // Tray → Today
-    if (src.type === "tray" && dst.type === "today") {
+    // Tray → Today (列全体 or Today内のタスクカード上にドロップした場合も同様に処理)
+    if (src.type === "tray" && (dst.type === "today" || dst.type === "task-in-today")) {
       acceptInboxItem(src.id, "", "", { today: true, plain: true });
       setToast("TRAYからTodayにカテゴリなしタスクとして追加しました");
       return;
     }
 
-    // Tray → Weekly
-    if (src.type === "tray" && dst.type === "weekly") {
+    // Tray → Weekly (列全体 or Weekly内のタスクカード上にドロップした場合も同様に処理)
+    if (src.type === "tray" && (dst.type === "weekly" || dst.type === "task-in-weekly")) {
       acceptInboxItem(src.id, "", "", { thisWeek: true, plain: true });
       setToast("TRAYからWeeklyにカテゴリなしタスクとして追加しました");
       return;
     }
 
-    // Tray → Project
+    // Tray → Project (プロジェクト枠 or その中のタスク上にドロップした場合も処理)
     if (src.type === "tray" && dst.type === "project") {
       acceptInboxItem(src.id, dst.category, dst.project);
+      return;
+    }
+    if (src.type === "tray" && dst.type === "task") {
+      const target = taskMap.get(dst.id);
+      if (target) acceptInboxItem(src.id, target.category, target.project);
       return;
     }
 
