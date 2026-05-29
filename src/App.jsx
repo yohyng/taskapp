@@ -1663,7 +1663,7 @@ function WeeklyColumn({
             <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
           </div>
           <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
             {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
           </div>
         </div>
@@ -1947,7 +1947,7 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
       </button>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} children={childrenOf(task.id)} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
           <div className="mt-1 flex gap-1">
             <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="このProjectに追加" className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20" />
             <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
@@ -2022,7 +2022,7 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
   );
 }
 
-function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
+function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
@@ -2198,7 +2198,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
               key={child.id}
               task={child}
               taskMap={taskMap}
-              children={[]}
+              children={childrenOf ? childrenOf(child.id) : []}
+              childrenOf={childrenOf}
               categoryTone={categoryTone}
               depth={depth + 1}
               collapsed={collapsed}
