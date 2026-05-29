@@ -752,14 +752,8 @@ function App() {
       if (!inInput && (event.key === "Delete" || event.key === "Backspace")) {
         if (selectedIds.size > 0 || selectedTrayIds.size > 0) {
           event.preventDefault();
-          const count = selectedIds.size + selectedTrayIds.size;
-          commitState((current) => ({
-            ...current,
-            tasks: selectedIds.size > 0 ? current.tasks.filter((t) => !selectedIds.has(t.id)) : current.tasks,
-            inboxItems: selectedTrayIds.size > 0 ? (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)) : current.inboxItems,
-          }));
-          setToast(`${count}件を削除しました`);
-          exitSelectMode();
+          if (selectedIds.size > 0) bulkDelete();
+          else bulkTrayDelete();
           return;
         }
       }
