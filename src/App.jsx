@@ -1084,7 +1084,7 @@ function App() {
   }
 
   function changeZoom(val) {
-    const v = Math.min(1.5, Math.max(0.6, val));
+    const v = Math.min(2.0, Math.max(0.5, val));
     setZoom(v);
     localStorage.setItem("taskspace-zoom", String(v));
   }
