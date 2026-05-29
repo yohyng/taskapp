@@ -1980,6 +1980,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
       {...(!selectMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
       onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
+      style={{ userSelect: "none", WebkitUserSelect: "none" }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
@@ -2327,6 +2328,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerMove={handlePointerMove}
         onContextMenu={e => e.preventDefault()}
         onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } else { setSelectedTaskId(task.id); } }}
+        style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
           isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
