@@ -550,6 +550,8 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const [realtimeStatus, setRealtimeStatus] = useState("connecting");
+
   // Realtime: 他デバイスの変更を即時反映
   useEffect(() => {
     const unsubscribe = subscribeRealtime({
@@ -582,6 +584,9 @@ function App() {
         loadFromSupabase().then((remote) => {
           if (Object.keys(remote?.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
         });
+      },
+      onStatusChange: (status) => {
+        setRealtimeStatus(status);
       },
     });
     return unsubscribe;
@@ -1358,6 +1363,16 @@ function App() {
                     <button onClick={() => { archiveAll(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
                       完了タスクをすべてアーカイブ
                     </button>
+                  </div>
+
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <div className="mb-2 text-[11px] text-neutral-500">同期ステータス</div>
+                    <div className="flex items-center gap-2 rounded-md border border-white/10 bg-black/20 px-2.5 py-2">
+                      <div className={classNames("h-2 w-2 rounded-full shrink-0", realtimeStatus === "SUBSCRIBED" ? "bg-emerald-400" : realtimeStatus === "disabled" ? "bg-neutral-600" : realtimeStatus === "TIMED_OUT" || realtimeStatus === "CHANNEL_ERROR" ? "bg-red-400" : "bg-amber-400 animate-pulse")} />
+                      <span className="text-[11px] text-neutral-400">
+                        {realtimeStatus === "SUBSCRIBED" ? "リアルタイム同期中" : realtimeStatus === "disabled" ? "Supabase 未設定" : realtimeStatus === "TIMED_OUT" ? "タイムアウト" : realtimeStatus === "CHANNEL_ERROR" ? "接続エラー" : "接続中…"}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="mt-3 border-t border-white/10 pt-3">
