@@ -196,3 +196,30 @@ export async function deleteTrayItem(id) {
   if (!isSupabaseEnabled) return
   await supabase.from('tray_items').delete().eq('id', id)
 }
+
+// --- Realtime subscription ---
+
+export function subscribeRealtime({ onTaskChange, onTrayChange, onCategoryChange, onProjectRuleChange, onProjectOrderChange }) {
+  if (!isSupabaseEnabled) return () => {}
+
+  const channel = supabase
+    .channel('taskspace-sync')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tasks' }, (payload) => {
+      onTaskChange?.(payload)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'tray_items' }, (payload) => {
+      onTrayChange?.(payload)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'categories' }, (payload) => {
+      onCategoryChange?.(payload)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'project_rules' }, (payload) => {
+      onProjectRuleChange?.(payload)
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'project_order' }, (payload) => {
+      onProjectOrderChange?.(payload)
+    })
+    .subscribe()
+
+  return () => supabase.removeChannel(channel)
+}

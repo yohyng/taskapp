@@ -12,7 +12,7 @@ import {
   rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -541,13 +541,50 @@ function App() {
     loadFromSupabase().then((remote) => {
       supabaseReadyRef.current = true;
       if (!remote) return;
-      // tasks/inboxItems は空配列でも上書き（削除が反映されるように）
       if (remote.tasks !== undefined) setTasks((remote.tasks || []).map(normalizeTask));
       if (remote.categories?.length) setCategories(remote.categories);
       if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
       if (Object.keys(remote.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
       if (remote.inboxItems !== undefined) setInboxItems(remote.inboxItems || []);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Realtime: 他デバイスの変更を即時反映
+  useEffect(() => {
+    const unsubscribe = subscribeRealtime({
+      onTaskChange: () => {
+        if (!supabaseReadyRef.current) return;
+        loadFromSupabase().then((remote) => {
+          if (remote?.tasks !== undefined) setTasks((remote.tasks || []).map(normalizeTask));
+        });
+      },
+      onTrayChange: () => {
+        if (!supabaseReadyRef.current) return;
+        loadFromSupabase().then((remote) => {
+          if (remote?.inboxItems !== undefined) setInboxItems(remote.inboxItems || []);
+        });
+      },
+      onCategoryChange: () => {
+        if (!supabaseReadyRef.current) return;
+        loadFromSupabase().then((remote) => {
+          if (remote?.categories?.length) setCategories(remote.categories);
+        });
+      },
+      onProjectRuleChange: () => {
+        if (!supabaseReadyRef.current) return;
+        loadFromSupabase().then((remote) => {
+          if (Object.keys(remote?.projectRules || {}).length) setProjectRules(remote.projectRules);
+        });
+      },
+      onProjectOrderChange: () => {
+        if (!supabaseReadyRef.current) return;
+        loadFromSupabase().then((remote) => {
+          if (Object.keys(remote?.projectOrder || {}).length) setProjectOrder(remote.projectOrder);
+        });
+      },
+    });
+    return unsubscribe;
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
