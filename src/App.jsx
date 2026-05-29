@@ -1,4 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  TouchSensor,
+  useSensor,
+  useSensors,
+  useDroppable,
+  useDraggable,
+  closestCenter,
+} from "@dnd-kit/core";
+import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -287,6 +299,126 @@ function App() {
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
+  const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
+
+  const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 8 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } });
+  const sensors = useSensors(pointerSensor, touchSensor);
+
+  function handleDragStart({ active }) {
+    setActiveDrag(active.data.current || null);
+  }
+
+  function handleDragEnd({ active, over }) {
+    setActiveDrag(null);
+    if (!over) return;
+    const src = active.data.current;
+    const dst = over.data.current;
+    if (!src || !dst) return;
+
+    // Column header reorder
+    if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
+      moveColumn(src.key, dst.key);
+      return;
+    }
+
+    // Project header reorder
+    if (src.type === "project" && dst.type === "project" && src.category === dst.category && src.project !== dst.project) {
+      moveProject(src.category, src.project, dst.project);
+      return;
+    }
+
+    // Tray item reorder within tray
+    if (src.type === "tray" && dst.type === "tray" && src.id !== dst.id) {
+      moveInboxItem(src.id, dst.id);
+      return;
+    }
+
+    // Tray → Today
+    if (src.type === "tray" && dst.type === "today") {
+      acceptInboxItem(src.id, "", "", { today: true, plain: true });
+      setToast("TRAYからTodayにカテゴリなしタスクとして追加しました");
+      return;
+    }
+
+    // Tray → Weekly
+    if (src.type === "tray" && dst.type === "weekly") {
+      acceptInboxItem(src.id, "", "", { thisWeek: true, plain: true });
+      setToast("TRAYからWeeklyにカテゴリなしタスクとして追加しました");
+      return;
+    }
+
+    // Tray → Project
+    if (src.type === "tray" && dst.type === "project") {
+      acceptInboxItem(src.id, dst.category, dst.project);
+      return;
+    }
+
+    // Task → Today
+    if (src.type === "task" && dst.type === "today") {
+      upsertTask({ id: src.id, today: true });
+      setToast("Todayに追加しました");
+      return;
+    }
+
+    // Task → Weekly
+    if (src.type === "task" && dst.type === "weekly") {
+      const relatedIds = [src.id, ...collectAncestorIds(src.id), ...collectDescendantIds(src.id)];
+      commitTasks((prev) => prev.map((t) => (relatedIds.includes(t.id) ? { ...t, thisWeek: true } : t)));
+      setToast("親子構造ごとWeekly Taskに追加しました");
+      return;
+    }
+
+    // Task reorder within Today
+    if (src.type === "task" && dst.type === "task-in-today" && src.id !== dst.id) {
+      moveTodayTask(src.id, dst.id);
+      return;
+    }
+
+    // Task reorder within Weekly
+    if (src.type === "task" && dst.type === "task-in-weekly" && src.id !== dst.id) {
+      moveWeeklyTask(src.id, dst.id);
+      return;
+    }
+
+    // Task dropped on Today column (also covers task-in-today drop zone)
+    if (src.type === "task" && dst.type === "today") {
+      upsertTask({ id: src.id, today: true });
+      setToast("Todayに追加しました");
+      return;
+    }
+
+    // Task → Project (drop on project zone or on another task in a project)
+    if (src.type === "task" && dst.type === "project") {
+      const task = taskMap.get(src.id);
+      if (!task) return;
+      upsertTask({ id: src.id, category: dst.category, project: dst.project, parentId: null });
+      setToast(task.parentId ? `親子解除：${dst.category} / ${dst.project} の並列タスクにしました` : `移動：${dst.category} / ${dst.project} に変更しました`);
+      return;
+    }
+
+    // Task dropped on another task (parent-child or cross-project move)
+    if (src.type === "task" && dst.type === "task" && src.id !== dst.id) {
+      const droppedOn = taskMap.get(dst.id);
+      const dragged = taskMap.get(src.id);
+      if (!droppedOn || !dragged) return;
+      if (droppedOn.parentId === src.id) return; // avoid cycle
+      const movedAcrossProject = dragged.category !== droppedOn.category || dragged.project !== droppedOn.project;
+      if (movedAcrossProject) {
+        upsertTask({ id: src.id, parentId: null, category: droppedOn.category, project: droppedOn.project });
+        setToast(`移動：${droppedOn.category} / ${droppedOn.project} の並列タスクにしました`);
+      } else {
+        upsertTask({ id: src.id, parentId: dst.id, category: droppedOn.category, project: droppedOn.project });
+        setToast(`親子化：「${droppedOn.title}」の子タスクにしました`);
+      }
+      return;
+    }
+
+    // Tray item dropped into tray drop zone
+    if (src.type === "tray" && dst.type === "tray-zone") {
+      return; // nothing to do
+    }
+  }
 
   // Save to localStorage immediately, Supabase debounced
   const supabaseSaveTimer = useRef(null);
@@ -804,6 +936,7 @@ function App() {
     : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
 
   return (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
@@ -973,6 +1106,13 @@ handleDropOnToday={handleDropOnToday}
         <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
       </div>
     </div>
+    <DragOverlay>
+      {activeDrag?.type === "task" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{taskMap.get(activeDrag.id)?.title || "…"}</div>}
+      {activeDrag?.type === "tray" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{activeDrag.title || "…"}</div>}
+      {activeDrag?.type === "column" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-xl opacity-90">{activeDrag.label || activeDrag.key}</div>}
+      {activeDrag?.type === "project" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-xl opacity-90">{activeDrag.project}</div>}
+    </DragOverlay>
+    </DndContext>
   );
 }
 
@@ -995,8 +1135,9 @@ function TodayColumn({
   defaultCategory,
   defaultProject,
 }) {
+  const { setNodeRef: todayDropRef, isOver: isTodayOver } = useDroppable({ id: "today-column", data: { type: "today" } });
   return (
-    <aside onDragOver={(event) => event.preventDefault()} onDrop={handleDropOnToday} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2", collapsed["column:today"] && "min-h-0")}>
+    <aside ref={todayDropRef} className={classNames("flex min-h-[180px] flex-col rounded-lg border border-cyan-400/20 bg-cyan-500/[0.035] p-2 transition", isTodayOver && "border-cyan-300/50 bg-cyan-500/[0.07]", collapsed["column:today"] && "min-h-0")}>
       <div className="mb-2 flex items-center justify-between gap-2 border-b border-cyan-200/10 pb-1.5">
         <button
           onClick={() => setCollapsed((prev) => ({ ...prev, ["column:today"]: !prev["column:today"] }))}
@@ -1028,17 +1169,6 @@ function TodayColumn({
                 selectedTaskId={selectedTaskId}
                 setSelectedTaskId={setSelectedTaskId}
                 handleDropOnTask={handleDropOnTask}
-moveWeeklyTask={(dragId, targetId, source) => {
-                  if (source === "inbox") {
-                    acceptInboxItem(dragId, "", "", { today: true, plain: true });
-                    return;
-                  }
-                  if (todayTasks.some((item) => item.id === dragId)) {
-                    moveTodayTask(dragId, targetId);
-                  } else {
-                    upsertTask({ id: dragId, today: true });
-                  }
-                }}
                 compact
               />
             ))}
@@ -1070,8 +1200,9 @@ function WeeklyColumn({
   handleDropOnWeekly,
   moveWeeklyTask,
 }) {
+  const { setNodeRef: weeklyDropRef, isOver: isWeeklyOver } = useDroppable({ id: `weekly-column-${className || "main"}`, data: { type: "weekly" } });
   return (
-    <aside onDragOver={(event) => event.preventDefault()} onDrop={handleDropOnWeekly} className={classNames("flex-col rounded-lg border border-amber-400/20 bg-amber-500/[0.035] p-2", collapsed["column:weekly"] ? "min-h-0" : "min-h-[260px] md:min-h-[360px] xl:min-h-[430px]", className)}>
+    <aside ref={weeklyDropRef} className={classNames("flex-col rounded-lg border border-amber-400/20 bg-amber-500/[0.035] p-2 transition", isWeeklyOver && "border-amber-300/50 bg-amber-500/[0.07]", collapsed["column:weekly"] ? "min-h-0" : "min-h-[260px] md:min-h-[360px] xl:min-h-[430px]", className)}>
       <div className="mb-2 flex items-center justify-between gap-2 border-b border-amber-200/10 pb-1.5">
         <button
           onClick={() => setCollapsed((prev) => ({ ...prev, ["column:weekly"]: !prev["column:weekly"] }))}
@@ -1156,11 +1287,17 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
 function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
-  const [isOver, setIsOver] = useState(false);
 
   useEffect(() => {
     setDraft(item.title);
   }, [item.id, item.title]);
+
+  const { attributes: trayDragAttrs, listeners: trayDragListeners, setNodeRef: trayDragRef, isDragging: isTrayDragging } = useDraggable({
+    id: `tray-${item.id}`,
+    data: { type: "tray", id: item.id, title: item.title },
+    disabled: editing,
+  });
+  const { setNodeRef: trayDropRef, isOver } = useDroppable({ id: `tray-drop-${item.id}`, data: { type: "tray", id: item.id } });
 
   function commitTitle() {
     const clean = normalizeTitle(draft);
@@ -1178,34 +1315,21 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
     setEditing(false);
   }
 
+  // Merge refs
+  function setRefs(el) {
+    trayDragRef(el);
+    trayDropRef(el);
+  }
+
   return (
     <div
-      draggable={!editing}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("inbox/id", item.id);
-        event.dataTransfer.setData("application/x-tray-item", item.id);
-        event.dataTransfer.setData("text/plain", `tray:${item.id}`);
-      }}
-      onDragOver={(event) => {
-        if (event.dataTransfer.types.includes("inbox/id") || event.dataTransfer.types.includes("application/x-tray-item")) {
-          event.preventDefault();
-          setIsOver(true);
-        }
-      }}
-      onDragLeave={() => setIsOver(false)}
-      onDrop={(event) => {
-        const dragId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
-        if (dragId) {
-          event.preventDefault();
-          event.stopPropagation();
-          setIsOver(false);
-          moveInboxItem(dragId, item.id);
-        }
-      }}
+      ref={setRefs}
+      {...trayDragListeners}
+      {...trayDragAttrs}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
-        isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10"
+        isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
+        isTrayDragging && "opacity-40"
       )}
     >
       <div className="flex items-start gap-2">
@@ -1264,6 +1388,9 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, c
   const isColumnCollapsed = collapsed[columnKey];
   const effectiveProjects = projects.length ? projects : ["未分類"];
 
+  const { setNodeRef: colDropRef, isOver: isColOver } = useDroppable({ id: `col-drop-${category.key}`, data: { type: "column", key: category.key } });
+  const { attributes: colDragAttrs, listeners: colDragListeners, setNodeRef: colDragRef, isDragging: isColDragging } = useDraggable({ id: `col-drag-${category.key}`, data: { type: "column", key: category.key, label: category.label } });
+
   function createProject() {
     const clean = normalizeTitle(newProject);
     if (!clean) return;
@@ -1274,37 +1401,14 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, c
 
   return (
     <div
-      className={classNames("w-full rounded-lg border p-2", isColumnCollapsed ? "min-h-0" : "min-h-[420px] md:min-h-[560px] xl:min-h-[660px]", tone.panel)}
-      onDragOver={(event) => event.preventDefault()}
-      onDrop={(event) => {
-        const dragKey = event.dataTransfer.getData("category/key");
-        if (dragKey) {
-          event.preventDefault();
-          moveColumn(dragKey, category.key);
-        }
-      }}
+      ref={colDropRef}
+      className={classNames("w-full rounded-lg border p-2 transition", isColumnCollapsed ? "min-h-0" : "min-h-[420px] md:min-h-[560px] xl:min-h-[660px]", tone.panel, isColOver && "border-white/30")}
     >
       <div
-        draggable
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("category/key", category.key);
-          event.dataTransfer.setData("text/plain", category.key);
-        }}
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("category/key") || event.dataTransfer.types.includes("text/plain")) {
-            event.preventDefault();
-          }
-        }}
-        onDrop={(event) => {
-          const dragKey = event.dataTransfer.getData("category/key");
-          if (dragKey) {
-            event.preventDefault();
-            event.stopPropagation();
-            moveColumn(dragKey, category.key);
-          }
-        }}
-        className="mb-2 flex cursor-grab items-center justify-between gap-2 border-b border-white/10 pb-1.5 active:cursor-grabbing"
+        ref={colDragRef}
+        {...colDragListeners}
+        {...colDragAttrs}
+        className={classNames("mb-2 flex cursor-grab items-center justify-between gap-2 border-b border-white/10 pb-1.5 active:cursor-grabbing", isColDragging && "opacity-40")}
       >
         <button
           onClick={() => setCollapsed((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))}
@@ -1343,11 +1447,13 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, c
 
 function ProjectGroup({ category, project, roots, childrenOf, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules }) {
   const [newTitle, setNewTitle] = useState("");
-  const [isOver, setIsOver] = useState(false);
   const key = `${category}:${project}`;
   const isCollapsed = collapsed[key];
   const tone = categoryTone(category);
   const rule = projectRules?.[projectKey(category, project)];
+
+  const { setNodeRef: projDropRef, isOver } = useDroppable({ id: `proj-drop-${category}-${project}`, data: { type: "project", category, project } });
+  const { attributes: projDragAttrs, listeners: projDragListeners, setNodeRef: projDragRef, isDragging: isProjDragging } = useDraggable({ id: `proj-drag-${category}-${project}`, data: { type: "project", category, project } });
 
   function create() {
     const task = addTask({ title: newTitle || "新規タスク", category, project });
@@ -1356,44 +1462,18 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
 
   return (
     <div
+      ref={projDropRef}
       className={classNames(
         "rounded-md border px-1.5 py-1 transition",
         isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10"
       )}
-      onDragOver={(event) => event.preventDefault()}
-      onDragEnter={() => setIsOver(true)}
-      onDragLeave={() => setIsOver(false)}
-      onDrop={(event) => {
-        setIsOver(false);
-        const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
-        if (inboxId) {
-          event.preventDefault();
-          event.stopPropagation();
-          handleDropOnProject(event, category, project);
-          return;
-        }
-
-        const projectDrag = event.dataTransfer.getData("project/key");
-        if (projectDrag) {
-          event.preventDefault();
-          event.stopPropagation();
-          const info = projectLabelFromKey(projectDrag);
-          if (info.category === category) moveProject(category, info.project, project);
-          return;
-        }
-        handleDropOnProject(event, category, project);
-      }}
     >
       <button
-        draggable
-        onDragStart={(event) => {
-          event.stopPropagation();
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("project/key", projectKey(category, project));
-          event.dataTransfer.setData("text/plain", projectKey(category, project));
-        }}
+        ref={projDragRef}
+        {...projDragListeners}
+        {...projDragAttrs}
         onClick={() => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))}
-        className="mb-1 flex w-full cursor-grab items-center justify-between gap-2 text-left active:cursor-grabbing"
+        className={classNames("mb-1 flex w-full cursor-grab items-center justify-between gap-2 text-left active:cursor-grabbing", isProjDragging && "opacity-40")}
       >
         <div className="flex min-w-0 items-center gap-2">
           {isCollapsed ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
@@ -1424,12 +1504,79 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
   );
 }
 
-function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false }) {
+// Long-press context menu component
+function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories, onClose }) {
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+
+  useEffect(() => {
+    function handleClick() { onClose(); }
+    window.addEventListener("pointerdown", handleClick, { capture: true });
+    return () => window.removeEventListener("pointerdown", handleClick, { capture: true });
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed z-[200] min-w-[180px] rounded-xl border border-white/15 bg-neutral-900/97 p-1.5 shadow-2xl backdrop-blur"
+      style={{ left: Math.min(x, window.innerWidth - 196), top: Math.min(y, window.innerHeight - 300) }}
+      onPointerDown={(e) => e.stopPropagation()}
+    >
+      {!task.today && (
+        <button
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
+          onClick={() => { upsertTask({ id: task.id, today: true }); onClose(); }}
+        >Move to Today</button>
+      )}
+      {task.today && (
+        <button
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
+          onClick={() => { upsertTask({ id: task.id, today: false }); onClose(); }}
+        >Remove from Today</button>
+      )}
+      {!task.thisWeek && (
+        <button
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
+          onClick={() => { upsertTask({ id: task.id, thisWeek: true }); onClose(); }}
+        >Move to Weekly</button>
+      )}
+      {task.thisWeek && (
+        <button
+          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
+          onClick={() => { upsertTask({ id: task.id, thisWeek: false }); onClose(); }}
+        >Remove from Weekly</button>
+      )}
+      <button
+        className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
+        onClick={() => setShowProjectPicker((v) => !v)}
+      >Move to Project…</button>
+      {showProjectPicker && (
+        <div className="mt-1 max-h-48 overflow-y-auto rounded-lg border border-white/10 bg-black/40 p-1">
+          {categories.map((cat) =>
+            (projectsByCategory[cat.key] || []).map((proj) => (
+              <button
+                key={`${cat.key}::${proj}`}
+                className="flex w-full flex-col rounded px-2 py-1.5 text-left text-[11px] hover:bg-white/10"
+                onClick={() => { upsertTask({ id: task.id, category: cat.key, project: proj, parentId: null }); onClose(); }}
+              >
+                <span className="text-neutral-400">{cat.key}</span>
+                <span className="text-neutral-200">{proj}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories }) {
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
   const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
   const [titleDraft, setTitleDraft] = useState(task.title);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y }
+  const longPressTimer = useRef(null);
+  const longPressActive = useRef(false);
 
   useEffect(() => {
     setTitleDraft(task.title);
@@ -1448,35 +1595,70 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
     setTitleDraft(task.title);
   }
 
+  function handlePointerDown(e) {
+    if (e.pointerType !== "touch") return;
+    const x = e.clientX;
+    const y = e.clientY;
+    longPressActive.current = false;
+    longPressTimer.current = setTimeout(() => {
+      longPressActive.current = true;
+      setContextMenu({ x, y });
+    }, 600);
+  }
+
+  function handlePointerUp() {
+    clearTimeout(longPressTimer.current);
+  }
+
+  function handlePointerMove() {
+    clearTimeout(longPressTimer.current);
+  }
+
+  // dnd-kit hooks
+  const dragType = compact ? "task" : "task";
+  const { attributes: taskDragAttrs, listeners: taskDragListeners, setNodeRef: taskDragRef, isDragging } = useDraggable({
+    id: `task-${task.id}`,
+    data: { type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId },
+  });
+
+  // Drop target: task itself (for parent-child or cross-project)
+  const dropType = compact ? (task.today ? "task-in-today" : "task-in-weekly") : "task";
+  const { setNodeRef: taskDropRef, isOver: isTaskOver } = useDroppable({
+    id: `task-drop-${task.id}`,
+    data: { type: dropType, id: task.id, category: task.category, project: task.project },
+  });
+
+  function setRefs(el) {
+    taskDragRef(el);
+    taskDropRef(el);
+  }
+
   return (
     <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0 }}>
+      {contextMenu && projectsByCategory && categories && (
+        <LongPressMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          task={task}
+          upsertTask={upsertTask}
+          projectsByCategory={projectsByCategory}
+          categories={categories}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
       <div
-        draggable
-        onDragStart={(event) => {
-          event.dataTransfer.effectAllowed = "move";
-          event.dataTransfer.setData("task/id", task.id);
-        }}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          if (compact && moveWeeklyTask) {
-            event.preventDefault();
-            event.stopPropagation();
-            const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
-            if (inboxId) {
-              moveWeeklyTask(inboxId, task.id, "inbox");
-              return;
-            }
-            const id = event.dataTransfer.getData("task/id");
-            if (id) moveWeeklyTask(id, task.id, "task");
-            return;
-          }
-          handleDropOnTask(event, task);
-        }}
-        onClick={() => setSelectedTaskId(task.id)}
+        ref={setRefs}
+        {...taskDragListeners}
+        {...taskDragAttrs}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerMove={handlePointerMove}
+        onClick={() => { if (!longPressActive.current) setSelectedTaskId(task.id); }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
-          selected ? "border-white/35 bg-white/[0.07]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
-          task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45"
+          selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45",
+          isDragging && "opacity-40"
         )}
       >
         <div className="flex items-start gap-1.5">
@@ -1556,6 +1738,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
               handleDropOnTask={handleDropOnTask}
               compact={compact}
               moveWeeklyTask={moveWeeklyTask}
+              projectsByCategory={projectsByCategory}
+              categories={categories}
             />
           ))}
         </div>
