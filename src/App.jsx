@@ -2182,22 +2182,25 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                   }
                   if (event.key === "Tab") {
                     event.preventDefault();
-                    commitTitle();
+                    const titleClean = normalizeTitle(titleDraft);
+                    if (titleClean && titleClean !== task.title) upsertTask({ id: task.id, title: titleClean });
                     if (event.shiftKey) {
-                      // Shift+Tab: 階層を1つ浅く（親の親に付け替え、なければrootに）
+                      // Shift+Tab: 1つ浅く
                       if (task.parentId) {
                         const parent = taskMap.get(task.parentId);
                         upsertTask({ id: task.id, parentId: parent?.parentId ?? null });
                       }
                     } else {
-                      // Tab: 直前の兄弟タスクを親にする（深さ制限チェック）
+                      // Tab: 同じ project 内の直前の兄弟を親にする
                       if (depth < 3) {
-                        const siblings = childrenOf ? childrenOf(task.parentId) : [];
+                        const siblings = [...taskMap.values()].filter(
+                          (t) => t.parentId === (task.parentId ?? null) &&
+                                 t.category === task.category &&
+                                 t.project === task.project
+                        );
                         const idx = siblings.findIndex((t) => t.id === task.id);
                         const prevSibling = siblings[idx - 1];
-                        if (prevSibling) {
-                          upsertTask({ id: task.id, parentId: prevSibling.id });
-                        }
+                        if (prevSibling) upsertTask({ id: task.id, parentId: prevSibling.id });
                       }
                     }
                   }
