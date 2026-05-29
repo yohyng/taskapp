@@ -633,8 +633,11 @@ function App() {
         if (selectedIds.size > 0 || selectedTrayIds.size > 0) {
           event.preventDefault();
           const count = selectedIds.size + selectedTrayIds.size;
-          if (selectedIds.size > 0) commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
-          if (selectedTrayIds.size > 0) { [...selectedTrayIds].forEach((id) => removeInboxItem(id)); }
+          commitState((current) => ({
+            ...current,
+            tasks: selectedIds.size > 0 ? current.tasks.filter((t) => !selectedIds.has(t.id)) : current.tasks,
+            inboxItems: selectedTrayIds.size > 0 ? (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)) : current.inboxItems,
+          }));
           setToast(`${count}件を削除しました`);
           exitSelectMode();
           return;
@@ -1140,9 +1143,12 @@ function App() {
   }
 
   function bulkTrayDelete() {
-    const ids = [...selectedTrayIds];
-    ids.forEach((id) => removeInboxItem(id));
-    setToast(`${ids.length}件を削除しました`);
+    const count = selectedTrayIds.size;
+    commitState((current) => ({
+      ...current,
+      inboxItems: (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)),
+    }));
+    setToast(`${count}件を削除しました`);
     exitSelectMode();
   }
 
@@ -1537,8 +1543,11 @@ function App() {
             )}
             <button onClick={() => {
               const count = selectedIds.size + selectedTrayIds.size;
-              if (selectedIds.size > 0) commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
-              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => removeInboxItem(id)); }
+              commitState((current) => ({
+                ...current,
+                tasks: selectedIds.size > 0 ? current.tasks.filter((t) => !selectedIds.has(t.id)) : current.tasks,
+                inboxItems: selectedTrayIds.size > 0 ? (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)) : current.inboxItems,
+              }));
               setToast(`${count}件を削除しました`);
               exitSelectMode();
             }} className="rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
