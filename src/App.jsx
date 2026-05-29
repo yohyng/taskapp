@@ -954,17 +954,6 @@ function App() {
             <span className="text-[11px] text-neutral-500">single DB / flexible columns</span>
           </div>
 
-          <div className="hidden min-w-[220px] flex-1 items-center gap-2 rounded-md border border-white/10 bg-black/25 px-2 py-1.5 md:flex">
-            <Search className="h-3.5 w-3.5 text-neutral-500" />
-            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="検索" className="w-full bg-transparent text-xs outline-none placeholder:text-neutral-600" />
-          </div>
-
-          <input value={quickMemo} onChange={(event) => setQuickMemo(event.target.value)} onKeyDown={(event) => event.key === "Enter" && addQuickMemo()} placeholder="Quick add" className="hidden w-full rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-56 md:block" />
-          <select value={quickCategory} onChange={(event) => { const next = event.target.value; setQuickCategory(next); setQuickProject(projectsByCategory[next]?.[0] || "未分類"); }} className="hidden rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none md:block">
-            {categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}
-          </select>
-          <input value={quickProject} onChange={(event) => setQuickProject(event.target.value)} placeholder="Project" className="hidden w-[calc(100vw-160px)] rounded-md border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600 sm:w-40 md:block" />
-          <button onClick={addQuickMemo} className="hidden rounded-md bg-white px-2 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-neutral-200 md:block">Add</button>
 
           <button onClick={() => setShowColumnsPanel((value) => !value)} className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-white/[0.07]"><Settings2 className="h-3.5 w-3.5" />Columns</button>
           <button onClick={() => setShowDone((value) => !value)} className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Done</button>

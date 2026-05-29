@@ -1,14 +1,9 @@
 import sharp from 'sharp'
-import { readFileSync } from 'fs'
 
-// SVG source for the icon
+// Lightning bolt icon
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="80" fill="#0f172a"/>
-  <rect x="96" y="128" width="320" height="36" rx="12" fill="#f1f5f9"/>
-  <rect x="96" y="208" width="224" height="28" rx="10" fill="#475569"/>
-  <rect x="96" y="272" width="256" height="28" rx="10" fill="#475569"/>
-  <rect x="96" y="336" width="176" height="28" rx="10" fill="#475569"/>
-  <rect x="96" y="400" width="200" height="28" rx="10" fill="#334155"/>
+  <polygon points="300,60 160,280 248,280 212,452 352,232 264,232" fill="#facc15" stroke="#fbbf24" stroke-width="6" stroke-linejoin="round"/>
 </svg>`
 
 const svgBuf = Buffer.from(svg)
