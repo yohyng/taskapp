@@ -1978,6 +1978,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
     <div
       ref={setRefs}
       {...(!selectMode ? trayDragAttrs : {})}
+      onContextMenu={e => e.preventDefault()}
       onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
@@ -2324,6 +2325,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
+        onContextMenu={e => e.preventDefault()}
         onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } else { setSelectedTaskId(task.id); } }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
