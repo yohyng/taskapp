@@ -1697,14 +1697,8 @@ function App() {
               </>
             )}
             <button onClick={() => {
-              const count = selectedIds.size + selectedTrayIds.size;
-              commitState((current) => ({
-                ...current,
-                tasks: selectedIds.size > 0 ? current.tasks.filter((t) => !selectedIds.has(t.id)) : current.tasks,
-                inboxItems: selectedTrayIds.size > 0 ? (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)) : current.inboxItems,
-              }));
-              setToast(`${count}件を削除しました`);
-              exitSelectMode();
+              if (selectedIds.size > 0) bulkDelete();
+              if (selectedTrayIds.size > 0) bulkTrayDelete();
             }} className="rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
             <button onClick={exitSelectMode} className="ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
           </div>
