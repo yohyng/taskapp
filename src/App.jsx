@@ -815,6 +815,7 @@ function App() {
       ...current,
       inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
     }));
+    dbDeleteTrayItem(id);
     setToast("TRAYから削除しました");
   }
 
@@ -848,6 +849,7 @@ function App() {
 
   function removeTask(id) {
     commitTasks((prev) => prev.map((task) => (task.parentId === id ? { ...task, parentId: null } : task)).filter((task) => task.id !== id));
+    dbDeleteTask(id);
     if (selectedTaskId === id) setSelectedTaskId(null);
     setToast("タスクを削除しました");
   }
@@ -1209,6 +1211,7 @@ function App() {
 
   function bulkTrayDelete() {
     const count = selectedTrayIds.size;
+    selectedTrayIds.forEach((id) => dbDeleteTrayItem(id));
     commitState((current) => ({
       ...current,
       inboxItems: (current.inboxItems || []).filter((i) => !selectedTrayIds.has(i.id)),
@@ -1236,6 +1239,7 @@ function App() {
   }
 
   function bulkDelete() {
+    selectedIds.forEach((id) => dbDeleteTask(id));
     commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
     setToast(`${selectedIds.size}件を削除しました`);
     exitSelectMode();
