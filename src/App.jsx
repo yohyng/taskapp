@@ -351,7 +351,7 @@ function App() {
   const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 6 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 10 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 15 } });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   function handleDragStart({ active }) {
