@@ -327,7 +327,7 @@ function App() {
   const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
 
   const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 10 } });
   const sensors = useSensors(pointerSensor, touchSensor);
 
   function handleDragStart({ active }) {
@@ -1757,7 +1757,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
             {isSelected && <div className="h-2 w-2 rounded-sm bg-sky-400" />}
           </div>
         ) : (
-          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-700 opacity-0 transition group-hover:opacity-100" />
+          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-30 transition group-hover:opacity-100" />
         )}
         <div className="min-w-0 flex-1">
           {editing ? (
@@ -2070,7 +2070,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
   }
 
   return (
-    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0 }}>
+    <motion.div layout initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.16 }} className="flex flex-col gap-0.5" style={{ marginLeft: depth ? Math.min(depth * 14, 32) : 0, touchAction: "none" }}>
       {contextMenu && projectsByCategory && categories && (
         <LongPressMenu
           x={contextMenu.x}
@@ -2107,7 +2107,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], depth, collapsed
               {isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
             </button>
           )}
-          {!selectMode && <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-700 opacity-0 transition group-hover:opacity-100" />}
+          {!selectMode && <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-neutral-600 opacity-30 transition group-hover:opacity-100" />}
           <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
           {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
           <div className="min-w-0 flex-1">
