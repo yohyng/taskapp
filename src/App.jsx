@@ -311,6 +311,7 @@ function App() {
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
+  const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
 
   const pointerSensor = useSensor(PointerSensor, { activationConstraint: { distance: 6 } });
   const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 400, tolerance: 8 } });
@@ -1010,6 +1011,7 @@ function App() {
   function exitSelectMode() {
     setSelectMode(false);
     setSelectedIds(new Set());
+    setSelectedTrayIds(new Set());
   }
 
   function onToggleSelect(id) {
@@ -1019,6 +1021,36 @@ function App() {
       else next.add(id);
       return next;
     });
+  }
+
+  function onToggleTraySelect(id) {
+    setSelectedTrayIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function bulkTrayToday() {
+    const ids = [...selectedTrayIds];
+    ids.forEach((id) => acceptInboxItem(id, "", "", { today: true, plain: true }));
+    setToast(`${ids.length}件をTodayに追加しました`);
+    exitSelectMode();
+  }
+
+  function bulkTrayWeekly() {
+    const ids = [...selectedTrayIds];
+    ids.forEach((id) => acceptInboxItem(id, "", "", { thisWeek: true, plain: true }));
+    setToast(`${ids.length}件をWeeklyに追加しました`);
+    exitSelectMode();
+  }
+
+  function bulkTrayDelete() {
+    const ids = [...selectedTrayIds];
+    ids.forEach((id) => removeInboxItem(id));
+    setToast(`${ids.length}件を削除しました`);
+    exitSelectMode();
   }
 
   function bulkToday() {
@@ -1237,6 +1269,9 @@ function App() {
                   removeInboxItem={removeInboxItem}
                   moveInboxItem={moveInboxItem}
                   addInboxItem={addInboxItem}
+                  selectMode={selectMode}
+                  selectedTrayIds={selectedTrayIds}
+                  onToggleTraySelect={onToggleTraySelect}
                 />
               </div>
               <TodayColumn
@@ -1329,32 +1364,55 @@ function App() {
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
-        {selectMode && selectedIds.size > 0 && (
+        {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-white/20 bg-neutral-900 px-4 py-3 shadow-2xl">
-            <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-100">{selectedIds.size}件選択中</span>
-            <button onClick={bulkToday} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
-            <button onClick={bulkWeekly} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
-            <div className="relative">
-              <select
-                onChange={(e) => {
-                  if (!e.target.value) return;
-                  const [cat, ...rest] = e.target.value.split("::");
-                  bulkMoveProject(cat, rest.join("::"));
-                  e.target.value = "";
-                }}
-                defaultValue=""
-                className="rounded-md border border-white/10 bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 outline-none cursor-pointer"
-              >
-                <option value="" disabled>Project…</option>
-                {categories.map((cat) =>
-                  (projectsByCategory[cat.key] || []).map((proj) => (
-                    <option key={`${cat.key}::${proj}`} value={`${cat.key}::${proj}`}>{cat.key} / {proj}</option>
-                  ))
-                )}
-              </select>
-            </div>
-            <button onClick={bulkArchive} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
-            <button onClick={bulkDelete} className="rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
+            <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-100">
+              {selectedIds.size + selectedTrayIds.size}件選択中
+              {selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">(TRAY:{selectedTrayIds.size})</span>}
+            </span>
+            <button onClick={() => {
+              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, today: true } : t));
+              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { today: true, plain: true })); }
+              setToast(`${selectedIds.size + selectedTrayIds.size}件をTodayに追加しました`);
+              exitSelectMode();
+            }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
+            <button onClick={() => {
+              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true } : t));
+              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { thisWeek: true, plain: true })); }
+              setToast(`${selectedIds.size + selectedTrayIds.size}件をWeeklyに追加しました`);
+              exitSelectMode();
+            }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
+            {selectedIds.size > 0 && (
+              <>
+                <div className="relative">
+                  <select
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const [cat, ...rest] = e.target.value.split("::");
+                      bulkMoveProject(cat, rest.join("::"));
+                      e.target.value = "";
+                    }}
+                    defaultValue=""
+                    className="rounded-md border border-white/10 bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 outline-none cursor-pointer"
+                  >
+                    <option value="" disabled>Project…</option>
+                    {categories.map((cat) =>
+                      (projectsByCategory[cat.key] || []).map((proj) => (
+                        <option key={`${cat.key}::${proj}`} value={`${cat.key}::${proj}`}>{cat.key} / {proj}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+                <button onClick={bulkArchive} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
+              </>
+            )}
+            <button onClick={() => {
+              const count = selectedIds.size + selectedTrayIds.size;
+              if (selectedIds.size > 0) commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
+              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => removeInboxItem(id)); }
+              setToast(`${count}件を削除しました`);
+              exitSelectMode();
+            }} className="rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
             <button onClick={exitSelectMode} className="ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
           </div>
         )}
@@ -1536,7 +1594,7 @@ function WeeklyColumn({
   );
 }
 
-function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem }) {
+function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
@@ -1579,6 +1637,9 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
                   updateInboxItem={updateInboxItem}
                   removeInboxItem={removeInboxItem}
                   moveInboxItem={moveInboxItem}
+                  selectMode={selectMode}
+                  isSelected={selectedTrayIds && selectedTrayIds.has(item.id)}
+                  onToggleSelect={onToggleTraySelect}
                 />
               ))
             )}
@@ -1589,7 +1650,7 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
   );
 }
 
-function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
+function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
 
@@ -1600,7 +1661,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
   const { attributes: trayDragAttrs, listeners: trayDragListeners, setNodeRef: trayDragRef, isDragging: isTrayDragging } = useDraggable({
     id: `tray-${item.id}`,
     data: { type: "tray", id: item.id, title: item.title },
-    disabled: editing,
+    disabled: editing || selectMode,
   });
   const { setNodeRef: trayDropRef, isOver } = useDroppable({ id: `tray-drop-${item.id}`, data: { type: "tray", id: item.id } });
 
@@ -1629,17 +1690,26 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
   return (
     <div
       ref={setRefs}
-      {...trayDragListeners}
-      {...trayDragAttrs}
+      {...(!selectMode ? trayDragListeners : {})}
+      {...(!selectMode ? trayDragAttrs : {})}
       style={{ touchAction: "none" }}
+      onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
-        isTrayDragging && "opacity-40"
+        isTrayDragging && "opacity-40",
+        selectMode && isSelected && "border-sky-500/50 bg-sky-500/10",
+        selectMode && "cursor-pointer"
       )}
     >
       <div className="flex items-start gap-2">
-        <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-700 opacity-0 transition group-hover:opacity-100" />
+        {selectMode ? (
+          <div className={classNames("mt-0.5 h-3.5 w-3.5 shrink-0 rounded border flex items-center justify-center transition", isSelected ? "border-sky-400 bg-sky-500/30" : "border-neutral-600")}>
+            {isSelected && <div className="h-2 w-2 rounded-sm bg-sky-400" />}
+          </div>
+        ) : (
+          <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-700 opacity-0 transition group-hover:opacity-100" />
+        )}
         <div className="min-w-0 flex-1">
           {editing ? (
             <input
@@ -1670,7 +1740,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem }) {
             />
           ) : (
             <div
-              onClick={() => setEditing(true)}
+              onClick={(e) => { if (selectMode) { e.stopPropagation(); return; } setEditing(true); }}
               className="block w-full break-words text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
