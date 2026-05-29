@@ -297,6 +297,8 @@ function App() {
   const [toast, setToast] = useState("列編集とカレンダーを追加しました");
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
@@ -944,9 +946,15 @@ function App() {
     ? weeklyTasks
     : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
 
+  function changeZoom(val) {
+    const v = Math.min(1.5, Math.max(0.6, val));
+    setZoom(v);
+    localStorage.setItem("taskspace-zoom", String(v));
+  }
+
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontSize: `${zoom * 100}%` }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
@@ -954,13 +962,65 @@ function App() {
             <span className="text-[11px] text-neutral-500">single DB / flexible columns</span>
           </div>
 
+          <div className="ml-auto flex items-center gap-1.5">
+            <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
+            <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
+            <div className="relative">
+              <button
+                onClick={() => setShowSettingsPanel((v) => !v)}
+                className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showSettingsPanel ? "border-white/25 bg-white/10 text-neutral-100" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+                title="Settings"
+              >
+                <Settings2 className="h-3.5 w-3.5" />
+              </button>
+              {showSettingsPanel && (
+                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-white/15 bg-neutral-900 p-3 shadow-2xl">
+                  <div className="mb-3 flex items-center justify-between">
+                    <span className="text-xs font-semibold text-neutral-200">Settings</span>
+                    <button onClick={() => setShowSettingsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-3.5 w-3.5" /></button>
+                  </div>
 
-          <button onClick={() => setShowColumnsPanel((value) => !value)} className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-white/[0.07]"><Settings2 className="h-3.5 w-3.5" />Columns</button>
-          <button onClick={() => setShowDone((value) => !value)} className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Done</button>
-          <button onClick={archiveAll} className="rounded-md border border-violet-400/30 bg-violet-500/10 px-2 py-1.5 text-xs text-violet-200 transition hover:bg-violet-500/20">Archive</button>
-          <button onClick={undo} disabled={!history.past.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Undo</button>
-          <button onClick={redo} disabled={!history.future.length} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30">Redo</button>
-          <button onClick={resetDemo} className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RotateCcw className="h-3.5 w-3.5" /></button>
+                  {/* Zoom */}
+                  <div className="mb-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">表示サイズ</div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => changeZoom(zoom - 0.1)} className="rounded border border-white/10 px-2 py-1 text-xs text-neutral-400 hover:bg-white/[0.07]">−</button>
+                      <div className="flex-1 text-center text-xs text-neutral-300">{Math.round(zoom * 100)}%</div>
+                      <button onClick={() => changeZoom(zoom + 0.1)} className="rounded border border-white/10 px-2 py-1 text-xs text-neutral-400 hover:bg-white/[0.07]">＋</button>
+                      <button onClick={() => changeZoom(1)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-500 hover:bg-white/[0.07]">reset</button>
+                    </div>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">表示</div>
+                    <button onClick={() => setShowDone((v) => !v)} className={classNames("w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
+                      {showDone ? "✓ 完了タスクを表示中" : "完了タスクを非表示中"}
+                    </button>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">カラム設定</div>
+                    <button onClick={() => { setShowColumnsPanel((v) => !v); setShowSettingsPanel(false); }} className="w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-white/[0.07]">
+                      Columns を編集…
+                    </button>
+                  </div>
+
+                  <div className="border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">アーカイブ</div>
+                    <button onClick={() => { archiveAll(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
+                      完了タスクをすべてアーカイブ
+                    </button>
+                  </div>
+
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <button onClick={() => { resetDemo(); setShowSettingsPanel(false); }} className="flex w-full items-center gap-1.5 rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-500 transition hover:bg-white/[0.07]">
+                      <RotateCcw className="h-3 w-3" />サンプルデータに戻す
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </header>
 
         <nav className="grid grid-cols-3 gap-1 md:hidden">
