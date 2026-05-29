@@ -1,1 +1,6 @@
 @import "tailwindcss";
+
+/* ドラッグモード中はカード全体のタッチスクロールを無効化 */
+.ts-drag-mode [data-draggable] {
+  touch-action: none;
+}

@@ -349,10 +349,33 @@ function App() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
+  const [dragMode, setDragMode] = useState(false);
+  const dragModeLongPressTimer = useRef(null);
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 6 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 300, tolerance: 8 } });
-  const sensors = useSensors(mouseSensor, touchSensor);
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } });
+  const sensors = useSensors(mouseSensor, ...(dragMode ? [touchSensor] : []));
+
+  // ドラッグモード：カード外の長押し検知 → ドラッグモード ON
+  useEffect(() => {
+    if (dragMode) return;
+    const onTouchStart = (e) => {
+      if (e.target.closest('button, input, textarea, select, a, [role="button"]')) return;
+      dragModeLongPressTimer.current = setTimeout(() => {
+        setDragMode(true);
+        if (navigator.vibrate) navigator.vibrate(60);
+      }, 600);
+    };
+    const cancel = () => clearTimeout(dragModeLongPressTimer.current);
+    document.addEventListener('touchstart', onTouchStart, { passive: true });
+    document.addEventListener('touchend', cancel, { passive: true });
+    document.addEventListener('touchmove', cancel, { passive: true });
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchend', cancel);
+      document.removeEventListener('touchmove', cancel);
+    };
+  }, [dragMode]);
 
   function handleDragStart({ active }) {
     setActiveDrag(active.data.current || null);
@@ -362,8 +385,14 @@ function App() {
     }
   }
 
+  // ドラッグモード時はbodyにクラスを付与してCSS側でtouch-action: noneを適用
+  useEffect(() => {
+    document.body.classList.toggle('ts-drag-mode', dragMode);
+  }, [dragMode]);
+
   function handleDragEnd({ active, over, activatorEvent, delta }) {
     setActiveDrag(null);
+    setDragMode(false);
     if (!over) return;
     const src = active.data.current;
     const dst = over.data.current;
@@ -1654,6 +1683,13 @@ function App() {
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
+        {dragMode && (
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-amber-400/30 bg-neutral-900 px-4 py-3 shadow-2xl">
+            <span className="text-[12px] text-amber-200">✦ ドラッグモード</span>
+            <button onClick={() => setDragMode(false)} className="rounded-md border border-white/15 bg-white/[0.07] px-3 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">完了</button>
+          </div>
+        )}
+
         {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-white/20 bg-neutral-900 px-4 py-3 shadow-2xl">
             <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-100">
@@ -1981,7 +2017,8 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
       {...(!selectMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
       onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
-      style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none" }}
+      data-draggable
+      style={{ userSelect: "none", WebkitUserSelect: "none" }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
@@ -2330,7 +2367,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerMove={handlePointerMove}
         onContextMenu={e => e.preventDefault()}
         onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } else { setSelectedTaskId(task.id); } }}
-        style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none" }}
+        data-draggable
+        style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
           isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
