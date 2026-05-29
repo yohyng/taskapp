@@ -299,6 +299,10 @@ function App() {
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
+  const [notionToken, setNotionToken] = useState(() => localStorage.getItem("taskspace-notion-token") || "");
+  const [notionDbId, setNotionDbId] = useState(() => localStorage.getItem("taskspace-notion-dbid") || "");
+  const [notionSyncing, setNotionSyncing] = useState(false);
+  const [notionLastSync, setNotionLastSync] = useState(() => localStorage.getItem("taskspace-notion-last-sync") || "");
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
@@ -946,6 +950,50 @@ function App() {
     ? weeklyTasks
     : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
 
+  async function syncNotion() {
+    if (!notionToken || !notionDbId) {
+      setToast("Notion Token と DB ID を設定してください");
+      return;
+    }
+    setNotionSyncing(true);
+    try {
+      const res = await fetch("/api/notion-sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ token: notionToken, dbId: notionDbId.replace(/-/g, "") }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "sync failed");
+
+      // 既存のTRAYアイテムIDと照合して重複を除く
+      setInboxItems((prev) => {
+        const existingIds = new Set(prev.map((item) => item.id));
+        const newItems = data.pages
+          .filter((p) => !existingIds.has(`notion-${p.id}`))
+          .map((p) => ({
+            id: `notion-${p.id}`,
+            title: p.title,
+            source: "Notion",
+            createdAt: p.createdAt,
+          }));
+        if (newItems.length === 0) {
+          setToast("新しいNotionページはありませんでした");
+          return prev;
+        }
+        setToast(`${newItems.length}件をTRAYに追加しました`);
+        return [...newItems, ...prev];
+      });
+
+      const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
+      setNotionLastSync(now);
+      localStorage.setItem("taskspace-notion-last-sync", now);
+    } catch (err) {
+      setToast(`Notion同期エラー: ${err.message}`);
+    } finally {
+      setNotionSyncing(false);
+    }
+  }
+
   function changeZoom(val) {
     const v = Math.min(1.5, Math.max(0.6, val));
     setZoom(v);
@@ -1009,6 +1057,33 @@ function App() {
                     <div className="mb-1.5 text-[11px] text-neutral-500">アーカイブ</div>
                     <button onClick={() => { archiveAll(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
                       完了タスクをすべてアーカイブ
+                    </button>
+                  </div>
+
+                  <div className="mt-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <span className="text-[11px] text-neutral-500">Notion 連携</span>
+                      {notionLastSync && <span className="text-[10px] text-neutral-600">最終: {notionLastSync}</span>}
+                    </div>
+                    <input
+                      type="password"
+                      value={notionToken}
+                      onChange={(e) => { setNotionToken(e.target.value); localStorage.setItem("taskspace-notion-token", e.target.value); }}
+                      placeholder="Integration Token (secret_...)"
+                      className="mb-1.5 w-full rounded border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] outline-none placeholder:text-neutral-600"
+                    />
+                    <input
+                      value={notionDbId}
+                      onChange={(e) => { setNotionDbId(e.target.value); localStorage.setItem("taskspace-notion-dbid", e.target.value); }}
+                      placeholder="DB ID (32文字 or URL)"
+                      className="mb-1.5 w-full rounded border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] outline-none placeholder:text-neutral-600"
+                    />
+                    <button
+                      onClick={syncNotion}
+                      disabled={notionSyncing}
+                      className="w-full rounded border border-neutral-400/20 bg-neutral-500/10 px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-500/20 disabled:opacity-50"
+                    >
+                      {notionSyncing ? "同期中…" : "TRAYに同期"}
                     </button>
                   </div>
 
