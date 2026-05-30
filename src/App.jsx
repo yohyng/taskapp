@@ -1382,7 +1382,7 @@ function App() {
   }, []);
 
   return (
-    <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+    <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} measuring={{ draggable: { measure: (el) => el.getBoundingClientRect() } }}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
@@ -1572,7 +1572,7 @@ function App() {
           </section>
         )}
 
-        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]", mobileView === "calendar" && "hidden md:grid")}>
+        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))] transition-[padding] duration-200", mobileView === "calendar" && "hidden md:grid", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <section
             className={classNames(
               "min-w-0 gap-2 pb-1",
@@ -1675,11 +1675,13 @@ function App() {
           />
         </main>
 
-        <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block")}>
+        <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block", "transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
         </div>
 
-        <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
+        <div className={classNames("transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
+        </div>
 
         <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} onClose={() => setSelectedProject(null)} />
 
@@ -1734,7 +1736,7 @@ function App() {
         <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
       </div>
     </div>
-    <DragOverlay>
+    <DragOverlay adjustScale={false} dropAnimation={null}>
       {activeDrag?.type === "task" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{taskMap.get(activeDrag.id)?.title || "…"}</div>}
       {activeDrag?.type === "tray" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{activeDrag.title || "…"}</div>}
       {activeDrag?.type === "column" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-xl opacity-90">{activeDrag.label || activeDrag.key}</div>}
