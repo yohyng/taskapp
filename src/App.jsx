@@ -896,20 +896,32 @@ function App() {
 
   function toggleWeek(task) {
     const nextValue = !task.thisWeek;
+    if (!nextValue && !task.category) {
+      // plain タスクを Weekly から外す → TRAY に戻す
+      addInboxItem(task.title);
+      removeTask(task.id);
+      setToast("TRAYに戻しました");
+      return;
+    }
     const relatedIds = nextValue
       ? [task.id, ...collectAncestorIds(task.id), ...collectDescendantIds(task.id)]
       : [task.id, ...collectDescendantIds(task.id)];
-    // Weekly ON → Today から外す（排他）
     commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id) ? { ...item, thisWeek: nextValue, ...(nextValue ? { today: false } : {}) } : item)));
     setToast(nextValue ? "Weekly Taskに追加しました" : "Weekly Taskから外しました");
   }
 
   function toggleToday(task) {
     const nextValue = !task.today;
+    if (!nextValue && !task.category) {
+      // plain タスクを Today から外す → TRAY に戻す
+      addInboxItem(task.title);
+      removeTask(task.id);
+      setToast("TRAYに戻しました");
+      return;
+    }
     const relatedIds = nextValue
       ? [task.id, ...collectAncestorIds(task.id), ...collectDescendantIds(task.id)]
       : [task.id, ...collectDescendantIds(task.id)];
-    // Today ON → Weekly から外す（排他）
     commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id) ? { ...item, today: nextValue, ...(nextValue ? { thisWeek: false } : {}) } : item)));
     setToast(nextValue ? "Todayに追加しました" : "Todayから外しました");
   }
@@ -1335,19 +1347,27 @@ function App() {
       commitTasks((prev) => prev.map((t) => toRemoveFromView.includes(t.id) ? { ...t, today: false, thisWeek: false } : t));
     }
     if (toDelete.length > 0) {
-      addSyncLog(`🗑 タスク一括削除 ${toDelete.length}件`);
-      toDelete.forEach((id) => {
+      // plain タスク（today/thisWeek 付き）は TRAY に戻す、それ以外は完全削除
+      const toTray = toDelete.filter((id) => { const t = taskMap.get(id); return t && (t.today || t.thisWeek); });
+      const toReallyDelete = toDelete.filter((id) => !toTray.includes(id));
+      toTray.forEach((id) => {
+        const t = taskMap.get(id);
+        if (t) addInboxItem(t.title);
+      });
+      const allToRemove = [...toDelete]; // tray + delete 両方タスクから消す
+      addSyncLog(`🗑 タスク一括削除 ${toReallyDelete.length}件`);
+      toReallyDelete.forEach((id) => {
         addTombstone(TOMBSTONE_TASKS_KEY, id);
         dbDeleteTask(id).then(() => addSyncLog(`✓ タスク DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
       });
-      commitTasks((prev) => prev.filter((t) => !toDelete.includes(t.id)));
+      commitTasks((prev) => prev.filter((t) => !allToRemove.includes(t.id)));
     }
     const removedCount = toRemoveFromView.length;
     const deletedCount = toDelete.length;
     setToast(removedCount > 0 && deletedCount > 0
-      ? `${removedCount}件をビューから除外、${deletedCount}件を削除しました`
+      ? `${removedCount}件をビューから除外、${deletedCount}件をTRAYに戻しました`
       : removedCount > 0 ? `${removedCount}件をTodayとWeeklyから外しました`
-      : `${deletedCount}件を削除しました`);
+      : `${deletedCount}件をTRAYに戻しました`);
     exitSelectMode();
   }
 
@@ -1676,6 +1696,7 @@ function App() {
                 handleDropOnWeekly={handleDropOnWeekly}
                 moveWeeklyTask={moveWeeklyTask}
                 addTask={addTask}
+                addInboxItem={addInboxItem}
                 selectMode={selectMode}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
@@ -1706,6 +1727,7 @@ function App() {
             handleDropOnWeekly={handleDropOnWeekly}
             moveWeeklyTask={moveWeeklyTask}
             addTask={addTask}
+            addInboxItem={addInboxItem}
             selectMode={selectMode}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
@@ -1814,7 +1836,7 @@ function TodayColumn({
   function removeTodayTask(id) {
     const t = taskMap.get(id);
     if (t && t.category) { upsertTask({ id, today: false }); }
-    else { removeTask(id); }
+    else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
   }
 
   function submitDraft() {
@@ -1904,6 +1926,7 @@ function WeeklyColumn({
   handleDropOnWeekly,
   moveWeeklyTask,
   addTask,
+  addInboxItem,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -1914,7 +1937,7 @@ function WeeklyColumn({
   function removeWeeklyTask(id) {
     const t = taskMap.get(id);
     if (t && t.category) { upsertTask({ id, thisWeek: false }); }
-    else { removeTask(id); }
+    else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
   }
 
   function submitDraft() {
