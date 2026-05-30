@@ -1686,24 +1686,23 @@ function App() {
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
         {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 rounded-xl border border-white/20 bg-neutral-900 px-4 py-3 shadow-2xl">
-            <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[11px] text-sky-100">
-              {selectedIds.size + selectedTrayIds.size}件選択中
-              {selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">(TRAY:{selectedTrayIds.size})</span>}
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl overflow-x-auto max-w-[calc(100vw-1.5rem)]">
+            <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
+              {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
             <button onClick={() => {
               if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, today: true } : t));
               if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { today: true, plain: true })); }
               setToast(`${selectedIds.size + selectedTrayIds.size}件をTodayに追加しました`);
               exitSelectMode();
-            }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
+            }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
             <button onClick={() => {
               if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true } : t));
               if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { thisWeek: true, plain: true })); }
               setToast(`${selectedIds.size + selectedTrayIds.size}件をWeeklyに追加しました`);
               exitSelectMode();
-            }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
-            <div className="relative">
+            }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
+            <div className="relative flex-shrink-0">
               <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
               {showMovePanel && (
                 <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 max-h-72 overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
@@ -1723,13 +1722,13 @@ function App() {
               )}
             </div>
             {selectedIds.size > 0 && (
-              <button onClick={bulkArchive} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
+              <button onClick={bulkArchive} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
             )}
             <button onClick={() => {
               if (selectedIds.size > 0) bulkDelete();
               if (selectedTrayIds.size > 0) bulkTrayDelete();
-            }} className="rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
-            <button onClick={exitSelectMode} className="ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
+            }} className="flex-shrink-0 rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
+            <button onClick={exitSelectMode} className="flex-shrink-0 ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
           </div>
         )}
         <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
