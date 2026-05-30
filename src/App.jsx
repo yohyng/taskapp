@@ -335,6 +335,7 @@ function App() {
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [showMovePanel, setShowMovePanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
   const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1"));
   const [notionToken, setNotionToken] = useState(() => localStorage.getItem("taskspace-notion-token") || "");
@@ -1233,6 +1234,7 @@ function App() {
     setSelectMode(false);
     setSelectedIds(new Set());
     setSelectedTrayIds(new Set());
+    setShowMovePanel(false);
   }
 
   function onToggleSelect(id) {
@@ -1315,6 +1317,30 @@ function App() {
   function bulkMoveProject(category, project) {
     commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null } : t));
     setToast(`${selectedIds.size}件を ${category} / ${project} に移動しました`);
+    exitSelectMode();
+  }
+
+  function bulkMoveTo(category, project) {
+    const trayIds = [...selectedTrayIds];
+    const taskCount = selectedIds.size;
+    const trayCount = trayIds.length;
+    if (taskCount > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null } : t));
+    if (trayCount > 0) {
+      trayIds.forEach((id) => {
+        const item = inboxItems.find((i) => i.id === id);
+        if (!item) return;
+        const newTask = normalizeTask({ id: uid(), title: item.title, category, project, status: "未着手", parentId: null, memo: `Imported from Inbox`, dueDate: "", plain: false });
+        commitState((current) => ({
+          ...current,
+          tasks: [newTask, ...current.tasks],
+          inboxItems: (current.inboxItems || []).filter((i) => i.id !== id),
+        }));
+        addTombstone(TOMBSTONE_TRAY_KEY, id);
+        dbDeleteTrayItem(id);
+      });
+    }
+    setToast(`${taskCount + trayCount}件を ${category} / ${project} に移動しました`);
+    setShowMovePanel(false);
     exitSelectMode();
   }
 
@@ -1677,29 +1703,27 @@ function App() {
               setToast(`${selectedIds.size + selectedTrayIds.size}件をWeeklyに追加しました`);
               exitSelectMode();
             }} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
-            {selectedIds.size > 0 && (
-              <>
-                <div className="relative">
-                  <select
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      const [cat, ...rest] = e.target.value.split("::");
-                      bulkMoveProject(cat, rest.join("::"));
-                      e.target.value = "";
-                    }}
-                    defaultValue=""
-                    className="rounded-md border border-white/10 bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 outline-none cursor-pointer"
-                  >
-                    <option value="" disabled>Project…</option>
-                    {categories.map((cat) =>
-                      (projectsByCategory[cat.key] || []).map((proj) => (
-                        <option key={`${cat.key}::${proj}`} value={`${cat.key}::${proj}`}>{cat.key} / {proj}</option>
-                      ))
-                    )}
-                  </select>
+            <div className="relative">
+              <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
+              {showMovePanel && (
+                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 max-h-72 overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
+                  <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
+                  <button onClick={() => { bulkToday(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📅 Today</button>
+                  <button onClick={() => { bulkWeekly(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📆 Weekly</button>
+                  <div className="my-1 border-t border-white/10" />
+                  {categories.map((cat) => (
+                    <div key={cat.key}>
+                      <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-500">{cat.label}</div>
+                      {(projectsByCategory[cat.key] || []).map((proj) => (
+                        <button key={proj} onClick={() => bulkMoveTo(cat.key, proj)} className="w-full rounded-lg px-3 py-1.5 text-left text-xs text-neutral-300 hover:bg-white/[0.07]">{proj}</button>
+                      ))}
+                    </div>
+                  ))}
                 </div>
-                <button onClick={bulkArchive} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
-              </>
+              )}
+            </div>
+            {selectedIds.size > 0 && (
+              <button onClick={bulkArchive} className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
             )}
             <button onClick={() => {
               if (selectedIds.size > 0) bulkDelete();
