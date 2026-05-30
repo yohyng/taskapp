@@ -1326,13 +1326,28 @@ function App() {
 
   function bulkDelete() {
     const ids = [...selectedIds];
-    addSyncLog(`🗑 タスク一括削除 ${ids.length}件`);
-    ids.forEach((id) => {
-      addTombstone(TOMBSTONE_TASKS_KEY, id);
-      dbDeleteTask(id).then(() => addSyncLog(`✓ タスク DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
-    });
-    commitTasks((prev) => prev.filter((t) => !selectedIds.has(t.id)));
-    setToast(`${ids.length}件を削除しました`);
+    // プロジェクト所属タスクは Today/Weekly から外すだけ（プロジェクト側は保持）
+    // plain タスク（カテゴリなし）のみ完全削除
+    const toRemoveFromView = ids.filter((id) => taskMap.get(id)?.category);
+    const toDelete = ids.filter((id) => !taskMap.get(id)?.category);
+
+    if (toRemoveFromView.length > 0) {
+      commitTasks((prev) => prev.map((t) => toRemoveFromView.includes(t.id) ? { ...t, today: false, thisWeek: false } : t));
+    }
+    if (toDelete.length > 0) {
+      addSyncLog(`🗑 タスク一括削除 ${toDelete.length}件`);
+      toDelete.forEach((id) => {
+        addTombstone(TOMBSTONE_TASKS_KEY, id);
+        dbDeleteTask(id).then(() => addSyncLog(`✓ タスク DELETE完了 id=${id.slice(0,8)}`)).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
+      });
+      commitTasks((prev) => prev.filter((t) => !toDelete.includes(t.id)));
+    }
+    const removedCount = toRemoveFromView.length;
+    const deletedCount = toDelete.length;
+    setToast(removedCount > 0 && deletedCount > 0
+      ? `${removedCount}件をビューから除外、${deletedCount}件を削除しました`
+      : removedCount > 0 ? `${removedCount}件をTodayとWeeklyから外しました`
+      : `${deletedCount}件を削除しました`);
     exitSelectMode();
   }
 
