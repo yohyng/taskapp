@@ -1686,7 +1686,7 @@ function App() {
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
         {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl overflow-x-auto max-w-[calc(100vw-1.5rem)]">
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)]">
             <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
@@ -1705,7 +1705,7 @@ function App() {
             <div className="relative flex-shrink-0">
               <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
               {showMovePanel && (
-                <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 z-50 w-56 max-h-72 overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
+                <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-[60] w-56 max-h-72 overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
                   <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
                   <button onClick={() => { bulkToday(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📅 Today</button>
                   <button onClick={() => { bulkWeekly(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📆 Weekly</button>
