@@ -61,7 +61,7 @@ function pruneTombstones(key, remoteIdSet) {
 
 // タスクレベルのドロップゾーンをカラム全体より優先する衝突検知
 function taskFirstCollision(args) {
-  const taskTypes = ["task-in-today", "task-in-weekly", "task", "tray"];
+  const taskTypes = ["task-in-today", "task-in-weekly", "task", "tray", "today", "weekly"];
   const taskContainers = args.droppableContainers.filter(
     (c) => taskTypes.includes(c.data.current?.type)
   );
@@ -539,9 +539,13 @@ function App() {
         upsertTask({ id: src.id, parentId: null, category: droppedOn.category, project: droppedOn.project });
         setToast(`移動：${droppedOn.category} / ${droppedOn.project} の並列タスクにしました`);
       } else {
-        if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
-        upsertTask({ id: src.id, parentId: dst.id, category: droppedOn.category, project: droppedOn.project });
-        setToast(`親子化：「${droppedOn.title}」の子タスクにしました`);
+        if (isBottomHalf()) {
+          if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
+          upsertTask({ id: src.id, parentId: dst.id, category: droppedOn.category, project: droppedOn.project });
+          setToast(`親子化：「${droppedOn.title}」の子タスクにしました`);
+        } else {
+          moveProjectTask(src.id, dst.id, true);
+        }
       }
       return;
     }
@@ -1102,6 +1106,37 @@ function App() {
     setToast("Today内で上下に並び替えました");
   }
 
+  function moveProjectTask(dragId, targetId, insertBefore) {
+    if (!dragId || !targetId || dragId === targetId) return;
+    const draggedTask = taskMap.get(dragId);
+    const targetTask = taskMap.get(targetId);
+    if (!draggedTask || !targetTask) return;
+    // Get all root tasks in the same project, sorted by current sortOrder
+    const projectRoots = tasks
+      .filter((t) => t.category === targetTask.category && t.project === targetTask.project && !t.parentId && !t.archived)
+      .sort((a, b) => {
+        const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
+        const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
+        if (ao !== bo) return ao - bo;
+        return a.title.localeCompare(b.title, "ja");
+      });
+    const ids = projectRoots.map((t) => t.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const nextIds = [...ids];
+    const [movedId] = nextIds.splice(from, 1);
+    const insertAt = insertBefore ? nextIds.indexOf(targetId) : nextIds.indexOf(targetId) + 1;
+    nextIds.splice(insertAt, 0, movedId);
+    commitTasks((prev) =>
+      prev.map((task) => {
+        const index = nextIds.indexOf(task.id);
+        return index === -1 ? task : { ...task, sortOrder: index + 1 };
+      })
+    );
+    setToast("プロジェクト内で並び替えました");
+  }
+
   function handleDropOnProject(event, category, project) {
     event.preventDefault();
     const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
@@ -1187,11 +1222,25 @@ function App() {
   const MAX_DEPTH = 3;
 
   function rootTasksForProject(category, project) {
-    return tasksForCategory(category).filter((task) => task.project === project && !task.parentId);
+    return tasksForCategory(category)
+      .filter((task) => task.project === project && !task.parentId)
+      .sort((a, b) => {
+        const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
+        const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
+        if (ao !== bo) return ao - bo;
+        return a.title.localeCompare(b.title, "ja");
+      });
   }
 
   function childrenOf(parentId) {
-    return filteredTasks.filter((task) => task.parentId === parentId);
+    return filteredTasks
+      .filter((task) => task.parentId === parentId)
+      .sort((a, b) => {
+        const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
+        const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
+        if (ao !== bo) return ao - bo;
+        return a.title.localeCompare(b.title, "ja");
+      });
   }
 
   const weeklyTasks = useMemo(() => {

@@ -22,6 +22,7 @@ function taskToRow(t) {
     recurrence_day: t.recurrenceDay ?? null,
     recurrence_end: t.recurrenceEnd ?? '',
     plain: t.plain ?? false,
+    sort_order: t.sortOrder ?? null,
   }
 }
 
@@ -43,6 +44,7 @@ function rowToTask(r) {
     recurrenceDay: r.recurrence_day,
     recurrenceEnd: r.recurrence_end,
     plain: r.plain,
+    sortOrder: r.sort_order ?? null,
   }
 }
 
