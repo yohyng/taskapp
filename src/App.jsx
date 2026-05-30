@@ -506,13 +506,6 @@ function App() {
       return;
     }
 
-    // Task dropped on Today column (also covers task-in-today drop zone)
-    if (src.type === "task" && dst.type === "today") {
-      upsertTask({ id: src.id, today: true });
-      setToast("Todayに追加しました");
-      return;
-    }
-
     // Task → Project (drop on project zone or on another task in a project)
     if (src.type === "task" && dst.type === "project") {
       const task = taskMap.get(src.id);
@@ -1488,7 +1481,7 @@ function App() {
   }, []);
 
   return (
-    <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} measuring={{ draggable: { measure: (el) => el.getBoundingClientRect() } }}>
+    <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100">
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
@@ -1844,11 +1837,11 @@ function App() {
         <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
       </div>
     </div>
-    <DragOverlay adjustScale={false} dropAnimation={null}>
-      {activeDrag?.type === "task" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{taskMap.get(activeDrag.id)?.title || "…"}</div>}
-      {activeDrag?.type === "tray" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-xl opacity-90">{activeDrag.title || "…"}</div>}
-      {activeDrag?.type === "column" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-xl opacity-90">{activeDrag.label || activeDrag.key}</div>}
-      {activeDrag?.type === "project" && <div className="rounded-md border border-white/30 bg-neutral-800/90 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-xl opacity-90">{activeDrag.project}</div>}
+    <DragOverlay dropAnimation={null}>
+      {activeDrag?.type === "task" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{taskMap.get(activeDrag.id)?.title || "…"}</div>}
+      {activeDrag?.type === "tray" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{activeDrag.title || "…"}</div>}
+      {activeDrag?.type === "column" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.label || activeDrag.key}</div>}
+      {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
   );
@@ -2443,15 +2436,16 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   const isSelected = selectMode && selectedIds && selectedIds.has(task.id);
 
   // dnd-kit hooks
-  const dragType = compact ? "task" : "task";
   const { attributes: taskDragAttrs, listeners: taskDragListeners, setNodeRef: taskDragRef, isDragging } = useDraggable({
     id: `task-${task.id}`,
     data: { type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId },
     disabled: selectMode,
   });
 
-  // Drop target: task itself (for parent-child or cross-project)
-  const dropType = compact ? (task.today ? "task-in-today" : "task-in-weekly") : "task";
+  // Drop target type: compact cards in Today/Weekly get special types for routing
+  const dropType = compact
+    ? (task.today ? "task-in-today" : task.thisWeek ? "task-in-weekly" : "task")
+    : "task";
   const { setNodeRef: taskDropRef, isOver: isTaskOver } = useDroppable({
     id: `task-drop-${task.id}`,
     data: { type: dropType, id: task.id, category: task.category, project: task.project },
