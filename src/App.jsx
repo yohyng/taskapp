@@ -432,27 +432,25 @@ function App() {
     // Task → Today
     if (src.type === "task" && dst.type === "today") {
       const dragged = taskMap.get(src.id);
-      const isMove = dragged?.thisWeek && !dragged?.today;
-      upsertTask({ id: src.id, today: true, ...(isMove ? { thisWeek: false } : {}) });
-      setToast(isMove ? "WeeklyからTodayに移動しました" : "Todayに追加しました");
+      upsertTask({ id: src.id, today: true, thisWeek: false });
+      setToast(dragged?.thisWeek ? "WeeklyからTodayに移動しました" : "Todayに追加しました");
       return;
     }
 
     // Task → Weekly
     if (src.type === "task" && dst.type === "weekly") {
       const dragged = taskMap.get(src.id);
-      const isMove = dragged?.today && !dragged?.thisWeek;
       const relatedIds = [src.id, ...collectAncestorIds(src.id), ...collectDescendantIds(src.id)];
-      commitTasks((prev) => prev.map((t) => relatedIds.includes(t.id) ? { ...t, thisWeek: true, ...(isMove ? { today: false } : {}) } : t));
-      setToast(isMove ? "TodayからWeeklyに移動しました" : "親子構造ごとWeekly Taskに追加しました");
+      commitTasks((prev) => prev.map((t) => relatedIds.includes(t.id) ? { ...t, thisWeek: true, today: false } : t));
+      setToast(dragged?.today ? "TodayからWeeklyに移動しました" : "親子構造ごとWeekly Taskに追加しました");
       return;
     }
 
     // Task reorder / parent-child within Today
     if (src.type === "task" && dst.type === "task-in-today" && src.id !== dst.id) {
       const dragged = taskMap.get(src.id);
-      // Weekly タスクを Today タスクにドロップ → Today に移動
-      if (dragged?.thisWeek && !dragged?.today) {
+      // Weekly タスクを Today タスクにドロップ → Today に移動（排他）
+      if (dragged?.thisWeek) {
         upsertTask({ id: src.id, today: true, thisWeek: false });
         setToast("WeeklyからTodayに移動しました");
         return;
@@ -481,8 +479,8 @@ function App() {
     // Task reorder / parent-child within Weekly
     if (src.type === "task" && dst.type === "task-in-weekly" && src.id !== dst.id) {
       const dragged = taskMap.get(src.id);
-      // Today タスクを Weekly タスクにドロップ → Weekly に移動
-      if (dragged?.today && !dragged?.thisWeek) {
+      // Today タスクを Weekly タスクにドロップ → Weekly に移動（排他）
+      if (dragged?.today) {
         upsertTask({ id: src.id, thisWeek: true, today: false });
         setToast("TodayからWeeklyに移動しました");
         return;
