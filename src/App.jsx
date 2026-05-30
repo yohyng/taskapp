@@ -468,7 +468,8 @@ function App() {
         const target = taskMap.get(dst.id);
         if (target && dragged && target.parentId !== src.id) {
           if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
-          upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
+          // Today内では category/project は変えず parentId のみ変更
+          upsertTask({ id: src.id, parentId: dst.id });
           setToast(`親子化：「${target.title}」の子タスクにしました`);
           return;
         }
@@ -497,7 +498,8 @@ function App() {
         const target = taskMap.get(dst.id);
         if (target && dragged && target.parentId !== src.id) {
           if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
-          upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project });
+          // Weekly内では category/project は変えず parentId のみ変更
+          upsertTask({ id: src.id, parentId: dst.id });
           setToast(`親子化：「${target.title}」の子タスクにしました`);
           return;
         }
@@ -1030,21 +1032,33 @@ function App() {
 
   function moveWeeklyTask(dragId, targetId) {
     if (!dragId || !targetId || dragId === targetId) return;
-    const weeklyList = weeklyTasks.map((task) => task.id);
-    const from = weeklyList.indexOf(dragId);
-    const to = weeklyList.indexOf(targetId);
-    if (from < 0 || to < 0) return;
-
-    const nextIds = [...weeklyList];
-    const [moved] = nextIds.splice(from, 1);
-    nextIds.splice(to, 0, moved);
-
-    commitTasks((prev) =>
-      prev.map((task) => {
+    // ルートのみ並び替え（子タスクの weeklyOrder は触らない）
+    const rootList = weeklyRoots.map((task) => task.id);
+    const from = rootList.indexOf(dragId);
+    const to = rootList.indexOf(targetId);
+    if (from < 0 || to < 0) {
+      // どちらかが子タスク → フラットリスト全体で並び替え
+      const weeklyList = weeklyTasks.map((task) => task.id);
+      const fi = weeklyList.indexOf(dragId);
+      const ti = weeklyList.indexOf(targetId);
+      if (fi < 0 || ti < 0) return;
+      const nextIds = [...weeklyList];
+      const [moved] = nextIds.splice(fi, 1);
+      nextIds.splice(ti, 0, moved);
+      commitTasks((prev) => prev.map((task) => {
         const index = nextIds.indexOf(task.id);
         return index === -1 ? task : { ...task, weeklyOrder: index + 1 };
-      })
-    );
+      }));
+    } else {
+      const nextIds = [...rootList];
+      const [moved] = nextIds.splice(from, 1);
+      nextIds.splice(to, 0, moved);
+      // ルートだけ weeklyOrder を振り直す（子タスクは変えない）
+      commitTasks((prev) => prev.map((task) => {
+        const index = nextIds.indexOf(task.id);
+        return index === -1 ? task : { ...task, weeklyOrder: index + 1 };
+      }));
+    }
     setToast("Weekly内で上下に並び替えました");
   }
 
@@ -2468,7 +2482,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 ) : (
                   <span>{NO_CATEGORY_LABEL}</span>
                 )}
-                {parent && <span>・親: {parent.title}</span>}
                 {task.dueDate && <span>・{task.dueDate}</span>}
               </div>
             )}
