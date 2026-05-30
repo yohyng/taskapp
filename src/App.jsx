@@ -1772,6 +1772,12 @@ function TodayColumn({
 }) {
   const [draft, setDraft] = useState("");
   const { setNodeRef: todayDropRef, isOver: isTodayOver } = useDroppable({ id: "today-column", data: { type: "today" } });
+  // プロジェクト側にもあるタスク（category あり）はTodayから外すだけ。plainタスクは本当に削除
+  function removeTodayTask(id) {
+    const t = taskMap.get(id);
+    if (t && t.category) { upsertTask({ id, today: false }); }
+    else { removeTask(id); }
+  }
 
   function submitDraft() {
     const title = draft.trim();
@@ -1818,7 +1824,7 @@ function TodayColumn({
                   collapsed={collapsed}
                   setCollapsed={setCollapsed}
                   upsertTask={upsertTask}
-                  removeTask={removeTask}
+                  removeTask={removeTodayTask}
                   toggleDone={toggleDone}
                   toggleWeek={toggleWeek}
                   selectedTaskId={selectedTaskId}
@@ -1866,6 +1872,12 @@ function WeeklyColumn({
   const [draft, setDraft] = useState("");
   const { setNodeRef: weeklyDropRef, isOver: isWeeklyOver } = useDroppable({ id: `weekly-column-${className || "main"}`, data: { type: "weekly" } });
 
+  function removeWeeklyTask(id) {
+    const t = taskMap.get(id);
+    if (t && t.category) { upsertTask({ id, thisWeek: false }); }
+    else { removeTask(id); }
+  }
+
   function submitDraft() {
     const title = draft.trim();
     if (!title) return;
@@ -1902,7 +1914,7 @@ function WeeklyColumn({
             <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
           </div>
           <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
             {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
           </div>
         </div>
