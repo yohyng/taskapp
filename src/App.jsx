@@ -851,6 +851,7 @@ function App() {
       plain: isPlain,
       ...patch,
     });
+    addTombstone(TOMBSTONE_TRAY_KEY, id);
     commitState((current) => ({
       ...current,
       tasks: [newTask, ...current.tasks],
