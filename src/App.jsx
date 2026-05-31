@@ -331,7 +331,13 @@ function App() {
   const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
   const [quickProject, setQuickProject] = useState("空間シンクタンク");
   const [collapsed, setCollapsed] = useState({});
-  const [toast, setToast] = useState("");
+  const [toast, setToastRaw] = useState("");
+  const toastTimer = useRef(null);
+  function setToast(msg) {
+    setToastRaw(msg);
+    clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToastRaw(""), 3000);
+  }
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
@@ -1834,7 +1840,7 @@ function App() {
             <button onClick={exitSelectMode} className="flex-shrink-0 ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
           </div>
         )}
-        <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>
+        {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
     </div>
     <DragOverlay dropAnimation={null}>
