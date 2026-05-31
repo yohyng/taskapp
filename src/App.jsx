@@ -1562,9 +1562,16 @@ function App() {
 
                   <div className="border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">アーカイブ</div>
-                    <button onClick={() => { archiveAll(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
-                      完了タスクをすべてアーカイブ
-                    </button>
+                    <div className="flex flex-col gap-1.5">
+                      <button onClick={() => { archiveAll(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
+                        完了タスクをすべてアーカイブ
+                      </button>
+                      {selectedIds.size > 0 && (
+                        <button onClick={() => { bulkArchive(); setShowSettingsPanel(false); }} className="w-full rounded border border-violet-400/25 bg-violet-500/10 px-2 py-1.5 text-left text-xs text-violet-200 transition hover:bg-violet-500/20">
+                          選択中の{selectedIds.size}件をアーカイブ
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 border-t border-white/10 pt-3">
@@ -1830,9 +1837,6 @@ function App() {
                 </div>
               )}
             </div>
-            {selectedIds.size > 0 && (
-              <button onClick={bulkArchive} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Archive</button>
-            )}
             <button onClick={() => {
               if (selectedIds.size > 0) bulkDelete();
               if (selectedTrayIds.size > 0) bulkTrayDelete();
