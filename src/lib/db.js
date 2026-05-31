@@ -219,6 +219,13 @@ export async function upsertTaskRow(task) {
   return error
 }
 
+export async function upsertTrayRow(item, index = 0) {
+  if (!isSupabaseEnabled) return null
+  const { error } = await supabase.from('tray_items').upsert(trayToRow(item, index), { onConflict: 'id' })
+  if (error) console.error('[db] upsertTrayRow error', error, trayToRow(item, index))
+  return error
+}
+
 // --- Realtime subscription ---
 
 export function subscribeRealtime({ onTaskChange, onTrayChange, onCategoryChange, onProjectRuleChange, onProjectOrderChange, onStatusChange }) {

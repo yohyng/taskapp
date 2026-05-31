@@ -12,7 +12,7 @@ import {
   rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -909,12 +909,24 @@ function App() {
     upsertTask({ id: task.id, status: task.status === "完了" ? "未着手" : "完了" });
   }
 
+  // plainタスクをTRAYに戻す（Supabase即時反映）
+  function returnTaskToTray(task) {
+    const newItem = { id: uid(), title: task.title, source: "Local Tray", createdAt: toDateKey(new Date()) };
+    addTombstone(TOMBSTONE_TASKS_KEY, task.id);
+    commitState((current) => ({
+      ...current,
+      tasks: (current.tasks || []).filter((t) => t.id !== task.id),
+      inboxItems: [newItem, ...(current.inboxItems || [])],
+    }));
+    dbDeleteTask(task.id);
+    dbUpsertTrayRow(newItem);
+    setToast("TRAYに戻しました");
+  }
+
   function toggleWeek(task) {
     const nextValue = !task.thisWeek;
     if (!nextValue && task.plain) {
-      addInboxItem(task.title);
-      removeTask(task.id);
-      setToast("TRAYに戻しました");
+      returnTaskToTray(task);
       return;
     }
     const relatedIds = nextValue
@@ -927,9 +939,7 @@ function App() {
   function toggleToday(task) {
     const nextValue = !task.today;
     if (!nextValue && task.plain) {
-      addInboxItem(task.title);
-      removeTask(task.id);
-      setToast("TRAYに戻しました");
+      returnTaskToTray(task);
       return;
     }
     const relatedIds = nextValue
@@ -1735,6 +1745,7 @@ function App() {
                 handleDropOnToday={handleDropOnToday}
                 moveTodayTask={moveTodayTask}
                 acceptInboxItem={acceptInboxItem}
+                returnTaskToTray={returnTaskToTray}
                 defaultCategory={quickCategory}
                 defaultProject={quickProject}
                 addTask={addTask}
@@ -1763,6 +1774,7 @@ function App() {
                 moveWeeklyTask={moveWeeklyTask}
                 addTask={addTask}
                 addInboxItem={addInboxItem}
+                returnTaskToTray={returnTaskToTray}
                 selectMode={selectMode}
                 selectedIds={selectedIds}
                 onToggleSelect={onToggleSelect}
@@ -1794,6 +1806,7 @@ function App() {
             moveWeeklyTask={moveWeeklyTask}
             addTask={addTask}
             addInboxItem={addInboxItem}
+            returnTaskToTray={returnTaskToTray}
             selectMode={selectMode}
             selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
@@ -1887,6 +1900,7 @@ function TodayColumn({
   handleDropOnToday,
   moveTodayTask,
   acceptInboxItem,
+  returnTaskToTray,
   defaultCategory,
   defaultProject,
   addTask,
@@ -1897,11 +1911,11 @@ function TodayColumn({
 }) {
   const [draft, setDraft] = useState("");
   const { setNodeRef: todayDropRef, isOver: isTodayOver } = useDroppable({ id: "today-column", data: { type: "today" } });
-  // プロジェクト側にもあるタスク（category あり）はTodayから外すだけ。plainタスクは本当に削除
+  // プロジェクト側にもあるタスクはTodayから外すだけ。plainタスクはTRAYに戻す
   function removeTodayTask(id) {
     const t = taskMap.get(id);
     if (t && !t.plain) { upsertTask({ id, today: false }); }
-    else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
+    else if (t) { returnTaskToTray(t); }
   }
 
   function submitDraft() {
@@ -1992,6 +2006,7 @@ function WeeklyColumn({
   moveWeeklyTask,
   addTask,
   addInboxItem,
+  returnTaskToTray,
   selectMode,
   selectedIds,
   onToggleSelect,
@@ -2002,7 +2017,7 @@ function WeeklyColumn({
   function removeWeeklyTask(id) {
     const t = taskMap.get(id);
     if (t && !t.plain) { upsertTask({ id, thisWeek: false }); }
-    else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
+    else if (t) { returnTaskToTray(t); }
   }
 
   function submitDraft() {
