@@ -1820,22 +1820,6 @@ function App() {
             }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
             <div className="relative flex-shrink-0">
               <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
-              {showMovePanel && (
-                <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-[60] w-56 max-h-72 overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
-                  <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
-                  <button onClick={() => { bulkToday(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📅 Today</button>
-                  <button onClick={() => { bulkWeekly(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📆 Weekly</button>
-                  <div className="my-1 border-t border-white/10" />
-                  {categories.map((cat) => (
-                    <div key={cat.key}>
-                      <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-500">{cat.label}</div>
-                      {(projectsByCategory[cat.key] || []).map((proj) => (
-                        <button key={proj} onClick={() => bulkMoveTo(cat.key, proj)} className="w-full rounded-lg px-3 py-1.5 text-left text-xs text-neutral-300 hover:bg-white/[0.07]">{proj}</button>
-                      ))}
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
             <button onClick={() => {
               if (selectedIds.size > 0) bulkDelete();
@@ -1843,6 +1827,22 @@ function App() {
             }} className="flex-shrink-0 rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
             <button onClick={exitSelectMode} className="flex-shrink-0 ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
           </div>
+          {showMovePanel && (
+            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
+              <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
+              <button onClick={() => { bulkToday(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📅 Today</button>
+              <button onClick={() => { bulkWeekly(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📆 Weekly</button>
+              <div className="my-1 border-t border-white/10" />
+              {categories.map((cat) => (
+                <div key={cat.key}>
+                  <div className="px-2 pt-1.5 pb-0.5 text-[10px] font-semibold text-neutral-500">{cat.label}</div>
+                  {(projectsByCategory[cat.key] || []).map((proj) => (
+                    <button key={proj} onClick={() => bulkMoveTo(cat.key, proj)} className="w-full rounded-lg px-3 py-1.5 text-left text-xs text-neutral-300 hover:bg-white/[0.07]">{proj}</button>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
         )}
         {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
