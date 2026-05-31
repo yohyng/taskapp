@@ -208,6 +208,11 @@ export async function deleteTrayItem(id) {
   await supabase.from('tray_items').delete().eq('id', id)
 }
 
+export async function upsertTaskRow(task) {
+  if (!isSupabaseEnabled) return
+  await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
+}
+
 // --- Realtime subscription ---
 
 export function subscribeRealtime({ onTaskChange, onTrayChange, onCategoryChange, onProjectRuleChange, onProjectOrderChange, onStatusChange }) {

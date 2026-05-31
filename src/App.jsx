@@ -12,7 +12,7 @@ import {
   rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -857,6 +857,9 @@ function App() {
       tasks: [newTask, ...current.tasks],
       inboxItems: (current.inboxItems || []).filter((entry) => entry.id !== id),
     }));
+    // Supabaseに即時反映（debounce待ちで消えないよう）
+    dbDeleteTrayItem(id);
+    dbUpsertTaskRow(newTask);
     if (options.selectAfter) setSelectedTaskId(newTask.id);
     setToast(isPlain ? "カテゴリなしタスクとして追加しました" : `${category} / ${project} に受け入れました`);
     return newTask;
