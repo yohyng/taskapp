@@ -1516,7 +1516,7 @@ function App() {
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
               {showSettingsPanel && (
-                <div className="absolute right-0 top-full z-50 mt-1 w-64 rounded-lg border border-white/15 bg-neutral-900 p-3 shadow-2xl max-h-[80vh] overflow-y-auto">
+                <div className="fixed right-2 top-14 z-50 w-72 rounded-lg border border-white/15 bg-neutral-900 p-3 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto md:absolute md:right-0 md:top-full md:mt-1 md:w-64 md:max-h-[80vh]">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="text-xs font-semibold text-neutral-200">Settings</span>
                     <button onClick={() => setShowSettingsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-3.5 w-3.5" /></button>
