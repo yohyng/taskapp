@@ -787,7 +787,9 @@ function App() {
   }, [history, tasks, categories, selectedIds, selectedTrayIds]);
 
   function upsertTask(patch) {
-    commitTasks((prev) => prev.map((task) => (task.id === patch.id ? normalizeTask({ ...task, ...patch }) : task)));
+    // categoryとprojectが設定されたらplainを自動でfalseに
+    const resolved = (patch.category || patch.project) ? { plain: false, ...patch } : patch;
+    commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
   function addTask({ title, category, project, parentId = null, thisWeek = false, dueDate = "" }) {
