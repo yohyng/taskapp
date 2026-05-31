@@ -838,15 +838,18 @@ function App() {
     const item = inboxItems.find((entry) => entry.id === id);
     if (!item) return;
     const isPlain = !category && !project;
+    // plain taskもSupabaseに保存できるよう実際のcategoryを割り当てる（プロジェクト列表示はplain:trueでフィルタ）
+    const resolvedCategory = isPlain ? (categories[0]?.key || "NOMLAB") : category;
+    const resolvedProject = isPlain ? "未分類" : project;
     const newTask = normalizeTask({
       id: uid(),
       title: item.title,
-      category,
-      project,
+      category: resolvedCategory,
+      project: resolvedProject,
       status: "未着手",
       thisWeek: false,
       parentId: null,
-      memo: isPlain ? `Plain task from ${item.source || "Inbox"}` : `Imported from ${item.source || "Inbox"}`,
+      memo: "",
       dueDate: "",
       plain: isPlain,
       ...patch,
@@ -903,8 +906,7 @@ function App() {
 
   function toggleWeek(task) {
     const nextValue = !task.thisWeek;
-    if (!nextValue && !task.category) {
-      // plain タスクを Weekly から外す → TRAY に戻す
+    if (!nextValue && task.plain) {
       addInboxItem(task.title);
       removeTask(task.id);
       setToast("TRAYに戻しました");
@@ -919,8 +921,7 @@ function App() {
 
   function toggleToday(task) {
     const nextValue = !task.today;
-    if (!nextValue && !task.category) {
-      // plain タスクを Today から外す → TRAY に戻す
+    if (!nextValue && task.plain) {
       addInboxItem(task.title);
       removeTask(task.id);
       setToast("TRAYに戻しました");
@@ -1226,7 +1227,7 @@ function App() {
 
   function rootTasksForProject(category, project) {
     return tasksForCategory(category)
-      .filter((task) => task.project === project && !task.parentId)
+      .filter((task) => task.project === project && !task.parentId && !task.plain)
       .sort((a, b) => {
         const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
         const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
@@ -1894,7 +1895,7 @@ function TodayColumn({
   // プロジェクト側にもあるタスク（category あり）はTodayから外すだけ。plainタスクは本当に削除
   function removeTodayTask(id) {
     const t = taskMap.get(id);
-    if (t && t.category) { upsertTask({ id, today: false }); }
+    if (t && !t.plain) { upsertTask({ id, today: false }); }
     else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
   }
 
@@ -1995,7 +1996,7 @@ function WeeklyColumn({
 
   function removeWeeklyTask(id) {
     const t = taskMap.get(id);
-    if (t && t.category) { upsertTask({ id, thisWeek: false }); }
+    if (t && !t.plain) { upsertTask({ id, thisWeek: false }); }
     else if (t) { addInboxItem(t.title); removeTask(id); setToast("TRAYに戻しました"); }
   }
 
