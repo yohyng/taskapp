@@ -1439,7 +1439,7 @@ function App() {
   }
 
   function bulkMoveProject(category, project) {
-    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null } : t));
+    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null, plain: false } : t));
     setToast(`${selectedIds.size}件を ${category} / ${project} に移動しました`);
     exitSelectMode();
   }
@@ -1448,7 +1448,7 @@ function App() {
     const trayIds = [...selectedTrayIds];
     const taskCount = selectedIds.size;
     const trayCount = trayIds.length;
-    if (taskCount > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null } : t));
+    if (taskCount > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, category, project, parentId: null, plain: false } : t));
     if (trayCount > 0) {
       trayIds.forEach((id) => {
         const item = inboxItems.find((i) => i.id === id);
