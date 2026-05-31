@@ -840,14 +840,11 @@ function App() {
     const item = inboxItems.find((entry) => entry.id === id);
     if (!item) return;
     const isPlain = !category && !project;
-    // plain taskもSupabaseに保存できるよう実際のcategoryを割り当てる（プロジェクト列表示はplain:trueでフィルタ）
-    const resolvedCategory = isPlain ? (categories[0]?.key || "NOMLAB") : category;
-    const resolvedProject = isPlain ? "未分類" : project;
     const newTask = normalizeTask({
       id: uid(),
       title: item.title,
-      category: resolvedCategory,
-      project: resolvedProject,
+      category,
+      project,
       status: "未着手",
       thisWeek: false,
       parentId: null,
