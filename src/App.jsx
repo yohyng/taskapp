@@ -1702,6 +1702,7 @@ function App() {
                   removeInboxItem={removeInboxItem}
                   moveInboxItem={moveInboxItem}
                   addInboxItem={addInboxItem}
+                  acceptInboxItem={acceptInboxItem}
                   selectMode={selectMode}
                   selectedTrayIds={selectedTrayIds}
                   onToggleTraySelect={onToggleTraySelect}
@@ -2039,7 +2040,7 @@ function WeeklyColumn({
   );
 }
 
-function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
+function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
@@ -2082,6 +2083,7 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
                   updateInboxItem={updateInboxItem}
                   removeInboxItem={removeInboxItem}
                   moveInboxItem={moveInboxItem}
+                  acceptInboxItem={acceptInboxItem}
                   selectMode={selectMode}
                   isSelected={selectedTrayIds && selectedTrayIds.has(item.id)}
                   onToggleSelect={onToggleTraySelect}
@@ -2095,7 +2097,7 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
   );
 }
 
-function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
+function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
 
@@ -2193,11 +2195,13 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, selec
               {item.title}
             </div>
           )}
-          <div className="mt-1 text-[10px] text-neutral-600">{item.source} / {item.createdAt}</div>
         </div>
-      </div>
-      <div className="mt-2 flex items-center justify-end gap-1">
-        <span className="text-[10px] text-neutral-600">drag to project / reorder</span>
+        {!selectMode && (
+          <div className="flex shrink-0 gap-1">
+            <button onClick={(e) => { e.stopPropagation(); acceptInboxItem(item.id, "", "", { today: true, plain: true }); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-neutral-500 transition hover:border-cyan-300/30 hover:bg-cyan-300/15 hover:text-cyan-100">今日</button>
+            <button onClick={(e) => { e.stopPropagation(); acceptInboxItem(item.id, "", "", { thisWeek: true, plain: true }); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-neutral-500 transition hover:border-amber-300/30 hover:bg-amber-300/15 hover:text-amber-100">週</button>
+          </div>
+        )}
       </div>
     </div>
   );
