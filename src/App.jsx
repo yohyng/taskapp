@@ -922,7 +922,7 @@ function App() {
 
   function toggleWeek(task) {
     const nextValue = !task.thisWeek;
-    if (!nextValue && task.plain) {
+    if (!nextValue && (task.plain || !task.category)) {
       returnTaskToTray(task);
       return;
     }
@@ -935,7 +935,7 @@ function App() {
 
   function toggleToday(task) {
     const nextValue = !task.today;
-    if (!nextValue && task.plain) {
+    if (!nextValue && (task.plain || !task.category)) {
       returnTaskToTray(task);
       return;
     }
@@ -1911,7 +1911,7 @@ function TodayColumn({
   // プロジェクト側にもあるタスクはTodayから外すだけ。plainタスクはTRAYに戻す
   function removeTodayTask(id) {
     const t = taskMap.get(id);
-    if (t && !t.plain) { upsertTask({ id, today: false }); }
+    if (t && !t.plain && t.category) { upsertTask({ id, today: false }); }
     else if (t) { returnTaskToTray(t); }
   }
 
@@ -2013,7 +2013,7 @@ function WeeklyColumn({
 
   function removeWeeklyTask(id) {
     const t = taskMap.get(id);
-    if (t && !t.plain) { upsertTask({ id, thisWeek: false }); }
+    if (t && !t.plain && t.category) { upsertTask({ id, thisWeek: false }); }
     else if (t) { returnTaskToTray(t); }
   }
 
