@@ -1802,6 +1802,7 @@ function App() {
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
         {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
+          <>
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
             <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
@@ -1843,6 +1844,7 @@ function App() {
               ))}
             </div>
           )}
+          </>
         )}
         {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
