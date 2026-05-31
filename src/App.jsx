@@ -575,7 +575,9 @@ function App() {
         const deletedTaskIds = [...getTombstoneSet(TOMBSTONE_TASKS_KEY)]
         const deletedTrayIds = [...getTombstoneSet(TOMBSTONE_TRAY_KEY)]
         if (deletedTaskIds.length || deletedTrayIds.length) addSyncLog(`💾 保存時削除 task:${deletedTaskIds.length}件 tray:${deletedTrayIds.length}件`)
-        saveToSupabase({ ...data, deletedTaskIds, deletedTrayIds })
+        saveToSupabase({ ...data, deletedTaskIds, deletedTrayIds }).then((err) => {
+          if (err) addSyncLog(`❌ 保存エラー: ${err}`);
+        })
       }, 1500);
     }
   }, [tasks, categories, projectRules, projectOrder, inboxItems]);
@@ -862,7 +864,10 @@ function App() {
     }));
     // Supabaseに即時反映（debounce待ちで消えないよう）
     dbDeleteTrayItem(id);
-    dbUpsertTaskRow(newTask);
+    dbUpsertTaskRow(newTask).then((err) => {
+      if (err) addSyncLog(`❌ タスク保存失敗: ${err.message || JSON.stringify(err)}`);
+      else addSyncLog(`💾 タスク即時保存 id=${newTask.id.slice(0,8)}`);
+    });
     if (options.selectAfter) setSelectedTaskId(newTask.id);
     setToast(isPlain ? "カテゴリなしタスクとして追加しました" : `${category} / ${project} に受け入れました`);
     return newTask;

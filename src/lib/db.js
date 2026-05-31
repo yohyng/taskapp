@@ -175,24 +175,28 @@ export async function saveToSupabase({ tasks, categories, projectRules, projectO
       projects,
     }))
 
-    const promises = [
+    const results = await Promise.all([
       supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' }),
       supabase.from('categories').upsert(categories.map(categoryToRow), { onConflict: 'id' }),
       supabase.from('project_rules').upsert(projectRulesToRows(projectRules), { onConflict: 'id' }),
       supabase.from('project_order').upsert(orderRows, { onConflict: 'category' }),
       supabase.from('tray_items').upsert(inboxItems.map(trayToRow), { onConflict: 'id' }),
-    ]
+    ])
+    const labels = ['tasks', 'categories', 'project_rules', 'project_order', 'tray_items']
+    const errors = []
+    results.forEach((r, i) => { if (r.error) { console.error(`[db] save error (${labels[i]})`, r.error); errors.push(`${labels[i]}: ${r.error.message}`) } })
     if (deletedTaskIds.length) {
       console.log('[db] deleting tombstoned tasks', deletedTaskIds)
-      promises.push(supabase.from('tasks').delete().in('id', deletedTaskIds))
+      await supabase.from('tasks').delete().in('id', deletedTaskIds)
     }
     if (deletedTrayIds.length) {
       console.log('[db] deleting tombstoned tray items', deletedTrayIds)
-      promises.push(supabase.from('tray_items').delete().in('id', deletedTrayIds))
+      await supabase.from('tray_items').delete().in('id', deletedTrayIds)
     }
-    await Promise.all(promises)
+    return errors.length ? errors.join(' / ') : null
   } catch (err) {
     console.error('[db] Supabase save exception', err)
+    return String(err)
   }
 }
 
@@ -209,8 +213,10 @@ export async function deleteTrayItem(id) {
 }
 
 export async function upsertTaskRow(task) {
-  if (!isSupabaseEnabled) return
-  await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
+  if (!isSupabaseEnabled) return null
+  const { error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
+  if (error) console.error('[db] upsertTaskRow error', error, taskToRow(task))
+  return error
 }
 
 // --- Realtime subscription ---
