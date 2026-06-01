@@ -844,7 +844,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = true }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
