@@ -844,7 +844,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = true }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -864,7 +864,7 @@ function App() {
       dueDate,
     });
     commitTasks((prev) => [newTask, ...prev]);
-    setSelectedTaskId(newTask.id);
+    if (select) setSelectedTaskId(newTask.id);
     setToast(parent ? "子タスクを追加：親のCategory / Projectを継承しました" : "タスクを追加しました");
     return newTask;
   }
@@ -1975,7 +1975,7 @@ function TodayColumn({
   function submitDraft() {
     const title = draft.trim();
     if (!title) return;
-    addTask({ title, category: "", project: "", today: true, plain: true });
+    addTask({ title, category: "", project: "", today: true, plain: true, select: false });
     setDraft("");
   }
 
@@ -2077,7 +2077,7 @@ function WeeklyColumn({
   function submitDraft() {
     const title = draft.trim();
     if (!title) return;
-    addTask({ title, category: "", project: "", thisWeek: true, plain: true });
+    addTask({ title, category: "", project: "", thisWeek: true, plain: true, select: false });
     setDraft("");
   }
 
