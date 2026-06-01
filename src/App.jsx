@@ -350,6 +350,7 @@ function App() {
   const [notionSyncing, setNotionSyncing] = useState(false);
   const [notionLastSync, setNotionLastSync] = useState(() => localStorage.getItem("taskspace-notion-last-sync") || "");
   const [notionError, setNotionError] = useState(null);
+  const [notionAutoSync, setNotionAutoSync] = useState(() => localStorage.getItem("taskspace-notion-auto") !== "off");
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
@@ -1370,15 +1371,15 @@ function App() {
     ? weeklyTasks
     : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
 
-  async function syncNotion() {
+  async function syncNotion({ silent = false } = {}) {
     if (!notionToken || !notionDbId) {
-      setToast("Notion Token と DB ID を設定してください");
+      if (!silent) setToast("Notion Token と DB ID を設定してください");
       return;
     }
     setNotionSyncing(true);
     setNotionError(null);
     const cleanDbId = notionDbId.replace(/-/g, "").match(/[0-9a-f]{32}/i)?.[0] || notionDbId.replace(/-/g, "");
-    addSyncLog(`📤 Notion同期開始 db=${cleanDbId.slice(0, 8)}…`);
+    addSyncLog(`📤 Notion同期開始${silent ? "（自動）" : ""} db=${cleanDbId.slice(0, 8)}…`);
     try {
       const res = await fetch("/api/notion-sync", {
         method: "POST",
@@ -1397,7 +1398,7 @@ function App() {
         setNotionError(detail);
         addSyncLog(`❌ Notion失敗 [${detail.stage}] ${detail.status} ${detail.code}: ${detail.message}`);
         if (detail.hint) addSyncLog(`💡 ${detail.hint}`);
-        setToast(`Notion同期エラー (${detail.status})`);
+        if (!silent) setToast(`Notion同期エラー (${detail.status})`);
         return;
       }
 
@@ -1414,7 +1415,7 @@ function App() {
           }));
         if (newItems.length === 0) {
           addSyncLog(`✅ Notion取得 ${data.count ?? 0}件（新規なし）`);
-          setToast("新しいNotionページはありませんでした");
+          if (!silent) setToast("新しいNotionページはありませんでした");
           return prev;
         }
         addSyncLog(`✅ Notion取得 ${data.count ?? 0}件 → 新規${newItems.length}件をTRAYへ`);
@@ -1428,11 +1429,24 @@ function App() {
     } catch (err) {
       setNotionError({ stage: "network", status: 0, code: "", message: err.message, hint: "アプリからAPIへの通信に失敗しました" });
       addSyncLog(`❌ Notion通信エラー: ${err.message}`);
-      setToast(`Notion同期エラー: ${err.message}`);
+      if (!silent) setToast(`Notion同期エラー: ${err.message}`);
     } finally {
       setNotionSyncing(false);
     }
   }
+
+  // 最新の syncNotion を ref に保持（interval のクロージャ陳腐化を防ぐ）
+  const syncNotionRef = useRef(syncNotion);
+  syncNotionRef.current = syncNotion;
+
+  // 自動同期: 起動時に1回 ＋ 5分ごと（トークン/DB設定済み かつ ONのとき）
+  useEffect(() => {
+    if (!notionAutoSync || !notionToken || !notionDbId) return;
+    const run = () => syncNotionRef.current?.({ silent: true });
+    run();
+    const interval = setInterval(run, 5 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [notionAutoSync, notionToken, notionDbId]);
 
   function exitSelectMode() {
     setSelectMode(false);
@@ -1740,12 +1754,22 @@ function App() {
                       className="mb-1.5 w-full rounded border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] outline-none placeholder:text-neutral-600"
                     />
                     <button
-                      onClick={syncNotion}
+                      onClick={() => syncNotion()}
                       disabled={notionSyncing}
                       className="w-full rounded border border-neutral-400/20 bg-neutral-500/10 px-2 py-1.5 text-xs text-neutral-300 transition hover:bg-neutral-500/20 disabled:opacity-50"
                     >
-                      {notionSyncing ? "同期中…" : "TRAYに同期"}
+                      {notionSyncing ? "同期中…" : "今すぐTRAYに同期"}
                     </button>
+
+                    <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] text-neutral-500">
+                      <input
+                        type="checkbox"
+                        checked={notionAutoSync}
+                        onChange={(e) => { setNotionAutoSync(e.target.checked); localStorage.setItem("taskspace-notion-auto", e.target.checked ? "on" : "off"); }}
+                        className="h-3 w-3 accent-neutral-400"
+                      />
+                      自動同期（起動時＋5分ごと）
+                    </label>
 
                     {notionError && (
                       <div className="mt-2 rounded border border-red-500/30 bg-red-500/10 p-2 text-[10px] leading-relaxed text-red-200">
