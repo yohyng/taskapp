@@ -26,7 +26,7 @@ function taskToRow(t) {
   }
 }
 
-function rowToTask(r) {
+export function rowToTask(r) {
   return {
     id: r.id,
     title: r.title,
@@ -105,8 +105,8 @@ function trayToRow(item, index) {
   }
 }
 
-function rowToTray(r) {
-  return { id: r.id, title: r.title, source: r.source, createdAt: r.created_at }
+export function rowToTray(r) {
+  return { id: r.id, title: r.title, source: r.source, createdAt: r.created_at, sortOrder: r.sort_order ?? null }
 }
 
 // --- localStorage helpers ---

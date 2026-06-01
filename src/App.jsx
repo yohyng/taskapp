@@ -12,7 +12,7 @@ import {
   rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -633,32 +633,55 @@ function App() {
   // Realtime: 他デバイスの変更を即時反映
   useEffect(() => {
     const unsubscribe = subscribeRealtime({
-      onTaskChange: () => {
+      // 変更のあった「その行だけ」を画面に反映（全件読み直しせずチラつきを防ぐ）
+      onTaskChange: (payload) => {
         if (!supabaseReadyRef.current) return;
-        addSyncLog('📡 Realtime: タスク変更受信');
-        loadFromSupabase().then((remote) => {
-          if (remote?.tasks !== undefined) {
-            const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
-            const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
-            pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
-            const applied = (remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask);
-            setTasks(applied);
-            rememberSynced(applied, null);
-          }
+        if (payload?.eventType === 'DELETE') {
+          const id = payload.old?.id;
+          if (!id) return;
+          addSyncLog('📡 Realtime: タスク削除受信');
+          setTasks((prev) => prev.filter((t) => t.id !== id));
+          syncedTasksRef.current.delete(id);
+          return;
+        }
+        const row = payload?.new;
+        if (!row) return;
+        if (getTombstoneSet(TOMBSTONE_TASKS_KEY).has(row.id)) return; // 自分が削除済みなら無視
+        const incoming = normalizeTask(rowToTask(row));
+        addSyncLog('📡 Realtime: タスク更新受信');
+        setTasks((prev) => {
+          const idx = prev.findIndex((t) => t.id === incoming.id);
+          if (idx === -1) return [incoming, ...prev];
+          const next = [...prev]; next[idx] = incoming; return next;
         });
+        syncedTasksRef.current.set(incoming.id, sig(incoming));
       },
-      onTrayChange: () => {
+      onTrayChange: (payload) => {
         if (!supabaseReadyRef.current) return;
-        addSyncLog('📡 Realtime: TRAY変更受信');
-        loadFromSupabase().then((remote) => {
-          if (remote?.inboxItems !== undefined) {
-            const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
-            const remoteTrayIds = new Set((remote.inboxItems || []).map(i => i.id))
-            pruneTombstones(TOMBSTONE_TRAY_KEY, remoteTrayIds)
-            const appliedTray = (remote.inboxItems || []).filter(i => !deletedTray.has(i.id));
-            setInboxItems(appliedTray);
-            rememberSynced(null, appliedTray);
-          }
+        if (payload?.eventType === 'DELETE') {
+          const id = payload.old?.id;
+          if (!id) return;
+          addSyncLog('📡 Realtime: TRAY削除受信');
+          setInboxItems((prev) => prev.filter((i) => i.id !== id));
+          syncedTrayRef.current.delete(id);
+          return;
+        }
+        const row = payload?.new;
+        if (!row) return;
+        if (getTombstoneSet(TOMBSTONE_TRAY_KEY).has(row.id)) return;
+        const incoming = rowToTray(row);
+        addSyncLog('📡 Realtime: TRAY更新受信');
+        setInboxItems((prev) => {
+          const idx = prev.findIndex((i) => i.id === incoming.id);
+          let next;
+          if (idx === -1) next = [...prev, incoming];
+          else { next = [...prev]; next[idx] = incoming; }
+          // sortOrderがあれば並べ替え
+          return next.slice().sort((a, b) => {
+            const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
+            const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
+            return ao - bo;
+          });
         });
       },
       onCategoryChange: () => {
