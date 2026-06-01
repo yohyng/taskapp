@@ -792,12 +792,12 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, dueDate = "" }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, dueDate = "", plain = false }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
-    const inheritedCategory = parent?.category || category || categories[0]?.key || "NOMLAB";
-    const inheritedProject = parent?.project || project || "未分類";
+    const inheritedCategory = plain ? (category || "") : (parent?.category || category || categories[0]?.key || "NOMLAB");
+    const inheritedProject = plain ? (project || "") : (parent?.project || project || "未分類");
     const newTask = normalizeTask({
       id: uid(),
       title: clean,
@@ -806,6 +806,7 @@ function App() {
       status: "未着手",
       thisWeek,
       parentId,
+      plain,
       memo: parent ? `「${parent.title}」の子タスクとして追加` : "",
       dueDate,
     });
