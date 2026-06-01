@@ -23,6 +23,7 @@ function taskToRow(t) {
     recurrence_end: t.recurrenceEnd ?? '',
     plain: t.plain ?? false,
     sort_order: t.sortOrder ?? null,
+    archived: t.archived ?? false,
   }
 }
 
@@ -45,6 +46,7 @@ export function rowToTask(r) {
     recurrenceEnd: r.recurrence_end,
     plain: r.plain,
     sortOrder: r.sort_order ?? null,
+    archived: r.archived ?? false,
   }
 }
 
