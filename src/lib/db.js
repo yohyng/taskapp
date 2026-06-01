@@ -77,6 +77,9 @@ function projectRulesToRows(rules) {
       recurrence_week: v.recurrenceWeek ?? null,
       recurrence_start: v.recurrenceStart ?? '',
       recurrence_end: v.recurrenceEnd ?? '',
+      description: v.description ?? '',
+      color: v.color ?? '',
+      emoji: v.emoji ?? '',
     }
   })
 }
@@ -92,6 +95,9 @@ function rowsToProjectRules(rows) {
       recurrenceWeek: r.recurrence_week,
       recurrenceStart: r.recurrence_start,
       recurrenceEnd: r.recurrence_end,
+      description: r.description ?? '',
+      color: r.color ?? '',
+      emoji: r.emoji ?? '',
     }
   }
   return rules
@@ -212,6 +218,11 @@ export async function deleteTask(id) {
 export async function deleteTrayItem(id) {
   if (!isSupabaseEnabled) return
   await supabase.from('tray_items').delete().eq('id', id)
+}
+
+export async function deleteProjectRule(key) {
+  if (!isSupabaseEnabled) return
+  await supabase.from('project_rules').delete().eq('id', key)
 }
 
 export async function upsertTaskRow(task) {

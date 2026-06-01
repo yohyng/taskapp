@@ -12,7 +12,7 @@ import {
   rectIntersection,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -1067,6 +1067,34 @@ function App() {
     }));
   }
 
+  function deleteProject(category, project) {
+    const key = projectKey(category, project);
+    const targetTasks = tasks.filter((t) => t.category === category && t.project === project);
+    const removeIds = targetTasks.map((t) => t.id);
+    const newItems = targetTasks
+      .filter((t) => !t.parentId)
+      .map((t) => ({ id: uid(), title: t.title, source: "Local Tray", createdAt: toDateKey(new Date()) }));
+    removeIds.forEach((id) => addTombstone(TOMBSTONE_TASKS_KEY, id));
+    commitState((current) => {
+      const nextRules = { ...(current.projectRules || {}) };
+      delete nextRules[key];
+      const nextOrder = { ...(current.projectOrder || {}) };
+      if (nextOrder[category]) nextOrder[category] = nextOrder[category].filter((p) => p !== project);
+      return {
+        ...current,
+        tasks: (current.tasks || []).filter((t) => !removeIds.includes(t.id)),
+        inboxItems: [...newItems, ...(current.inboxItems || [])],
+        projectRules: nextRules,
+        projectOrder: nextOrder,
+      };
+    });
+    removeIds.forEach((id) => dbDeleteTask(id));
+    newItems.forEach((item) => dbUpsertTrayRow(item));
+    dbDeleteProjectRule(key);
+    setSelectedProject(null);
+    setToast(`プロジェクトを削除し、${newItems.length}件をTRAYに戻しました`);
+  }
+
   function removeColumn(key) {
     if (categories.length <= 1) {
       setToast("列は最低1つ必要です");
@@ -1875,7 +1903,7 @@ function App() {
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
         </div>
 
-        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} onClose={() => setSelectedProject(null)} />
+        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} onClose={() => setSelectedProject(null)} />
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
@@ -2389,10 +2417,11 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
               setSelectedTaskId(null);
               setSelectedProject({ category, project });
             }}
-            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline", tone.accent)}
-            title="Project settings"
+            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline", !rule?.color && tone.accent)}
+            style={rule?.color ? { color: rule.color } : undefined}
+            title={rule?.description || "Project settings"}
           >
-            {rule?.recurrence && rule.recurrence !== "none" ? "↻ " : ""}{project}
+            {rule?.emoji ? `${rule.emoji} ` : ""}{rule?.recurrence && rule.recurrence !== "none" ? "↻ " : ""}{project}
           </span>
         </div>
         <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
@@ -2901,24 +2930,70 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
   );
 }
 
-function ProjectInspector({ selectedProject, projectRules, updateProjectRule, onClose }) {
+const PROJECT_COLORS = ["", "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"];
+
+function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, onClose }) {
   if (!selectedProject) return null;
   const { category, project } = selectedProject;
   const key = projectKey(category, project);
   const rule = projectRules?.[key] || { recurrence: "none", recurrenceDay: null, recurrenceEnd: "" };
+
+  function handleDelete() {
+    if (window.confirm(`プロジェクト「${project}」を削除しますか？\n中のタスクはTRAYに戻ります。`)) {
+      deleteProject(category, project);
+    }
+  }
 
   return (
     <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs text-neutral-500">Project</div>
-          <h2 className="truncate text-2xl font-semibold tracking-tight">{project}</h2>
+          <h2 className="truncate text-2xl font-semibold tracking-tight">{rule.emoji ? `${rule.emoji} ` : ""}{project}</h2>
           <p className="mt-2 text-xs text-neutral-500">{category} / project-level schedule</p>
         </div>
         <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button>
       </div>
 
       <div className="space-y-3">
+        <PropertyRow label="Emoji">
+          <input
+            value={rule.emoji || ""}
+            onChange={(event) => updateProjectRule(category, project, { emoji: event.target.value.slice(0, 4) })}
+            placeholder="🗂"
+            className="w-20 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-center text-lg outline-none"
+          />
+        </PropertyRow>
+
+        <PropertyRow label="Color">
+          <div className="flex flex-wrap gap-2">
+            {PROJECT_COLORS.map((c) => (
+              <button
+                key={c || "none"}
+                onClick={() => updateProjectRule(category, project, { color: c })}
+                title={c || "なし"}
+                className={classNames(
+                  "h-6 w-6 rounded-full border transition",
+                  (rule.color || "") === c ? "border-white ring-2 ring-white/40" : "border-white/20 hover:border-white/50"
+                )}
+                style={c ? { backgroundColor: c } : undefined}
+              >
+                {!c && <span className="text-[10px] text-neutral-500">×</span>}
+              </button>
+            ))}
+          </div>
+        </PropertyRow>
+
+        <PropertyRow label="Description">
+          <textarea
+            value={rule.description || ""}
+            onChange={(event) => updateProjectRule(category, project, { description: event.target.value })}
+            placeholder="このプロジェクトの説明・メモ"
+            rows={3}
+            className="min-w-0 w-full resize-y rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600"
+          />
+        </PropertyRow>
+
         <PropertyRow label="Repeat">
           <div className="grid min-w-0 gap-2">
             <select
@@ -3022,6 +3097,13 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, on
       <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs leading-5 text-neutral-400">
         Project単位のRepeatは、タスクとは別にカレンダーへ表示されます。タスク単位のRepeatもそのまま使えます。
       </div>
+
+      <button
+        onClick={handleDelete}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
+      >
+        <Trash2 className="h-4 w-4" /> プロジェクトを削除
+      </button>
     </aside>
   );
 }
