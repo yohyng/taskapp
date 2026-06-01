@@ -349,6 +349,7 @@ function App() {
   const [notionDbId, setNotionDbId] = useState(() => localStorage.getItem("taskspace-notion-dbid") || "");
   const [notionSyncing, setNotionSyncing] = useState(false);
   const [notionLastSync, setNotionLastSync] = useState(() => localStorage.getItem("taskspace-notion-last-sync") || "");
+  const [notionError, setNotionError] = useState(null);
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
@@ -1375,14 +1376,30 @@ function App() {
       return;
     }
     setNotionSyncing(true);
+    setNotionError(null);
+    const cleanDbId = notionDbId.replace(/-/g, "").match(/[0-9a-f]{32}/i)?.[0] || notionDbId.replace(/-/g, "");
+    addSyncLog(`📤 Notion同期開始 db=${cleanDbId.slice(0, 8)}…`);
     try {
       const res = await fetch("/api/notion-sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token: notionToken, dbId: notionDbId.replace(/-/g, "") }),
+        body: JSON.stringify({ token: notionToken, dbId: cleanDbId }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "sync failed");
+      if (!res.ok) {
+        const detail = {
+          stage: data.stage || "unknown",
+          status: data.status || res.status,
+          code: data.code || "",
+          message: data.error || "sync failed",
+          hint: data.hint || "",
+        };
+        setNotionError(detail);
+        addSyncLog(`❌ Notion失敗 [${detail.stage}] ${detail.status} ${detail.code}: ${detail.message}`);
+        if (detail.hint) addSyncLog(`💡 ${detail.hint}`);
+        setToast(`Notion同期エラー (${detail.status})`);
+        return;
+      }
 
       // 既存のTRAYアイテムIDと照合して重複を除く
       setInboxItems((prev) => {
@@ -1396,9 +1413,11 @@ function App() {
             createdAt: p.createdAt,
           }));
         if (newItems.length === 0) {
+          addSyncLog(`✅ Notion取得 ${data.count ?? 0}件（新規なし）`);
           setToast("新しいNotionページはありませんでした");
           return prev;
         }
+        addSyncLog(`✅ Notion取得 ${data.count ?? 0}件 → 新規${newItems.length}件をTRAYへ`);
         setToast(`${newItems.length}件をTRAYに追加しました`);
         return [...newItems, ...prev];
       });
@@ -1407,6 +1426,8 @@ function App() {
       setNotionLastSync(now);
       localStorage.setItem("taskspace-notion-last-sync", now);
     } catch (err) {
+      setNotionError({ stage: "network", status: 0, code: "", message: err.message, hint: "アプリからAPIへの通信に失敗しました" });
+      addSyncLog(`❌ Notion通信エラー: ${err.message}`);
       setToast(`Notion同期エラー: ${err.message}`);
     } finally {
       setNotionSyncing(false);
@@ -1725,6 +1746,21 @@ function App() {
                     >
                       {notionSyncing ? "同期中…" : "TRAYに同期"}
                     </button>
+
+                    {notionError && (
+                      <div className="mt-2 rounded border border-red-500/30 bg-red-500/10 p-2 text-[10px] leading-relaxed text-red-200">
+                        <div className="mb-1 flex items-center justify-between">
+                          <span className="font-semibold">Notionエラー詳細</span>
+                          <button onClick={() => setNotionError(null)} className="text-red-300/60 hover:text-red-200">×</button>
+                        </div>
+                        <div className="space-y-0.5 text-red-200/90">
+                          <div>段階: <span className="font-mono">{notionError.stage}</span></div>
+                          <div>HTTP: <span className="font-mono">{notionError.status}</span>{notionError.code ? <> / <span className="font-mono">{notionError.code}</span></> : null}</div>
+                          <div className="break-words">内容: {notionError.message}</div>
+                          {notionError.hint && <div className="mt-1 rounded bg-black/20 p-1.5 text-amber-200/90">💡 {notionError.hint}</div>}
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div className="mt-3 border-t border-white/10 pt-3">
