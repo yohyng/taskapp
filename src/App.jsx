@@ -1402,17 +1402,25 @@ function App() {
         return;
       }
 
-      // 既存のTRAYアイテムIDと照合して重複を除く
+      // 一度取り込んだNotionページIDを永続記録してスキップ
+      const seenKey = "taskspace-notion-seen";
+      const seenIds = new Set(JSON.parse(localStorage.getItem(seenKey) || "[]"));
+
       setInboxItems((prev) => {
         const existingIds = new Set(prev.map((item) => item.id));
         const newItems = data.pages
-          .filter((p) => !existingIds.has(`notion-${p.id}`))
+          .filter((p) => !existingIds.has(`notion-${p.id}`) && !seenIds.has(p.id))
           .map((p) => ({
             id: `notion-${p.id}`,
             title: p.title,
             source: "Notion",
             createdAt: p.createdAt,
           }));
+
+        // 新規分のIDを seen に追加して保存
+        data.pages.forEach((p) => seenIds.add(p.id));
+        localStorage.setItem(seenKey, JSON.stringify([...seenIds]));
+
         if (newItems.length === 0) {
           addSyncLog(`✅ Notion取得 ${data.count ?? 0}件（新規なし）`);
           if (!silent) setToast("新しいNotionページはありませんでした");
@@ -1761,15 +1769,24 @@ function App() {
                       {notionSyncing ? "同期中…" : "今すぐTRAYに同期"}
                     </button>
 
-                    <label className="mt-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] text-neutral-500">
-                      <input
-                        type="checkbox"
-                        checked={notionAutoSync}
-                        onChange={(e) => { setNotionAutoSync(e.target.checked); localStorage.setItem("taskspace-notion-auto", e.target.checked ? "on" : "off"); }}
-                        className="h-3 w-3 accent-neutral-400"
-                      />
-                      自動同期（起動時＋5分ごと）
-                    </label>
+                    <div className="mt-1.5 flex items-center justify-between gap-2">
+                      <label className="flex cursor-pointer items-center gap-1.5 text-[10px] text-neutral-500">
+                        <input
+                          type="checkbox"
+                          checked={notionAutoSync}
+                          onChange={(e) => { setNotionAutoSync(e.target.checked); localStorage.setItem("taskspace-notion-auto", e.target.checked ? "on" : "off"); }}
+                          className="h-3 w-3 accent-neutral-400"
+                        />
+                        自動同期（起動時＋5分ごと）
+                      </label>
+                      <button
+                        onClick={() => { localStorage.removeItem("taskspace-notion-seen"); setToast("取り込み済みIDをリセットしました"); }}
+                        className="text-[10px] text-neutral-600 underline-offset-2 hover:text-neutral-400 hover:underline"
+                        title="一度取り込んだページを再取得できるようにリセット"
+                      >
+                        履歴リセット
+                      </button>
+                    </div>
 
                     {notionError && (
                       <div className="mt-2 rounded border border-red-500/30 bg-red-500/10 p-2 text-[10px] leading-relaxed text-red-200">
