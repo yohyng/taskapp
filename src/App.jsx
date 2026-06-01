@@ -557,6 +557,15 @@ function App() {
 
   // Supabase load が完了するまで保存を抑制するフラグ
   const supabaseReadyRef = useRef(false);
+  // サーバーと同期済みの状態（id -> JSON署名）。変更行だけをupsertするために使う
+  const syncedTasksRef = useRef(new Map());
+  const syncedTrayRef = useRef(new Map());
+
+  function sig(obj) { return JSON.stringify(obj); }
+  function rememberSynced(tasksArr, trayArr) {
+    if (tasksArr) { const m = new Map(); tasksArr.forEach((t) => m.set(t.id, sig(t))); syncedTasksRef.current = m; }
+    if (trayArr) { const m = new Map(); trayArr.forEach((i, idx) => m.set(i.id, sig({ ...i, _idx: idx }))); syncedTrayRef.current = m; }
+  }
 
   const [syncLog, setSyncLog] = useState([]);
   function addSyncLog(msg) {
@@ -574,9 +583,16 @@ function App() {
       supabaseSaveTimer.current = setTimeout(() => {
         const deletedTaskIds = [...getTombstoneSet(TOMBSTONE_TASKS_KEY)]
         const deletedTrayIds = [...getTombstoneSet(TOMBSTONE_TRAY_KEY)]
+        // 変更/新規の行だけを抽出（他デバイスで削除された未変更行を復活させないため）
+        const changedTasks = tasks.filter((t) => syncedTasksRef.current.get(t.id) !== sig(t));
+        const changedInbox = inboxItems
+          .map((i, idx) => ({ item: i, idx }))
+          .filter(({ item, idx }) => syncedTrayRef.current.get(item.id) !== sig({ ...item, _idx: idx }))
+          .map(({ item, idx }) => ({ ...item, sortOrder: idx }));
         if (deletedTaskIds.length || deletedTrayIds.length) addSyncLog(`💾 保存時削除 task:${deletedTaskIds.length}件 tray:${deletedTrayIds.length}件`)
-        saveToSupabase({ ...data, deletedTaskIds, deletedTrayIds }).then((err) => {
+        saveToSupabase({ ...data, tasks: changedTasks, inboxItems: changedInbox, deletedTaskIds, deletedTrayIds }).then((err) => {
           if (err) addSyncLog(`❌ 保存エラー: ${err}`);
+          else rememberSynced(tasks, inboxItems);
         })
       }, 1500);
     }
@@ -593,7 +609,9 @@ function App() {
         const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
         if (deletedTasks.size) addSyncLog(`🔍 tombstone ${[...deletedTasks].length}件 remote残存:${[...deletedTasks].filter(id => remoteTaskIds.has(id)).length}件`)
         pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
-        setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
+        const applied = (remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask);
+        setTasks(applied);
+        rememberSynced(applied, null);
       }
       if (remote.categories?.length) setCategories(remote.categories);
       if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
@@ -602,7 +620,9 @@ function App() {
         const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
         const remoteTrayIds = new Set((remote.inboxItems || []).map(i => i.id))
         pruneTombstones(TOMBSTONE_TRAY_KEY, remoteTrayIds)
-        setInboxItems((remote.inboxItems || []).filter(i => !deletedTray.has(i.id)));
+        const appliedTray = (remote.inboxItems || []).filter(i => !deletedTray.has(i.id));
+        setInboxItems(appliedTray);
+        rememberSynced(null, appliedTray);
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -619,7 +639,11 @@ function App() {
         loadFromSupabase().then((remote) => {
           if (remote?.tasks !== undefined) {
             const deletedTasks = getTombstoneSet(TOMBSTONE_TASKS_KEY)
-            setTasks((remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask));
+            const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
+            pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
+            const applied = (remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask);
+            setTasks(applied);
+            rememberSynced(applied, null);
           }
         });
       },
@@ -629,7 +653,11 @@ function App() {
         loadFromSupabase().then((remote) => {
           if (remote?.inboxItems !== undefined) {
             const deletedTray = getTombstoneSet(TOMBSTONE_TRAY_KEY)
-            setInboxItems((remote.inboxItems || []).filter(i => !deletedTray.has(i.id)));
+            const remoteTrayIds = new Set((remote.inboxItems || []).map(i => i.id))
+            pruneTombstones(TOMBSTONE_TRAY_KEY, remoteTrayIds)
+            const appliedTray = (remote.inboxItems || []).filter(i => !deletedTray.has(i.id));
+            setInboxItems(appliedTray);
+            rememberSynced(null, appliedTray);
           }
         });
       },
@@ -792,7 +820,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, dueDate = "", plain = false }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -805,6 +833,7 @@ function App() {
       project: inheritedProject,
       status: "未着手",
       thisWeek,
+      today,
       parentId,
       plain,
       memo: parent ? `「${parent.title}」の子タスクとして追加` : "",

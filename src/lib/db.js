@@ -100,7 +100,7 @@ function trayToRow(item, index) {
     id: item.id,
     title: item.title,
     source: item.source ?? '',
-    sort_order: index,
+    sort_order: item.sortOrder ?? index,
     created_at: item.createdAt ?? '',
   }
 }
