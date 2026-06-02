@@ -34,6 +34,7 @@ import {
   Settings2,
   Trash2,
   CheckSquare,
+  FileText,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -2778,7 +2779,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               </div>
             )}
           </div>
-          <div className="flex shrink-0 gap-1">
+          <div className="flex shrink-0 items-center gap-1">
+            {task.memo?.trim() && <FileText className="h-3 w-3 text-neutral-500" title="メモあり" />}
             <button onClick={(event) => { event.stopPropagation(); toggleToday(task); }} className={classNames("rounded border px-1.5 py-0.5 text-[9px] transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 text-neutral-500 hover:text-cyan-200")}>今日</button>
             <button onClick={(event) => { event.stopPropagation(); toggleWeek(task); }} className={classNames("rounded border px-1.5 py-0.5 text-[9px] transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 text-neutral-500 hover:text-amber-100")}>週</button>
           </div>
