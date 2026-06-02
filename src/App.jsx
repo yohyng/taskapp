@@ -3197,22 +3197,27 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
     if (created) setSubTitle("");
   }
   return (
-    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
-      <div className="mb-5 flex items-start justify-between gap-4"><div className="min-w-0"><input value={task.title} onChange={(event) => upsertTask({ id: task.id, title: event.target.value })} className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none" /><p className="mt-2 text-xs text-neutral-500">同一TaskDB内の1レコード</p></div><button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button></div>
-      <div className="space-y-3">
-        <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
-        <PropertyRow label="Project"><input value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} list="project-options" placeholder={task.category ? "Project" : NO_CATEGORY_LABEL} className="w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600" /><datalist id="project-options">{siblingProjects.map((project) => <option key={project} value={project} />)}</datalist></PropertyRow>
-        <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
-        <PropertyRow label="Due"><input type="date" value={task.dueDate || ""} onChange={(event) => upsertTask({ id: task.id, dueDate: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none" /></PropertyRow>
+    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[360px] md:max-w-[360px] md:rounded-none md:border-l md:border-t-0">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <input value={task.title} onChange={(event) => upsertTask({ id: task.id, title: event.target.value })} className="w-full bg-transparent text-base font-semibold tracking-tight outline-none" />
+        </div>
+        <button onClick={onClose} className="rounded-full border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
+      </div>
+      <div className="space-y-2">
+        <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
+        <PropertyRow label="Project"><input value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} list="project-options" placeholder={task.category ? "Project" : NO_CATEGORY_LABEL} className="w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600" /><datalist id="project-options">{siblingProjects.map((project) => <option key={project} value={project} />)}</datalist></PropertyRow>
+        <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
+        <PropertyRow label="Due"><input type="date" value={task.dueDate || ""} onChange={(event) => upsertTask({ id: task.id, dueDate: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" /></PropertyRow>
         <PropertyRow label="Repeat">
-          <div className="grid min-w-0 gap-2">
-            <select value={task.recurrence || "none"} onChange={(event) => upsertTask({ id: task.id, recurrence: event.target.value, recurrenceDay: event.target.value === "weekly" ? Number(task.recurrenceDay ?? 3) : null })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none">
+          <div className="grid min-w-0 gap-1.5">
+            <select value={task.recurrence || "none"} onChange={(event) => upsertTask({ id: task.id, recurrence: event.target.value, recurrenceDay: event.target.value === "weekly" ? Number(task.recurrenceDay ?? 3) : null })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
               <option value="none">なし</option>
               <option value="weekly">毎週</option>
             </select>
             {task.recurrence === "weekly" && (
-              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                <select value={Number(task.recurrenceDay ?? 3)} onChange={(event) => upsertTask({ id: task.id, recurrenceDay: Number(event.target.value) })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none">
+              <div className="grid min-w-0 grid-cols-2 gap-1.5">
+                <select value={Number(task.recurrenceDay ?? 3)} onChange={(event) => upsertTask({ id: task.id, recurrenceDay: Number(event.target.value) })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
                   <option value={0}>日曜</option>
                   <option value={1}>月曜</option>
                   <option value={2}>火曜</option>
@@ -3221,26 +3226,32 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
                   <option value={5}>金曜</option>
                   <option value={6}>土曜</option>
                 </select>
-                <input type="date" value={task.recurrenceEnd || ""} onChange={(event) => upsertTask({ id: task.id, recurrenceEnd: event.target.value })} className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none" title="繰り返し終了日" />
+                <input type="date" value={task.recurrenceEnd || ""} onChange={(event) => upsertTask({ id: task.id, recurrenceEnd: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" title="繰り返し終了日" />
               </div>
             )}
           </div>
         </PropertyRow>
-        <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, today: !task.today })} className={classNames("w-full rounded-xl border px-3 py-2 text-left text-sm transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.today ? "今日やる" : "今日ではない"}</button></PropertyRow>
-        <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !task.thisWeek })} className={classNames("w-full rounded-xl border px-3 py-2 text-left text-sm transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.thisWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
-        <PropertyRow label="Parent"><div className="rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm text-neutral-300">{parent ? parent.title : "親なし"}</div></PropertyRow>
-        <PropertyRow label="Memo"><textarea value={task.memo || ""} onChange={(event) => upsertTask({ id: task.id, memo: event.target.value })} placeholder="メモ" rows={5} className="w-full resize-none rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm leading-6 outline-none placeholder:text-neutral-600" /></PropertyRow>
+        <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, today: !task.today })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.today ? "今日やる" : "今日ではない"}</button></PropertyRow>
+        <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !task.thisWeek })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.thisWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
+        <PropertyRow label="Parent"><div className="rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs text-neutral-300">{parent ? parent.title : "親なし"}</div></PropertyRow>
+        <PropertyRow label="Memo"><textarea value={task.memo || ""} onChange={(event) => upsertTask({ id: task.id, memo: event.target.value })} placeholder="メモ" rows={6} className="w-full resize-y rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs leading-5 outline-none placeholder:text-neutral-600" /></PropertyRow>
       </div>
-      <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.03] p-4"><div className="mb-3 text-sm font-medium text-neutral-200">子タスクを追加</div><p className="mb-3 text-xs leading-5 text-neutral-500">親アイテムに紐づき、Category / Projectを継承します。</p><div className="flex gap-2"><input value={subTitle} onChange={(event) => setSubTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && createSubTask()} placeholder="子タスク名" className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600" /><button onClick={createSubTask} className="rounded-xl bg-white px-3 py-2 text-sm font-medium text-neutral-950">追加</button></div></div>
-      <button onClick={() => removeTask(task.id)} className="mt-5 w-full rounded-2xl border border-red-300/20 bg-red-400/10 px-4 py-3 text-sm text-red-100 transition hover:bg-red-400/15">Delete Task</button>
+      <div className="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+        <div className="mb-2 text-xs font-medium text-neutral-400">子タスクを追加</div>
+        <div className="flex gap-1.5">
+          <input value={subTitle} onChange={(event) => setSubTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && createSubTask()} placeholder="子タスク名" className="min-w-0 flex-1 rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600" />
+          <button onClick={createSubTask} className="rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-neutral-950">追加</button>
+        </div>
+      </div>
+      <button onClick={() => removeTask(task.id)} className="mt-3 w-full rounded-xl border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs text-red-100 transition hover:bg-red-400/15">Delete Task</button>
     </aside>
   );
 }
 
 function PropertyRow({ label, children }) {
   return (
-    <div className="grid min-w-0 grid-cols-1 items-start gap-1 sm:grid-cols-[92px_minmax(0,1fr)] sm:gap-3">
-      <div className="pt-1 text-xs font-medium text-neutral-500 sm:pt-2">{label}</div>
+    <div className="grid min-w-0 grid-cols-1 items-start gap-1 sm:grid-cols-[76px_minmax(0,1fr)] sm:gap-2">
+      <div className="pt-1 text-[10px] font-medium uppercase tracking-wide text-neutral-600 sm:pt-2">{label}</div>
       <div className="min-w-0">{children}</div>
     </div>
   );
