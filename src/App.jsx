@@ -16,6 +16,7 @@ import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as d
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
+  ChevronUp,
   ChevronRight,
   ChevronLeft,
   Circle,
@@ -1981,7 +1982,7 @@ function App() {
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
         </div>
 
-        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} onClose={() => setSelectedProject(null)} />
+        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} moveProject={moveProject} projectsByCategory={projectsByCategory} onClose={() => setSelectedProject(null)} />
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
@@ -3018,11 +3019,16 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
 
 const PROJECT_COLORS = ["", "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, onClose }) {
+function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, moveProject, projectsByCategory, onClose }) {
   if (!selectedProject) return null;
   const { category, project } = selectedProject;
   const key = projectKey(category, project);
   const rule = projectRules?.[key] || { recurrence: "none", recurrenceDay: null, recurrenceEnd: "" };
+
+  const projects = projectsByCategory?.[category] || [];
+  const idx = projects.indexOf(project);
+  const canUp = idx > 0;
+  const canDown = idx !== -1 && idx < projects.length - 1;
 
   function handleDelete() {
     if (window.confirm(`プロジェクト「${project}」を削除しますか？\n中のタスクはTRAYに戻ります。`)) {
@@ -3184,9 +3190,26 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
         Project単位のRepeatは、タスクとは別にカレンダーへ表示されます。タスク単位のRepeatもそのまま使えます。
       </div>
 
+      <div className="mt-4 flex gap-2">
+        <button
+          onClick={() => canUp && moveProject(category, project, projects[idx - 1])}
+          disabled={!canUp}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-25 disabled:cursor-not-allowed"
+        >
+          <ChevronUp className="h-4 w-4" /> 上へ
+        </button>
+        <button
+          onClick={() => canDown && moveProject(category, project, projects[idx + 1])}
+          disabled={!canDown}
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-25 disabled:cursor-not-allowed"
+        >
+          下へ <ChevronDown className="h-4 w-4" />
+        </button>
+      </div>
+
       <button
         onClick={handleDelete}
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
+        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
       >
         <Trash2 className="h-4 w-4" /> プロジェクトを削除
       </button>
