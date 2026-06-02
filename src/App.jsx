@@ -2474,18 +2474,18 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
 
   return (
     <div
-      ref={projDropRef}
+      ref={(node) => { projDropRef(node); projDragRef(node); }}
+      {...projDragAttrs}
       className={classNames(
         "rounded-md border px-1.5 py-1 transition",
-        isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10"
+        isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10",
+        isProjDragging && "opacity-40"
       )}
     >
-      <div className={classNames("mb-1 flex w-full items-center justify-between gap-1 text-left", isProjDragging && "opacity-40")}>
+      <div className="mb-1 flex w-full items-center justify-between gap-1 text-left">
         <div className="flex min-w-0 flex-1 items-center gap-1">
           <span
-            ref={projDragRef}
             {...projDragListeners}
-            {...projDragAttrs}
             className="cursor-grab touch-none text-neutral-700 hover:text-neutral-400 active:cursor-grabbing"
           >
             <GripVertical className="h-3.5 w-3.5" />
