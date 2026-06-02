@@ -2480,22 +2480,29 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
         isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10"
       )}
     >
-      <button
-        ref={projDragRef}
-        {...projDragListeners}
-        {...projDragAttrs}
-        onClick={() => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))}
-        className={classNames("mb-1 flex w-full cursor-grab items-center justify-between gap-2 text-left active:cursor-grabbing", isProjDragging && "opacity-40")}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          {isCollapsed ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
+      <div className={classNames("mb-1 flex w-full items-center justify-between gap-1 text-left", isProjDragging && "opacity-40")}>
+        <div className="flex min-w-0 flex-1 items-center gap-1">
+          <span
+            ref={projDragRef}
+            {...projDragListeners}
+            {...projDragAttrs}
+            className="cursor-grab touch-none text-neutral-700 hover:text-neutral-400 active:cursor-grabbing"
+          >
+            <GripVertical className="h-3.5 w-3.5" />
+          </span>
+          <button
+            onClick={() => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))}
+            className="shrink-0"
+          >
+            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-neutral-500" /> : <ChevronDown className="h-3.5 w-3.5 text-neutral-500" />}
+          </button>
           <span
             onClick={(event) => {
               event.stopPropagation();
               setSelectedTaskId(null);
               setSelectedProject({ category, project });
             }}
-            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline", !rule?.color && tone.accent)}
+            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline cursor-pointer", !rule?.color && tone.accent)}
             style={rule?.color ? { color: rule.color } : undefined}
             title={rule?.description || "Project settings"}
           >
@@ -2503,7 +2510,7 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
           </span>
         </div>
         <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
-      </button>
+      </div>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
           <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
