@@ -1158,6 +1158,28 @@ function App() {
     setToast(`${dragProject} を移動しました`);
   }
 
+  function renameProject(category, oldName, newName) {
+    const clean = newName.trim();
+    if (!clean || clean === oldName) return false;
+    const oldKey = projectKey(category, oldName);
+    const newKey = projectKey(category, clean);
+    commitState((current) => {
+      const nextRules = { ...(current.projectRules || {}) };
+      if (nextRules[oldKey]) { nextRules[newKey] = nextRules[oldKey]; delete nextRules[oldKey]; }
+      const nextOrder = { ...(current.projectOrder || {}) };
+      if (nextOrder[category]) nextOrder[category] = nextOrder[category].map((p) => p === oldName ? clean : p);
+      return {
+        ...current,
+        tasks: current.tasks.map((t) => t.category === category && t.project === oldName ? { ...t, project: clean } : t),
+        projectRules: nextRules,
+        projectOrder: nextOrder,
+      };
+    });
+    setSelectedProject({ category, project: clean });
+    setToast(`プロジェクト名を変更しました`);
+    return true;
+  }
+
   function moveWeeklyTask(dragId, targetId) {
     if (!dragId || !targetId || dragId === targetId) return;
     // ルートのみ並び替え（子タスクの weeklyOrder は触らない）
@@ -1982,7 +2004,7 @@ function App() {
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
         </div>
 
-        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} moveProject={moveProject} projectsByCategory={projectsByCategory} onClose={() => setSelectedProject(null)} />
+        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} moveProject={moveProject} renameProject={renameProject} projectsByCategory={projectsByCategory} onClose={() => setSelectedProject(null)} />
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
@@ -3019,11 +3041,15 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
 
 const PROJECT_COLORS = ["", "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"];
 
-function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, moveProject, projectsByCategory, onClose }) {
+function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, moveProject, renameProject, projectsByCategory, onClose }) {
   if (!selectedProject) return null;
   const { category, project } = selectedProject;
   const key = projectKey(category, project);
   const rule = projectRules?.[key] || { recurrence: "none", recurrenceDay: null, recurrenceEnd: "" };
+  const [nameInput, setNameInput] = React.useState(project);
+
+  // プロジェクトが切り替わったら入力欄をリセット
+  React.useEffect(() => { setNameInput(project); }, [project]);
 
   const projects = projectsByCategory?.[category] || [];
   const idx = projects.indexOf(project);
@@ -3041,8 +3067,14 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs text-neutral-500">Project</div>
-          <h2 className="truncate text-2xl font-semibold tracking-tight">{rule.emoji ? `${rule.emoji} ` : ""}{project}</h2>
-          <p className="mt-2 text-xs text-neutral-500">{category} / project-level schedule</p>
+          <input
+            value={nameInput}
+            onChange={(e) => setNameInput(e.target.value)}
+            onBlur={() => renameProject(category, project, nameInput)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
+            className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
+          />
+          <p className="mt-1 text-xs text-neutral-500">{category}</p>
         </div>
         <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button>
       </div>
