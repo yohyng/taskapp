@@ -3199,8 +3199,15 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
   return (
     <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[360px] md:max-w-[360px] md:rounded-none md:border-l md:border-t-0">
       <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <input value={task.title} onChange={(event) => upsertTask({ id: task.id, title: event.target.value })} className="w-full bg-transparent text-base font-semibold tracking-tight outline-none" />
+        <div className="min-w-0 flex-1">
+          <textarea
+            value={task.title}
+            onChange={(event) => upsertTask({ id: task.id, title: event.target.value })}
+            onInput={(event) => { event.target.style.height = "auto"; event.target.style.height = event.target.scrollHeight + "px"; }}
+            ref={(el) => { if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; } }}
+            rows={1}
+            className="w-full resize-none overflow-hidden bg-transparent text-base font-semibold tracking-tight outline-none leading-snug"
+          />
         </div>
         <button onClick={onClose} className="rounded-full border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
       </div>
