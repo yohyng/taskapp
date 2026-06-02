@@ -13,7 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -648,6 +648,15 @@ function App() {
         const appliedTray = (remote.inboxItems || []).filter(i => !deletedTray.has(i.id));
         setInboxItems(appliedTray);
         rememberSynced(null, appliedTray);
+      }
+    });
+    // Notion DB ID を Supabase から復元（全端末で共有）
+    dbLoadSettings().then((settings) => {
+      const remoteDbId = settings?.notion_db_id;
+      if (remoteDbId && remoteDbId !== notionDbId) {
+        setNotionDbId(remoteDbId);
+        localStorage.setItem("taskspace-notion-dbid", remoteDbId);
+        addSyncLog("🔗 Notion DB ID を同期しました");
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1802,6 +1811,7 @@ function App() {
                     <input
                       value={notionDbId}
                       onChange={(e) => { setNotionDbId(e.target.value); localStorage.setItem("taskspace-notion-dbid", e.target.value); }}
+                      onBlur={(e) => { const v = e.target.value.trim(); if (v) dbSaveSetting("notion_db_id", v).then((err) => addSyncLog(err ? `❌ DB ID保存失敗: ${err.message || err}` : "💾 Notion DB ID を全端末に保存")); }}
                       placeholder="DB ID (32文字 or URL)"
                       className="mb-1.5 w-full rounded border border-white/10 bg-black/25 px-2 py-1.5 text-[11px] outline-none placeholder:text-neutral-600"
                     />

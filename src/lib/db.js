@@ -225,6 +225,24 @@ export async function deleteProjectRule(key) {
   await supabase.from('project_rules').delete().eq('id', key)
 }
 
+// --- App settings (key/value) ---
+
+export async function loadSettings() {
+  if (!isSupabaseEnabled) return {}
+  const { data, error } = await supabase.from('app_settings').select('*')
+  if (error) { console.error('[db] loadSettings error', error); return {} }
+  const out = {}
+  for (const r of data || []) out[r.key] = r.value
+  return out
+}
+
+export async function saveSetting(key, value) {
+  if (!isSupabaseEnabled) return null
+  const { error } = await supabase.from('app_settings').upsert({ key, value }, { onConflict: 'key' })
+  if (error) console.error('[db] saveSetting error', error)
+  return error
+}
+
 export async function upsertTaskRow(task) {
   if (!isSupabaseEnabled) return null
   const { error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
