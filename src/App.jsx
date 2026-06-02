@@ -10,6 +10,7 @@ import {
   useDraggable,
   closestCenter,
   rectIntersection,
+  pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
@@ -62,15 +63,34 @@ function pruneTombstones(key, remoteIdSet) {
   } catch {}
 }
 
-// タスクレベルのドロップゾーンをカラム全体より優先する衝突検知
+// ポインタ位置ベースでドロップ先を判定し、カードレベルを枠より優先する衝突検知
+function collisionType(hit) {
+  return hit?.data?.droppableContainer?.data?.current?.type;
+}
 function taskFirstCollision(args) {
-  const taskTypes = ["task-in-today", "task-in-weekly", "task", "tray", "today", "weekly"];
-  const taskContainers = args.droppableContainers.filter(
-    (c) => taskTypes.includes(c.data.current?.type)
-  );
-  const taskHits = closestCenter({ ...args, droppableContainers: taskContainers });
-  if (taskHits.length > 0) return taskHits;
-  return closestCenter(args);
+  // ポインタが重なっている全コンテナを取得（カラム跨ぎでも正確）
+  let hits = pointerWithin(args);
+  if (hits.length === 0) hits = rectIntersection(args);
+  if (hits.length === 0) hits = closestCenter(args);
+
+  const activeType = args.active?.data?.current?.type;
+  const pick = (types) => hits.filter((h) => types.includes(collisionType(h)));
+
+  // ドラッグ中の種類に応じてドロップ先の優先順位を変える
+  if (activeType === "column") {
+    return pick(["column"]).length ? pick(["column"]) : hits;
+  }
+  if (activeType === "project") {
+    const p = pick(["project"]);
+    return p.length ? p : (pick(["column"]).length ? pick(["column"]) : hits);
+  }
+
+  // タスク/TRAYアイテム: カード → 枠 の順で優先（カラム跨ぎ対応）
+  const cardHits = pick(["task-in-today", "task-in-weekly", "task", "tray"]);
+  if (cardHits.length > 0) return cardHits;
+  const zoneHits = pick(["project", "today", "weekly", "tray-zone"]);
+  if (zoneHits.length > 0) return zoneHits;
+  return hits;
 }
 
 const DEFAULT_CATEGORIES = [
