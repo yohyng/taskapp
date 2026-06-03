@@ -399,20 +399,20 @@ function App() {
     document.body.classList.toggle('ts-drag-mode', selectMode);
   }, [selectMode]);
 
-  function handleDragEnd({ active, over, activatorEvent, delta }) {
+  function handleDragEnd({ active, over }) {
     setActiveDrag(null);
     if (!over) return;
     const src = active.data.current;
     const dst = over.data.current;
     if (!src || !dst) return;
 
-    // over の rect の上半分か下半分かを判定（Today/Weekly 内の親子化判定用）
+    // ドラッグアイテムの中心Y とドロップ先要素の中央Y を比較して上/下半分を判定
     function isBottomHalf() {
       if (!over.rect) return false;
       const midY = over.rect.top + over.rect.height / 2;
-      // activatorEvent はドラッグ開始時のポインター位置、delta はその後の移動量
-      const pointerY = activatorEvent
-        ? (activatorEvent.clientY ?? activatorEvent.touches?.[0]?.clientY ?? midY) + (delta?.y ?? 0)
+      const draggedRect = active.rect?.current?.translated;
+      const pointerY = draggedRect
+        ? draggedRect.top + draggedRect.height / 2
         : midY;
       return pointerY > midY;
     }
