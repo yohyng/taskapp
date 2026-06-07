@@ -2987,8 +2987,20 @@ function getWeekDays(base = new Date()) {
 
 function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
-  const weekDays = getWeekDays();
+  const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
+
+  function getWeekDaysForOffset() {
+    const mon = new Date(2026, 4, 5); // Monday of the first week
+    mon.setDate(mon.getDate() + weekOffset * 7);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(mon);
+      d.setDate(mon.getDate() + i);
+      return d;
+    });
+  }
+
+  const weekDays = getWeekDaysForOffset();
 
   function tasksForDay(dateKey) {
     if (dateKey === todayKey) {
@@ -3015,41 +3027,73 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
-  return (
-    <div className="mt-1 overflow-x-auto pb-2">
-      {/* 幅広: 7列横並び / 幅狭: 縦積み */}
-      <div className="grid grid-cols-1 gap-2 md:grid-cols-7 md:min-w-[700px]">
-        {weekDays.map((date, i) => {
-          const dateKey = toDateKey(date);
-          const isToday = dateKey === todayKey;
-          const dayTasks = tasksForDay(dateKey);
-          const label = DAY_LABELS[i];
-          const isSat = i === 5;
-          const isSun = i === 6;
+  const firstDay = weekDays[0];
+  const lastDay = weekDays[6];
+  const monthLabel = `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
 
-          return (
-            <DayColumn
-              key={dateKey}
-              dateKey={dateKey}
-              label={label}
-              date={date}
-              isToday={isToday}
-              isSat={isSat}
-              isSun={isSun}
-              tasks={dayTasks}
-              newTitle={newTitles[dateKey] || ""}
-              setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-              onAdd={() => handleAdd(dateKey)}
-              toggleDone={toggleDone}
-              upsertTask={upsertTask}
-              categoryTone={categoryTone}
-              setSelectedTaskId={setSelectedTaskId}
-              selectedTaskId={selectedTaskId}
-            />
-          );
-        })}
+  return (
+    <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-1.5">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setWeekOffset((v) => v - 1)}
+            className="rounded border border-white/10 p-1.5 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="text-sm font-semibold text-neutral-300 min-w-[120px] text-center">{monthLabel}</span>
+          <button
+            onClick={() => setWeekOffset((v) => v + 1)}
+            className="rounded border border-white/10 p-1.5 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
+        </div>
+        {weekOffset !== 0 && (
+          <button
+            onClick={() => setWeekOffset(0)}
+            className="text-xs text-neutral-500 hover:text-neutral-300"
+          >
+            今週に戻す
+          </button>
+        )}
       </div>
-    </div>
+
+      <div className="overflow-x-auto pb-2">
+        {/* 幅広: 7列横並び / 幅狭: 縦積み */}
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-7 md:min-w-[700px]">
+          {weekDays.map((date, i) => {
+            const dateKey = toDateKey(date);
+            const isToday = dateKey === todayKey;
+            const dayTasks = tasksForDay(dateKey);
+            const label = DAY_LABELS[i];
+            const isSat = i === 5;
+            const isSun = i === 6;
+
+            return (
+              <DayColumn
+                key={dateKey}
+                dateKey={dateKey}
+                label={label}
+                date={date}
+                isToday={isToday}
+                isSat={isSat}
+                isSun={isSun}
+                tasks={dayTasks}
+                newTitle={newTitles[dateKey] || ""}
+                setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                onAdd={() => handleAdd(dateKey)}
+                toggleDone={toggleDone}
+                upsertTask={upsertTask}
+                categoryTone={categoryTone}
+                setSelectedTaskId={setSelectedTaskId}
+                selectedTaskId={selectedTaskId}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 
