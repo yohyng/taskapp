@@ -579,12 +579,13 @@ function App() {
     // Task → 7-day column
     if (src.type === "task" && dst.type === "day-column") {
       const todayKey = toDateKey(new Date());
+      const dragged = taskMap.get(src.id);
       if (dst.date === todayKey) {
         upsertTask({ id: src.id, today: true, scheduledDate: "" });
-        setToast("今日のタスクに追加しました");
+        setToast("Todayに移動しました");
       } else {
-        upsertTask({ id: src.id, today: false, scheduledDate: dst.date });
-        setToast(`${dst.label}に移動しました`);
+        upsertTask({ id: src.id, today: false, thisWeek: true, scheduledDate: dst.date });
+        setToast(`${dst.label}に移動しました（Weekly）`);
       }
       return;
     }
@@ -2980,19 +2981,25 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
 
   function tasksForDay(dateKey) {
     if (dateKey === todayKey) {
-      return tasks.filter((t) => !t.archived && (t.today || t.scheduledDate === dateKey));
+      // today=true のタスク、scheduledDate が今日のタスク、
+      // さらに thisWeek=true でまだ日付未割当のタスクも今日列に浮かせる
+      return tasks.filter((t) => !t.archived && (
+        t.today ||
+        t.scheduledDate === dateKey ||
+        (t.thisWeek && !t.today && !t.scheduledDate)
+      ));
     }
     return tasks.filter((t) => !t.archived && t.scheduledDate === dateKey);
   }
 
-  function handleAdd(dateKey, dayLabel) {
+  function handleAdd(dateKey) {
     const title = (newTitles[dateKey] || "").trim();
     if (!title) return;
     if (dateKey === todayKey) {
       addTask({ title, today: true, plain: true });
     } else {
-      const t = addTask({ title, plain: true });
-      if (t) upsertTask({ id: t.id, scheduledDate: dateKey });
+      const t = addTask({ title, thisWeek: true, plain: true });
+      if (t) upsertTask({ id: t.id, scheduledDate: dateKey, thisWeek: true });
     }
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
@@ -3021,7 +3028,7 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
               tasks={dayTasks}
               newTitle={newTitles[dateKey] || ""}
               setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-              onAdd={() => handleAdd(dateKey, label)}
+              onAdd={() => handleAdd(dateKey)}
               toggleDone={toggleDone}
               upsertTask={upsertTask}
               categoryTone={categoryTone}
@@ -3079,9 +3086,11 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitl
               >
                 {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
               </button>
-              <span className={classNames("leading-snug", isDone && "line-through opacity-40", task.category && tone.accent)}>
+              <span className={classNames("min-w-0 flex-1 leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
                 {task.title}
               </span>
+              {task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-cyan-400/70">今</span>}
+              {task.thisWeek && !task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-amber-400/70">週</span>}
             </div>
           );
         })}
