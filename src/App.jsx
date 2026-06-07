@@ -375,6 +375,21 @@ function App() {
   const [notionError, setNotionError] = useState(null);
   const [notionAutoSync, setNotionAutoSync] = useState(() => localStorage.getItem("taskspace-notion-auto") !== "off");
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
+  const [panelOrder, setPanelOrder] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["tray", "today", "weekly", "7days", "board", "calendar"]; } catch { return ["tray", "today", "weekly", "7days", "board", "calendar"]; }
+  });
+  function movePanelSection(key, dir) {
+    setPanelOrder((prev) => {
+      const idx = prev.indexOf(key);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const swap = idx + dir;
+      if (swap < 0 || swap >= next.length) return prev;
+      [next[idx], next[swap]] = [next[swap], next[idx]];
+      localStorage.setItem("taskspace-panel-order", JSON.stringify(next));
+      return next;
+    });
+  }
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
@@ -1769,6 +1784,22 @@ function App() {
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">セクション順序</div>
+                    <div className="flex flex-col gap-1">
+                      {panelOrder.map((key, idx) => {
+                        const labels = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "7Days", board: "Board（プロジェクト列）", calendar: "Calendar" };
+                        return (
+                          <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
+                            <span className="flex-1 text-[11px] text-neutral-300">{labels[key] || key}</span>
+                            <button onClick={() => movePanelSection(key, -1)} disabled={idx === 0} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronUp className="h-3 w-3" /></button>
+                            <button onClick={() => movePanelSection(key, 1)} disabled={idx === panelOrder.length - 1} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronDown className="h-3 w-3" /></button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">カラム設定</div>
                     <button onClick={() => { setShowColumnsPanel((v) => !v); setShowSettingsPanel(false); }} className="w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left text-xs text-neutral-300 transition hover:bg-white/[0.07]">
                       Columns を編集…
@@ -1935,18 +1966,10 @@ function App() {
           </section>
         )}
 
-        <main className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))] transition-[padding] duration-200", mobileView === "calendar" && "hidden md:grid", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-          <section
-            className={classNames(
-              "min-w-0 gap-2 pb-1",
-              mobileView === "board"
-                ? leftPanelHorizontal ? "grid md:col-span-full" : "grid md:contents"
-                : leftPanelHorizontal ? "hidden md:block md:col-span-full" : "hidden md:contents",
-              "grid-cols-1"
-            )}
-          >
-            <div className={classNames("gap-2 md:min-h-[560px] xl:min-h-[660px]", mobileView === "board" ? "flex" : "hidden md:flex", leftPanelHorizontal ? "flex-row items-start" : "min-h-[420px] flex-col")}>
-              <div className={classNames(leftPanelHorizontal ? "min-w-[200px] flex-1" : "w-full")}>
+        <div className={classNames("flex flex-col gap-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          {panelOrder.map((sectionKey) => {
+            if (sectionKey === "tray") return (
+              <div key="tray" className={mobileView === "board" ? "block" : "hidden md:block"}>
                 <InboxTray
                   items={inboxItems}
                   updateInboxItem={updateInboxItem}
@@ -1959,97 +1982,85 @@ function App() {
                   onToggleTraySelect={onToggleTraySelect}
                 />
               </div>
-              <TodayColumn
-                wrapClass={leftPanelHorizontal ? "min-w-[200px] flex-1" : ""}
-                todayTasks={todayTasks}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnToday={handleDropOnToday}
-                moveTodayTask={moveTodayTask}
-                acceptInboxItem={acceptInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                defaultCategory={quickCategory}
-                defaultProject={quickProject}
-                addTask={addTask}
-                selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-              />
-              <WeeklyColumn
-                className={classNames("flex", leftPanelHorizontal ? "min-w-[200px] flex-1" : "flex-1")}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                weeklyRoots={weeklyRoots}
-                weeklyFlat={weeklyFlat}
-                setWeeklyFlat={setWeeklyFlat}
-                childrenOf={childrenOf}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnWeekly={handleDropOnWeekly}
-                moveWeeklyTask={moveWeeklyTask}
-                addTask={addTask}
-                addInboxItem={addInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-              />
-            </div>
-            {categories.map((cat) => (
-              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
-            ))}
-          </section>
-
-          <WeeklyColumn
-            className={mobileView === "weekly" ? "flex md:hidden" : "hidden"}
-            collapsed={collapsed}
-            setCollapsed={setCollapsed}
-            weeklyRoots={weeklyRoots}
-            weeklyFlat={weeklyFlat}
-            setWeeklyFlat={setWeeklyFlat}
-            childrenOf={childrenOf}
-            taskMap={taskMap}
-            categoryTone={categoryTone}
-            upsertTask={upsertTask}
-            removeTask={removeTask}
-            toggleDone={toggleDone}
-            toggleWeek={toggleWeek} toggleToday={toggleToday}
-            selectedTaskId={selectedTaskId}
-            setSelectedTaskId={setSelectedTaskId}
-            handleDropOnTask={handleDropOnTask}
-            handleDropOnWeekly={handleDropOnWeekly}
-            moveWeeklyTask={moveWeeklyTask}
-            addTask={addTask}
-            addInboxItem={addInboxItem}
-            returnTaskToTray={returnTaskToTray}
-            selectMode={selectMode}
-            selectedIds={selectedIds}
-            onToggleSelect={onToggleSelect}
-          />
-        </main>
-
-        <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block", "transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-          <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
-        </div>
-
-        <div className={classNames(mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden", "transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-          <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+            );
+            if (sectionKey === "today") return (
+              <div key="today" className={mobileView === "board" ? "block" : "hidden md:block"}>
+                <TodayColumn
+                  wrapClass=""
+                  todayTasks={todayTasks}
+                  collapsed={collapsed}
+                  setCollapsed={setCollapsed}
+                  taskMap={taskMap}
+                  categoryTone={categoryTone}
+                  upsertTask={upsertTask}
+                  removeTask={removeTask}
+                  toggleDone={toggleDone}
+                  toggleWeek={toggleWeek} toggleToday={toggleToday}
+                  selectedTaskId={selectedTaskId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  handleDropOnTask={handleDropOnTask}
+                  handleDropOnToday={handleDropOnToday}
+                  moveTodayTask={moveTodayTask}
+                  acceptInboxItem={acceptInboxItem}
+                  returnTaskToTray={returnTaskToTray}
+                  defaultCategory={quickCategory}
+                  defaultProject={quickProject}
+                  addTask={addTask}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={onToggleSelect}
+                />
+              </div>
+            );
+            if (sectionKey === "weekly") return (
+              <div key="weekly" className={classNames(mobileView === "board" ? "block" : mobileView === "weekly" ? "block md:block" : "hidden md:block")}>
+                <WeeklyColumn
+                  className="flex"
+                  collapsed={collapsed}
+                  setCollapsed={setCollapsed}
+                  weeklyRoots={weeklyRoots}
+                  weeklyFlat={weeklyFlat}
+                  setWeeklyFlat={setWeeklyFlat}
+                  childrenOf={childrenOf}
+                  taskMap={taskMap}
+                  categoryTone={categoryTone}
+                  upsertTask={upsertTask}
+                  removeTask={removeTask}
+                  toggleDone={toggleDone}
+                  toggleWeek={toggleWeek} toggleToday={toggleToday}
+                  selectedTaskId={selectedTaskId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  handleDropOnTask={handleDropOnTask}
+                  handleDropOnWeekly={handleDropOnWeekly}
+                  moveWeeklyTask={moveWeeklyTask}
+                  addTask={addTask}
+                  addInboxItem={addInboxItem}
+                  returnTaskToTray={returnTaskToTray}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={onToggleSelect}
+                />
+              </div>
+            );
+            if (sectionKey === "board") return (
+              <div key="board" className={classNames("grid gap-2 md:[grid-template-columns:repeat(auto-fit,minmax(300px,1fr))]", mobileView === "board" ? "grid" : "hidden md:grid")}>
+                {categories.map((cat) => (
+                  <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
+                ))}
+              </div>
+            );
+            if (sectionKey === "7days") return (
+              <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
+                <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              </div>
+            );
+            if (sectionKey === "calendar") return (
+              <div key="calendar" className={mobileView === "calendar" ? "block" : "hidden md:block"}>
+                <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+              </div>
+            );
+            return null;
+          })}
         </div>
 
         <div className={classNames("transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
