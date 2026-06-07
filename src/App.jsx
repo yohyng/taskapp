@@ -319,6 +319,7 @@ function normalizeTask(task) {
     thisWeek: false,
     parentId: null,
     archived: false,
+    scheduledDate: "",
     ...task,
   };
 }
@@ -377,6 +378,7 @@ function App() {
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
+  const [show7Days, setShow7Days] = useState(false);
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -570,6 +572,19 @@ function App() {
         } else {
           moveProjectTask(src.id, dst.id, true);
         }
+      }
+      return;
+    }
+
+    // Task → 7-day column
+    if (src.type === "task" && dst.type === "day-column") {
+      const todayKey = toDateKey(new Date());
+      if (dst.date === todayKey) {
+        upsertTask({ id: src.id, today: true, scheduledDate: "" });
+        setToast("今日のタスクに追加しました");
+      } else {
+        upsertTask({ id: src.id, today: false, scheduledDate: dst.date });
+        setToast(`${dst.label}に移動しました`);
       }
       return;
     }
@@ -1694,6 +1709,7 @@ function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
+            <button onClick={() => { setShow7Days((v) => !v); setMobileView("7days"); }} title="7 Days view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>7Days</button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
@@ -1869,10 +1885,11 @@ function App() {
           </div>
         </header>
 
-        <nav className="grid grid-cols-3 gap-1 md:hidden">
+        <nav className="grid grid-cols-4 gap-1 md:hidden">
           {[
             ["board", "Board"],
             ["weekly", "Weekly"],
+            ["7days", "7Days"],
             ["calendar", "Calendar"],
           ].map(([key, label]) => (
             <button
@@ -2028,6 +2045,10 @@ function App() {
 
         <div className={classNames(mobileView === "calendar" ? "block" : "hidden md:block", "transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+        </div>
+
+        <div className={classNames(mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden", "transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
         </div>
 
         <div className={classNames("transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -2933,6 +2954,152 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
+
+function getWeekDays(base = new Date()) {
+  const dow = base.getDay(); // 0=Sun
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const mon = new Date(base);
+  mon.setDate(base.getDate() + diffToMon);
+  mon.setHours(0, 0, 0, 0);
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(mon);
+    d.setDate(mon.getDate() + i);
+    return d;
+  });
+}
+
+function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+  const todayKey = toDateKey(new Date());
+  const weekDays = getWeekDays();
+  const [newTitles, setNewTitles] = useState({});
+
+  function tasksForDay(dateKey) {
+    if (dateKey === todayKey) {
+      return tasks.filter((t) => !t.archived && (t.today || t.scheduledDate === dateKey));
+    }
+    return tasks.filter((t) => !t.archived && t.scheduledDate === dateKey);
+  }
+
+  function handleAdd(dateKey, dayLabel) {
+    const title = (newTitles[dateKey] || "").trim();
+    if (!title) return;
+    if (dateKey === todayKey) {
+      addTask({ title, today: true, plain: true });
+    } else {
+      const t = addTask({ title, plain: true });
+      if (t) upsertTask({ id: t.id, scheduledDate: dateKey });
+    }
+    setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
+  }
+
+  return (
+    <div className="mt-1 overflow-x-auto pb-2">
+      {/* 幅広: 7列横並び / 幅狭: 縦積み */}
+      <div className="grid grid-cols-1 gap-2 md:grid-cols-7 md:min-w-[700px]">
+        {weekDays.map((date, i) => {
+          const dateKey = toDateKey(date);
+          const isToday = dateKey === todayKey;
+          const dayTasks = tasksForDay(dateKey);
+          const label = DAY_LABELS[i];
+          const isSat = i === 5;
+          const isSun = i === 6;
+
+          return (
+            <DayColumn
+              key={dateKey}
+              dateKey={dateKey}
+              label={label}
+              date={date}
+              isToday={isToday}
+              isSat={isSat}
+              isSun={isSun}
+              tasks={dayTasks}
+              newTitle={newTitles[dateKey] || ""}
+              setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+              onAdd={() => handleAdd(dateKey, label)}
+              toggleDone={toggleDone}
+              upsertTask={upsertTask}
+              categoryTone={categoryTone}
+              setSelectedTaskId={setSelectedTaskId}
+              selectedTaskId={selectedTaskId}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
+
+  const headColor = isToday
+    ? "text-cyan-300 border-cyan-400/40 bg-cyan-500/10"
+    : isSun ? "text-rose-300 border-rose-400/20 bg-rose-500/5"
+    : isSat ? "text-sky-300 border-sky-400/20 bg-sky-500/5"
+    : "text-neutral-300 border-white/10 bg-white/[0.03]";
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={classNames(
+        "flex min-h-[200px] md:min-h-[420px] flex-col rounded-lg border p-1.5 transition",
+        isOver ? "border-white/30 bg-white/[0.07]" : "border-white/8 bg-black/10",
+      )}
+    >
+      {/* 日付ヘッダー */}
+      <div className={classNames("mb-1.5 rounded-md border px-2 py-1 text-center", headColor)}>
+        <div className="text-sm font-bold">{label}</div>
+        <div className="text-[10px] opacity-70">{date.getMonth() + 1}/{date.getDate()}</div>
+        {isToday && <div className="text-[9px] mt-0.5 opacity-80">TODAY</div>}
+      </div>
+
+      {/* タスク一覧 */}
+      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
+        {tasks.map((task) => {
+          const tone = categoryTone(task.category);
+          const isDone = task.status === "完了";
+          return (
+            <div
+              key={task.id}
+              onClick={() => setSelectedTaskId(task.id)}
+              className={classNames(
+                "flex cursor-pointer items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+                selectedTaskId === task.id && "bg-white/[0.09]",
+              )}
+            >
+              <button
+                onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+                className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+              >
+                {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+              </button>
+              <span className={classNames("leading-snug", isDone && "line-through opacity-40", task.category && tone.accent)}>
+                {task.title}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* 追加入力 */}
+      <div className="mt-1 flex gap-1">
+        <input
+          value={newTitle}
+          onChange={(e) => setNewTitle(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && onAdd()}
+          placeholder="追加…"
+          className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20"
+        />
+        <button onClick={onAdd} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200">
+          <Plus className="h-3 w-3" />
+        </button>
+      </div>
     </div>
   );
 }

@@ -24,6 +24,7 @@ function taskToRow(t) {
     plain: t.plain ?? false,
     sort_order: t.sortOrder ?? null,
     archived: t.archived ?? false,
+    scheduled_date: t.scheduledDate ?? '',
   }
 }
 
@@ -47,6 +48,7 @@ export function rowToTask(r) {
     plain: r.plain,
     sortOrder: r.sort_order ?? null,
     archived: r.archived ?? false,
+    scheduledDate: r.scheduled_date ?? '',
   }
 }
 
