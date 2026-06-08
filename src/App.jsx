@@ -2990,17 +2990,11 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
 
-  function getWeekDaysForOffset() {
-    const mon = new Date(2026, 4, 5); // Monday of the first week
-    mon.setDate(mon.getDate() + weekOffset * 7);
-    return Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(mon);
-      d.setDate(mon.getDate() + i);
-      return d;
-    });
-  }
-
-  const weekDays = getWeekDaysForOffset();
+  const weekDays = useMemo(() => {
+    const base = new Date();
+    base.setDate(base.getDate() + weekOffset * 7);
+    return getWeekDays(base);
+  }, [weekOffset]);
 
   function tasksForDay(dateKey) {
     if (dateKey === todayKey) {
