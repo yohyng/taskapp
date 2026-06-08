@@ -3097,6 +3097,41 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
   );
 }
 
+function DayTask({ task, categoryTone, toggleDone, setSelectedTaskId, selectedTaskId }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: `daytask-${task.id}`,
+    data: { type: "task", id: task.id },
+  });
+  const tone = categoryTone(task.category);
+  const isDone = task.status === "完了";
+  return (
+    <div
+      ref={setNodeRef}
+      {...attributes}
+      {...listeners}
+      style={transform ? { transform: `translate(${transform.x}px,${transform.y}px)`, zIndex: 50 } : undefined}
+      onClick={() => setSelectedTaskId(task.id)}
+      className={classNames(
+        "flex cursor-grab items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+        selectedTaskId === task.id && "bg-white/[0.09]",
+        isDragging && "opacity-40",
+      )}
+    >
+      <button
+        onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+        className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+      >
+        {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+      </button>
+      <span className={classNames("min-w-0 flex-1 leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
+        {task.title}
+      </span>
+      {task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-cyan-400/70">今</span>}
+      {task.thisWeek && !task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-amber-400/70">週</span>}
+    </div>
+  );
+}
+
 function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
 
@@ -3123,32 +3158,16 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitl
 
       {/* タスク一覧 */}
       <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
-        {tasks.map((task) => {
-          const tone = categoryTone(task.category);
-          const isDone = task.status === "完了";
-          return (
-            <div
-              key={task.id}
-              onClick={() => setSelectedTaskId(task.id)}
-              className={classNames(
-                "flex cursor-pointer items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
-                selectedTaskId === task.id && "bg-white/[0.09]",
-              )}
-            >
-              <button
-                onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
-                className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
-              >
-                {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
-              </button>
-              <span className={classNames("min-w-0 flex-1 leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
-                {task.title}
-              </span>
-              {task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-cyan-400/70">今</span>}
-              {task.thisWeek && !task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-amber-400/70">週</span>}
-            </div>
-          );
-        })}
+        {tasks.map((task) => (
+          <DayTask
+            key={task.id}
+            task={task}
+            categoryTone={categoryTone}
+            toggleDone={toggleDone}
+            setSelectedTaskId={setSelectedTaskId}
+            selectedTaskId={selectedTaskId}
+          />
+        ))}
       </div>
 
       {/* 追加入力 */}
