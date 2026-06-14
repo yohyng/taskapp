@@ -1984,7 +1984,7 @@ function App() {
         {show5col && (
           <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* TRAY + Today stacked in col 1 */}
-            <div className="flex min-w-[220px] w-[220px] flex-col gap-2">
+            <div className="flex min-w-[180px] flex-1 flex-col gap-2">
               <InboxTray
                 label={sectionLabels.tray}
                 items={inboxItems}
@@ -2025,7 +2025,7 @@ function App() {
               />
             </div>
             {/* Weekly col */}
-            <div className="min-w-[220px] w-[220px]">
+            <div className="min-w-[180px] flex-1">
               <WeeklyColumn
                 label={sectionLabels.weekly}
                 className="flex"
@@ -2056,7 +2056,7 @@ function App() {
             </div>
             {/* Board category columns */}
             {categories.map((cat) => (
-              <div key={cat.key} className="min-w-[260px] flex-1">
+              <div key={cat.key} className="min-w-[180px] flex-1">
                 <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
               </div>
             ))}
