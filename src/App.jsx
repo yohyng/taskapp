@@ -1982,6 +1982,7 @@ function App() {
         )}
 
         {show5col && (
+          <>
           <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* TRAY + Today stacked in col 1 */}
             <div className="flex min-w-[180px] flex-1 flex-col gap-2">
@@ -2061,6 +2062,12 @@ function App() {
               </div>
             ))}
           </div>
+          {show7Days && (
+            <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+              <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+            </div>
+          )}
+          </>
         )}
 
         <div className={classNames("flex flex-col gap-2 transition-[padding] duration-200", show5col && "hidden md:hidden", (selectedTask || selectedProject) && "md:pr-[384px]")}>
