@@ -378,6 +378,17 @@ function App() {
   const [panelOrder, setPanelOrder] = useState(() => {
     try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["tray", "today", "weekly", "7days", "board", "calendar"]; } catch { return ["tray", "today", "weekly", "7days", "board", "calendar"]; }
   });
+  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "7Days", board: "Board", calendar: "Calendar" };
+  const [sectionLabels, setSectionLabels] = useState(() => {
+    try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
+  });
+  function updateSectionLabel(key, label) {
+    setSectionLabels((prev) => {
+      const next = { ...prev, [key]: label };
+      localStorage.setItem("taskspace-section-labels", JSON.stringify(next));
+      return next;
+    });
+  }
   function movePanelSection(key, dir) {
     setPanelOrder((prev) => {
       const idx = prev.indexOf(key);
@@ -1786,16 +1797,18 @@ function App() {
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">セクション順序</div>
                     <div className="flex flex-col gap-1">
-                      {panelOrder.map((key, idx) => {
-                        const labels = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "7Days", board: "Board（プロジェクト列）", calendar: "Calendar" };
-                        return (
-                          <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
-                            <span className="flex-1 text-[11px] text-neutral-300">{labels[key] || key}</span>
-                            <button onClick={() => movePanelSection(key, -1)} disabled={idx === 0} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronUp className="h-3 w-3" /></button>
-                            <button onClick={() => movePanelSection(key, 1)} disabled={idx === panelOrder.length - 1} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronDown className="h-3 w-3" /></button>
-                          </div>
-                        );
-                      })}
+                      {panelOrder.map((key, idx) => (
+                        <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
+                          <input
+                            value={sectionLabels[key] ?? DEFAULT_SECTION_LABELS[key] ?? key}
+                            onChange={(e) => updateSectionLabel(key, e.target.value)}
+                            className="flex-1 min-w-0 bg-transparent text-[11px] text-neutral-300 outline-none placeholder:text-neutral-600"
+                            placeholder={DEFAULT_SECTION_LABELS[key] || key}
+                          />
+                          <button onClick={() => movePanelSection(key, -1)} disabled={idx === 0} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronUp className="h-3 w-3" /></button>
+                          <button onClick={() => movePanelSection(key, 1)} disabled={idx === panelOrder.length - 1} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronDown className="h-3 w-3" /></button>
+                        </div>
+                      ))}
                     </div>
                   </div>
 
@@ -1983,84 +1996,86 @@ function App() {
               }
             }
 
+            const trayEl = (
+              <InboxTray
+                label={sectionLabels.tray}
+                items={inboxItems}
+                updateInboxItem={updateInboxItem}
+                removeInboxItem={removeInboxItem}
+                moveInboxItem={moveInboxItem}
+                addInboxItem={addInboxItem}
+                acceptInboxItem={acceptInboxItem}
+                selectMode={selectMode}
+                selectedTrayIds={selectedTrayIds}
+                onToggleTraySelect={onToggleTraySelect}
+              />
+            );
+            const todayEl = (
+              <TodayColumn
+                label={sectionLabels.today}
+                wrapClass=""
+                todayTasks={todayTasks}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek} toggleToday={toggleToday}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+                handleDropOnToday={handleDropOnToday}
+                moveTodayTask={moveTodayTask}
+                acceptInboxItem={acceptInboxItem}
+                returnTaskToTray={returnTaskToTray}
+                defaultCategory={quickCategory}
+                defaultProject={quickProject}
+                addTask={addTask}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
+              />
+            );
+            const weeklyEl = (extraClass = "") => (
+              <WeeklyColumn
+                label={sectionLabels.weekly}
+                className={classNames("flex", extraClass)}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                weeklyRoots={weeklyRoots}
+                weeklyFlat={weeklyFlat}
+                setWeeklyFlat={setWeeklyFlat}
+                childrenOf={childrenOf}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek} toggleToday={toggleToday}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+                handleDropOnWeekly={handleDropOnWeekly}
+                moveWeeklyTask={moveWeeklyTask}
+                addTask={addTask}
+                addInboxItem={addInboxItem}
+                returnTaskToTray={returnTaskToTray}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
+              />
+            );
+            const boardCols = categories.map((cat) => (
+              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
+            ));
+
             function renderBoardSection(key) {
-              if (key === "tray") return (
-                <div key="tray" className="min-w-[200px] flex-1">
-                  <InboxTray
-                    items={inboxItems}
-                    updateInboxItem={updateInboxItem}
-                    removeInboxItem={removeInboxItem}
-                    moveInboxItem={moveInboxItem}
-                    addInboxItem={addInboxItem}
-                    acceptInboxItem={acceptInboxItem}
-                    selectMode={selectMode}
-                    selectedTrayIds={selectedTrayIds}
-                    onToggleTraySelect={onToggleTraySelect}
-                  />
-                </div>
-              );
-              if (key === "today") return (
-                <div key="today" className="min-w-[200px] flex-1">
-                  <TodayColumn
-                    wrapClass=""
-                    todayTasks={todayTasks}
-                    collapsed={collapsed}
-                    setCollapsed={setCollapsed}
-                    taskMap={taskMap}
-                    categoryTone={categoryTone}
-                    upsertTask={upsertTask}
-                    removeTask={removeTask}
-                    toggleDone={toggleDone}
-                    toggleWeek={toggleWeek} toggleToday={toggleToday}
-                    selectedTaskId={selectedTaskId}
-                    setSelectedTaskId={setSelectedTaskId}
-                    handleDropOnTask={handleDropOnTask}
-                    handleDropOnToday={handleDropOnToday}
-                    moveTodayTask={moveTodayTask}
-                    acceptInboxItem={acceptInboxItem}
-                    returnTaskToTray={returnTaskToTray}
-                    defaultCategory={quickCategory}
-                    defaultProject={quickProject}
-                    addTask={addTask}
-                    selectMode={selectMode}
-                    selectedIds={selectedIds}
-                    onToggleSelect={onToggleSelect}
-                  />
-                </div>
-              );
-              if (key === "weekly") return (
-                <div key="weekly" className="min-w-[200px] flex-1">
-                  <WeeklyColumn
-                    className="flex"
-                    collapsed={collapsed}
-                    setCollapsed={setCollapsed}
-                    weeklyRoots={weeklyRoots}
-                    weeklyFlat={weeklyFlat}
-                    setWeeklyFlat={setWeeklyFlat}
-                    childrenOf={childrenOf}
-                    taskMap={taskMap}
-                    categoryTone={categoryTone}
-                    upsertTask={upsertTask}
-                    removeTask={removeTask}
-                    toggleDone={toggleDone}
-                    toggleWeek={toggleWeek} toggleToday={toggleToday}
-                    selectedTaskId={selectedTaskId}
-                    setSelectedTaskId={setSelectedTaskId}
-                    handleDropOnTask={handleDropOnTask}
-                    handleDropOnWeekly={handleDropOnWeekly}
-                    moveWeeklyTask={moveWeeklyTask}
-                    addTask={addTask}
-                    addInboxItem={addInboxItem}
-                    returnTaskToTray={returnTaskToTray}
-                    selectMode={selectMode}
-                    selectedIds={selectedIds}
-                    onToggleSelect={onToggleSelect}
-                  />
-                </div>
-              );
-              if (key === "board") return categories.map((cat) => (
-                <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
-              ));
+              if (key === "tray") return <div key="tray" className="min-w-[200px] flex-1">{trayEl}</div>;
+              if (key === "today") return <div key="today" className="min-w-[200px] flex-1">{todayEl}</div>;
+              if (key === "weekly") return <div key="weekly" className="min-w-[200px] flex-1">{weeklyEl()}</div>;
+              if (key === "board") return boardCols;
               return null;
             }
 
@@ -2068,26 +2083,41 @@ function App() {
               if (chunk.type === "board-group") {
                 const isVisibleMobile = mobileView === "board";
                 const hasWeekly = chunk.keys.includes("weekly");
+                // Stack tray+today in one column if adjacent
+                const colItems = [];
+                const keys = chunk.keys;
+                let ki = 0;
+                while (ki < keys.length) {
+                  if (keys[ki] === "tray" && keys[ki + 1] === "today") {
+                    colItems.push({ type: "stack", first: "tray", second: "today" });
+                    ki += 2;
+                  } else if (keys[ki] === "today" && keys[ki + 1] === "tray") {
+                    colItems.push({ type: "stack", first: "today", second: "tray" });
+                    ki += 2;
+                  } else {
+                    colItems.push({ type: "single", key: keys[ki] });
+                    ki++;
+                  }
+                }
+
                 return (
                   <div key={`group-${ci}`} className={classNames(isVisibleMobile ? "flex" : "hidden md:flex", "flex-wrap gap-2 md:flex-nowrap md:items-start")}>
-                    {chunk.keys.map((k) => renderBoardSection(k))}
+                    {colItems.map((col, j) => {
+                      if (col.type === "stack") {
+                        const firstEl = col.first === "tray" ? trayEl : todayEl;
+                        const secondEl = col.second === "tray" ? trayEl : todayEl;
+                        return (
+                          <div key={`stack-${j}`} className="flex min-w-[200px] flex-1 flex-col gap-2">
+                            {firstEl}
+                            {secondEl}
+                          </div>
+                        );
+                      }
+                      return renderBoardSection(col.key);
+                    })}
                     {/* mobile weekly タブでも weekly を表示 */}
                     {!isVisibleMobile && hasWeekly && mobileView === "weekly" && (
-                      <div className="flex-1 md:hidden">
-                        <WeeklyColumn
-                          className="flex"
-                          collapsed={collapsed} setCollapsed={setCollapsed}
-                          weeklyRoots={weeklyRoots} weeklyFlat={weeklyFlat} setWeeklyFlat={setWeeklyFlat}
-                          childrenOf={childrenOf} taskMap={taskMap} categoryTone={categoryTone}
-                          upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone}
-                          toggleWeek={toggleWeek} toggleToday={toggleToday}
-                          selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId}
-                          handleDropOnTask={handleDropOnTask} handleDropOnWeekly={handleDropOnWeekly}
-                          moveWeeklyTask={moveWeeklyTask} addTask={addTask} addInboxItem={addInboxItem}
-                          returnTaskToTray={returnTaskToTray} selectMode={selectMode}
-                          selectedIds={selectedIds} onToggleSelect={onToggleSelect}
-                        />
-                      </div>
+                      <div className="flex-1 md:hidden">{weeklyEl()}</div>
                     )}
                   </div>
                 );
@@ -2176,6 +2206,7 @@ function App() {
 }
 
 function TodayColumn({
+  label = "Today",
   todayTasks,
   collapsed,
   setCollapsed,
@@ -2226,7 +2257,7 @@ function TodayColumn({
         >
           {collapsed["column:today"] ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
           <CalendarDays className="h-3.5 w-3.5" />
-          <h2 className="text-sm font-semibold">Today</h2>
+          <h2 className="text-sm font-semibold">{label}</h2>
           <span className="rounded-full border border-cyan-200/15 px-1.5 py-0.5 text-[10px] text-cyan-100/45">{todayTasks.length}</span>
         </button>
       </div>
@@ -2277,6 +2308,7 @@ function TodayColumn({
 }
 
 function WeeklyColumn({
+  label = "Weekly",
   className = "",
   collapsed,
   setCollapsed,
@@ -2328,7 +2360,7 @@ function WeeklyColumn({
         >
           {collapsed["column:weekly"] ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
           <CalendarDays className="h-3.5 w-3.5" />
-          <h2 className="text-sm font-semibold">Weekly</h2>
+          <h2 className="text-sm font-semibold">{label}</h2>
           <span className="rounded-full border border-amber-200/15 px-1.5 py-0.5 text-[10px] text-amber-100/45">{weeklyRoots.length}</span>
         </button>
         {!collapsed["column:weekly"] && (
@@ -2357,7 +2389,7 @@ function WeeklyColumn({
   );
 }
 
-function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
+function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
@@ -2371,7 +2403,7 @@ function InboxTray({ items, updateInboxItem, removeInboxItem, moveInboxItem, add
       <button onClick={() => setOpen((value) => !value)} className="mb-2 flex w-full items-center justify-between gap-2 border-b border-white/10 pb-1.5 text-left">
         <div className="flex min-w-0 items-center gap-2">
           {open ? <ChevronDown className="h-4 w-4 text-neutral-500" /> : <ChevronRight className="h-4 w-4 text-neutral-500" />}
-          <span className="truncate text-sm font-semibold text-neutral-300">TRAY</span>
+          <span className="truncate text-sm font-semibold text-neutral-300">{label}</span>
           <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-500">{items.length}</span>
         </div>
         <span className="text-[10px] text-neutral-600">Notion</span>
