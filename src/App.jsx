@@ -637,11 +637,10 @@ function App() {
 
     // Task → 7-day column
     // scheduledDate を唯一の源として配置。legacy フラグ(today/thisWeek)はクリア。
-    // 子タスクをドラッグした場合は親から取り外して(parentId=null)単独で配置。
-    // category/project はそのまま（プロジェクトの性質を保持）。
+    // 曜日カラムにドロップ → プロジェクトから外してプレーンタスクとして配置。
     if (src.type === "task" && dst.type === "day-column") {
       const tKey = toDateKey(new Date());
-      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null });
+      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "" });
       setToast(dst.date === tKey ? "今日に配置しました" : `${dst.label}に配置しました`);
       return;
     }
@@ -3154,9 +3153,9 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   function handleAdd(dateKey) {
     const title = (newTitles[dateKey] || "").trim();
     if (!title) return;
-    // 7Days への追加は scheduledDate を唯一の源として設定
-    const t = addTask({ title, plain: true });
-    if (t) upsertTask({ id: t.id, scheduledDate: dateKey, today: false, thisWeek: false });
+    // scheduledDate を一発でセット（addTask→upsertTask の2段階は state が stale になるため避ける）
+    const newTask = normalizeTask({ id: uid(), title, category: "", project: "", status: "未着手", parentId: null, plain: true, scheduledDate: dateKey, today: false, thisWeek: false, memo: "", dueDate: "" });
+    commitTasks((prev) => [newTask, ...prev]);
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
