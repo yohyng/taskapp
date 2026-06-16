@@ -3424,8 +3424,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
     const idx = flatRoots.findIndex((t) => t.id === taskId);
     if (idx <= 0) return; // 先頭は親にできない
     const prev = flatRoots[idx - 1];
-    const self = flatRoots[idx];
-    upsertTask({ id: taskId, parentId: prev.id, category: prev.category || self.category, project: prev.project || self.project });
+    upsertTask({ id: taskId, parentId: prev.id });
   }
 
   function makeOutdent(taskId) {
