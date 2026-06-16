@@ -3185,7 +3185,7 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
   );
 }
 
-const DAY_LABELS = ["🌙🌙", "火", "水", "木", "金", "土", "日"];
+const DAY_LABELS = ["🌙月", "🔥火", "🌊水", "🌳木", "🪙金", "🪐土", "☀️日"];
 
 function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
