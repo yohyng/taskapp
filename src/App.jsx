@@ -3540,7 +3540,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
               {!isCol && (
                 <div className="flex flex-col gap-0.5">
                   {g.items.map((task) => (
-                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
+                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
                   ))}
                 </div>
               )}
