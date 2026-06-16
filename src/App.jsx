@@ -2036,9 +2036,9 @@ function App() {
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
-          <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <div className={classNames("grid grid-cols-1 gap-2 items-start pb-2 sm:grid-cols-2 lg:grid-cols-[180px_repeat(auto-fill,minmax(180px,1fr))]", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* TRAY column */}
-            <div className="min-w-[180px] flex-1">
+            <div className="min-w-0">
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
                 <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
                   <span className="text-sm font-bold text-neutral-200">TRAY</span>
@@ -2059,7 +2059,7 @@ function App() {
             </div>
             {/* Board category columns */}
             {categories.map((cat) => (
-              <div key={cat.key} className="min-w-[180px] flex-1">
+              <div key={cat.key} className="min-w-0">
                 <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
               </div>
             ))}
@@ -3327,7 +3327,7 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3441,7 +3441,12 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           upsertTask={upsertTask}
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
-          onOutdent={() => { upsertTask({ id: child.id, parentId: task.parentId || null }); }}
+          dayDateKey={dayDateKey}
+          onOutdent={() => {
+            const patch = { id: child.id, parentId: task.parentId || null };
+            if (!child.scheduledDate && dayDateKey) patch.scheduledDate = dayDateKey;
+            upsertTask(patch);
+          }}
         />
       ))}
     </div>
@@ -3488,7 +3493,11 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   }
 
   function makeOutdent(taskId) {
-    upsertTask({ id: taskId, parentId: null });
+    // 子タスクが scheduledDate を持っていない場合、この日付列の dateKey を引き継ぐ
+    const task = tasks.find((t) => t.id === taskId);
+    const patch = { id: taskId, parentId: null };
+    if (task && !task.scheduledDate) patch.scheduledDate = dateKey;
+    upsertTask(patch);
   }
 
   const headColor = isToday
@@ -3516,7 +3525,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
         {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
         ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
