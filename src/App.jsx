@@ -3261,8 +3261,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       <div className="pb-2">
         {forceHorizontal ? (
           <div className="overflow-x-auto">
-            <div className="grid min-w-[560px] gap-1" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
-              {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+            <div className="grid min-w-[480px] gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+              {[0, 1, 2, 3, 4].map((i) => {
                 const date = weekDays[i];
                 const dateKey = toDateKey(date);
                 return (
@@ -3272,8 +3272,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                     label={DAY_LABELS[i]}
                     date={date}
                     isToday={dateKey === todayKey}
-                    isSat={i === 5}
-                    isSun={i === 6}
+                    isSat={false}
+                    isSun={false}
                     stacked
                     tasks={tasksForDay(dateKey, date)}
                     childrenOf={childrenOf}
@@ -3290,6 +3290,36 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                   />
                 );
               })}
+              <div className="flex flex-col gap-1">
+                {[5, 6].map((i) => {
+                  const date = weekDays[i];
+                  const dateKey = toDateKey(date);
+                  return (
+                    <DayColumn
+                      key={dateKey}
+                      dateKey={dateKey}
+                      label={DAY_LABELS[i]}
+                      date={date}
+                      isToday={dateKey === todayKey}
+                      isSat={i === 5}
+                      isSun={i === 6}
+                      stacked
+                      tasks={tasksForDay(dateKey, date)}
+                      childrenOf={childrenOf}
+                      newTitle={newTitles[dateKey] || ""}
+                      setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                      onAdd={() => handleAdd(dateKey)}
+                      toggleDone={toggleDone}
+                      upsertTask={upsertTask}
+                      removeTask={removeTask}
+                      categoryTone={categoryTone}
+                      setSelectedTaskId={setSelectedTaskId}
+                      selectedTaskId={selectedTaskId}
+                      projectRules={projectRules}
+                    />
+                  );
+                })}
+              </div>
             </div>
           </div>
         ) : (
