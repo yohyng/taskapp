@@ -302,6 +302,14 @@ function projectLabelFromKey(key) {
   return { category, project: rest.join("::") };
 }
 
+const FONT_OPTIONS = [
+  { key: "sans", label: "ゴシック（標準）", css: 'system-ui, -apple-system, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif' },
+  { key: "mincho", label: "明朝", css: '"Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif' },
+  { key: "rounded", label: "丸ゴシック", css: '"Hiragino Maru Gothic ProN", "Quicksand", "Noto Sans JP", system-ui, sans-serif' },
+  { key: "yugothic", label: "游ゴシック", css: '"Yu Gothic", "YuGothic", "Hiragino Kaku Gothic ProN", sans-serif' },
+  { key: "mono", label: "等幅", css: 'ui-monospace, SFMono-Regular, Menlo, "Courier New", monospace' },
+];
+
 function normalizeTask(task) {
   return {
     dueDate: "",
@@ -403,6 +411,8 @@ function App() {
   const [mobileView, setMobileView] = useState("board");
   const [show7Days, setShow7Days] = useState(() => localStorage.getItem("taskspace-show7days") !== "false");
   const [show5col, setShow5col] = useState(() => localStorage.getItem("taskspace-show5col") !== "false");
+  const [appFont, setAppFont] = useState(() => localStorage.getItem("taskspace-font") || "sans");
+  const appFontCss = (FONT_OPTIONS.find((f) => f.key === appFont) || FONT_OPTIONS[0]).css;
   // md(768px)以上か。5列ビューと通常ビューを排他マウントし、ドラッグID重複を防ぐ
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
   useEffect(() => {
@@ -1743,7 +1753,7 @@ function App() {
 
   return (
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-100">
+    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
@@ -1809,6 +1819,17 @@ function App() {
                     <button onClick={() => { const v = !leftPanelHorizontal; setLeftPanelHorizontal(v); localStorage.setItem("taskspace-left-horizontal", String(v)); }} className={classNames("w-full rounded border px-2 py-1.5 text-left text-xs transition", leftPanelHorizontal ? "border-sky-400/30 bg-sky-400/10 text-sky-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
                       {leftPanelHorizontal ? "✓ TRAY/Today/Weekly 横並び" : "TRAY/Today/Weekly 横並び"}
                     </button>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">フォント</div>
+                    <select
+                      value={appFont}
+                      onChange={(e) => { setAppFont(e.target.value); localStorage.setItem("taskspace-font", e.target.value); }}
+                      className="w-full rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"
+                    >
+                      {FONT_OPTIONS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+                    </select>
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
@@ -3303,7 +3324,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
       </div>
 
       {/* タスク一覧 */}
-      <div className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
+      <div className="flex flex-col gap-0.5">
         {tasks.map((task) => (
           <DayTask
             key={task.id}
@@ -3318,14 +3339,14 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
         ))}
       </div>
 
-      {/* 追加入力 */}
-      <div className="mt-1 flex gap-1">
+      {/* 追加入力（最後のタスクのすぐ下） */}
+      <div className="mt-0.5 flex gap-1">
         <input
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && onAdd()}
           placeholder="追加…"
-          className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20"
+          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20 focus:bg-white/[0.025]"
         />
         <button onClick={onAdd} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200">
           <Plus className="h-3 w-3" />
