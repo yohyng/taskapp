@@ -3642,7 +3642,7 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
               onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
               className="flex-1 bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
             />
-            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">🔄</span>}
+            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">↻</span>}
           </div>
           <p className="mt-1 text-xs text-neutral-500">{category}</p>
         </div>
