@@ -375,7 +375,7 @@ function App() {
   const [panelOrder, setPanelOrder] = useState(() => {
     try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "today", "board", "weekly", "calendar"]; } catch { return ["7days", "tray", "today", "board", "weekly", "calendar"]; }
   });
-  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "7Days", board: "Board", calendar: "Calendar" };
+  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "Weekly", board: "Board", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
     try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
   });
@@ -612,9 +612,11 @@ function App() {
 
     // Task → 7-day column
     // scheduledDate を唯一の源として配置。legacy フラグ(today/thisWeek)はクリア。
+    // 子タスクをドラッグした場合は親から取り外して(parentId=null)単独で配置。
+    // category/project はそのまま（プロジェクトの性質を保持）。
     if (src.type === "task" && dst.type === "day-column") {
       const tKey = toDateKey(new Date());
-      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false });
+      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null });
       setToast(dst.date === tKey ? "今日に配置しました" : `${dst.label}に配置しました`);
       return;
     }
@@ -1751,7 +1753,7 @@ function App() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <button onClick={() => { const next = !show5col; setShow5col(next); localStorage.setItem("taskspace-show5col", String(next)); }} title="5列カラムビュー" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show5col ? "border-violet-400/40 bg-violet-500/15 text-violet-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>5列</button>
-            <button onClick={() => { const next = !show7Days; setShow7Days(next); localStorage.setItem("taskspace-show7days", String(next)); setMobileView("7days"); }} title="7 Days view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>7Days</button>
+            <button onClick={() => { const next = !show7Days; setShow7Days(next); localStorage.setItem("taskspace-show7days", String(next)); setMobileView("7days"); }} title="Weekly view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Weekly</button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
@@ -1945,11 +1947,10 @@ function App() {
           </div>
         </header>
 
-        <nav className="grid grid-cols-4 gap-1 md:hidden">
+        <nav className="grid grid-cols-3 gap-1 md:hidden">
           {[
             ["board", "Board"],
-            ["weekly", "Weekly"],
-            ["7days", "7Days"],
+            ["7days", "Weekly"],
             ["calendar", "Calendar"],
           ].map(([key, label]) => (
             <button
@@ -3222,11 +3223,11 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSel
           {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
         </button>
         <div className="min-w-0 flex-1">
-          <div className={classNames("leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
+          <div className={classNames("break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100", isDone && "line-through opacity-40")}>
             {task.title}
           </div>
           {task.project && depth === 0 && (
-            <div className={classNames("text-[9px] opacity-50 truncate", tone.accent)}>{task.project}</div>
+            <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
           )}
         </div>
       </div>
@@ -3250,24 +3251,24 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
 
   const headColor = isToday
-    ? "text-cyan-300 border-cyan-400/40 bg-cyan-500/10"
-    : isSun ? "text-rose-300 border-rose-400/20 bg-rose-500/5"
-    : isSat ? "text-sky-300 border-sky-400/20 bg-sky-500/5"
-    : "text-neutral-300 border-white/10 bg-white/[0.03]";
+    ? "text-cyan-300 border-cyan-400/50"
+    : isSun ? "text-rose-300 border-white/10"
+    : isSat ? "text-sky-300 border-white/10"
+    : "text-neutral-300 border-white/10";
 
   return (
     <div
       ref={setNodeRef}
       className={classNames(
-        "flex min-h-[200px] md:min-h-[420px] flex-col rounded-lg border p-1.5 transition",
-        isOver ? "border-white/30 bg-white/[0.07]" : "border-white/8 bg-black/10",
+        "flex min-h-[160px] md:min-h-[420px] flex-col rounded-md p-1 transition",
+        isOver ? "bg-white/[0.06]" : "bg-transparent",
       )}
     >
-      {/* 日付ヘッダー */}
-      <div className={classNames("mb-1.5 rounded-md border px-2 py-1 text-center", headColor)}>
-        <div className="text-sm font-bold">{label}</div>
-        <div className="text-[10px] opacity-70">{date.getMonth() + 1}/{date.getDate()}</div>
-        {isToday && <div className="text-[9px] mt-0.5 opacity-80">TODAY</div>}
+      {/* 日付ヘッダー（シンプルな下線のみ） */}
+      <div className={classNames("mb-1 flex items-baseline gap-1.5 border-b px-1 pb-1", headColor)}>
+        <span className="text-sm font-bold">{label}</span>
+        <span className="text-[10px] opacity-60">{date.getMonth() + 1}/{date.getDate()}</span>
+        {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
       {/* タスク一覧 */}
@@ -3673,7 +3674,7 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
       </div>
       <div className="space-y-2">
         <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
-        <PropertyRow label="Project"><input value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} list="project-options" placeholder={task.category ? "Project" : NO_CATEGORY_LABEL} className="w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none placeholder:text-neutral-600" /><datalist id="project-options">{siblingProjects.map((project) => <option key={project} value={project} />)}</datalist></PropertyRow>
+        <PropertyRow label="Project"><select value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{task.category ? "（未選択）" : NO_CATEGORY_LABEL}</option>{siblingProjects.map((project) => <option key={project} value={project}>{project}</option>)}{task.project && !siblingProjects.includes(task.project) && <option value={task.project}>{task.project}</option>}</select></PropertyRow>
         <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
         <PropertyRow label="Due"><input type="date" value={task.dueDate || ""} onChange={(event) => upsertTask({ id: task.id, dueDate: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" /></PropertyRow>
         <PropertyRow label="Repeat">

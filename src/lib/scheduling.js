@@ -76,13 +76,15 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
   )).forEach(addRoot);
 
   // 2) プロジェクト繰り返しルール由来のゴースト（rootのみ）
+  // 既に特定日へ明示配置済み(scheduledDate あり)のタスクはゴースト表示しない
+  // （配置先の曜日と元の曜日の両方に出て複製されるのを防ぐ）
   if (projectRules && date) {
     Object.entries(projectRules).forEach(([ruleKey, rule]) => {
       if (!ruleMatchesWeekday(rule, date, dateKey)) return;
       const [cat, ...rest] = ruleKey.split("::");
       const proj = rest.join("::");
       tasks
-        .filter((t) => !t.archived && t.category === cat && t.project === proj && !t.parentId)
+        .filter((t) => !t.archived && !t.scheduledDate && t.category === cat && t.project === proj && !t.parentId)
         .forEach(addRoot);
     });
   }

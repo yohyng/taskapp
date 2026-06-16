@@ -143,12 +143,23 @@ describe("rootTasksForDay", () => {
     expect(got.map((t) => t.id)).toEqual(["b"]);
   });
 
-  it("adds recurring project ghosts on matching weekday without duplicating", () => {
+  it("adds recurring project ghosts for unscheduled project roots on matching weekday", () => {
     const projectRules = { "NOMLAB::P": { recurrence: "weekly", recurrenceDay: 2 } }; // Tuesday
-    const got = rootTasksForDay({ tasks, projectRules, dateKey: TODAY, date: new Date(2026, 5, 16), todayKey: TODAY });
+    // e2: project P root with NO scheduledDate -> should ghost onto Tuesday
+    const withGhost = [...tasks, { id: "g", parentId: null, category: "NOMLAB", project: "P" }];
+    const got = rootTasksForDay({ tasks: withGhost, projectRules, dateKey: TODAY, date: new Date(2026, 5, 16), todayKey: TODAY });
     const ids = got.map((t) => t.id).sort();
-    // a (scheduled today) already in; b is project P root -> added via ghost; d legacy today
-    expect(ids).toEqual(["a", "b", "d"]);
+    // a (scheduled today), d (legacy today), g (ghost). b is EXCLUDED from ghost (it has scheduledDate=Thu)
+    expect(ids).toEqual(["a", "d", "g"]);
+  });
+
+  it("does NOT ghost a task that has been explicitly placed on another day (no duplication)", () => {
+    const projectRules = { "NOMLAB::P": { recurrence: "weekly", recurrenceDay: 2 } }; // Tuesday
+    // b is in project P and scheduled for Thursday; it must appear ONLY on Thursday, never as a Tuesday ghost
+    const tue = rootTasksForDay({ tasks, projectRules, dateKey: TODAY, date: new Date(2026, 5, 16), todayKey: TODAY });
+    const thu = rootTasksForDay({ tasks, projectRules, dateKey: "2026-06-18", date: new Date(2026, 5, 18), todayKey: TODAY });
+    expect(tue.map((t) => t.id)).not.toContain("b");
+    expect(thu.map((t) => t.id)).toContain("b");
   });
 });
 
