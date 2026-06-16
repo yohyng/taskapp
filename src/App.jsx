@@ -410,7 +410,7 @@ function App() {
     });
   }
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
-  const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
+  const [calendarMonth, setCalendarMonth] = useState(() => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1); });
   const [mobileView, setMobileView] = useState("board");
   const [show7Days, setShow7Days] = useState(() => localStorage.getItem("taskspace-show7days") !== "false");
   const [show5col, setShow5col] = useState(() => localStorage.getItem("taskspace-show5col") !== "false");
