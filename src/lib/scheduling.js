@@ -85,7 +85,10 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
       const proj = rest.join("::");
       tasks
         .filter((t) => !t.archived && !t.scheduledDate && t.category === cat && t.project === proj && !t.parentId)
-        .forEach(addRoot);
+        .forEach((t) => {
+          const ghostTask = { ...t, __ghost: true };
+          addRoot(ghostTask);
+        });
     });
   }
 

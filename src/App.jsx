@@ -3326,6 +3326,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               >
                 {task.title}
               </div>
+              {task.__ghost && <span className="shrink-0 text-[11px] text-neutral-500">🔄</span>}
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
                 title="詳細を開く"
