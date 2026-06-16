@@ -3375,10 +3375,14 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       plainTasks.push(t);
     }
   }
-  // recurrenceTime 順にソート（未設定は末尾）
+  // 並び順: 時刻未設定プロジェクト → 時刻設定プロジェクト（時刻昇順）
   const projectGroups = [...pgMap.values()].sort((a, b) => {
-    const ta = projectRules?.[a.key]?.recurrenceTime || "99:99";
-    const tb = projectRules?.[b.key]?.recurrenceTime || "99:99";
+    const ta = projectRules?.[a.key]?.recurrenceTime || "";
+    const tb = projectRules?.[b.key]?.recurrenceTime || "";
+    // 未設定("")は先頭、設定ありは後ろに（時刻昇順）
+    if (!ta && !tb) return 0;
+    if (!ta) return -1;
+    if (!tb) return 1;
     return ta < tb ? -1 : ta > tb ? 1 : 0;
   });
 
