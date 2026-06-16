@@ -38,6 +38,7 @@ import {
   Trash2,
   CheckSquare,
   FileText,
+  Info,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -3218,6 +3219,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
                   categoryTone={categoryTone}
                   setSelectedTaskId={setSelectedTaskId}
                   selectedTaskId={selectedTaskId}
+                  projectRules={projectRules}
                 />
               );
             };
@@ -3267,7 +3269,6 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
         ref={setNodeRef}
         {...(!editing ? attributes : {})}
         {...(!editing ? listeners : {})}
-        onClick={() => { if (!editing) setSelectedTaskId(task.id); }}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
           editing ? "cursor-text" : "cursor-grab",
@@ -3298,12 +3299,21 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               className="w-full rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
             />
           ) : (
-            <div
-              onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
-              title="ダブルクリックで名前を編集"
-              className={classNames("break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100", isDone && "line-through opacity-40")}
-            >
-              {task.title}
+            <div className="flex items-start gap-1 group/title">
+              <div
+                onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+                title="クリックで名前を編集"
+                className={classNames("flex-1 break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
+              >
+                {task.title}
+              </div>
+              <button
+                onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
+                title="詳細を開く"
+                className="shrink-0 mt-0.5 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"
+              >
+                <Info className="h-3 w-3" />
+              </button>
             </div>
           )}
           {task.project && depth === 0 && !hideProject && (
@@ -3328,27 +3338,30 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
 
   // プロジェクト所属タスクはプロジェクトごとにまとめ、それ以外(plain)はフラット表示
-  const projectGroups = [];
   const pgMap = new Map();
   const plainTasks = [];
   for (const t of tasks) {
     if (t.category && t.project) {
       const key = `${t.category}::${t.project}`;
       if (!pgMap.has(key)) {
-        const g = { key, category: t.category, project: t.project, items: [] };
-        pgMap.set(key, g);
-        projectGroups.push(g);
+        pgMap.set(key, { key, category: t.category, project: t.project, items: [] });
       }
       pgMap.get(key).items.push(t);
     } else {
       plainTasks.push(t);
     }
   }
+  // recurrenceTime 順にソート（未設定は末尾）
+  const projectGroups = [...pgMap.values()].sort((a, b) => {
+    const ta = projectRules?.[a.key]?.recurrenceTime || "99:99";
+    const tb = projectRules?.[b.key]?.recurrenceTime || "99:99";
+    return ta < tb ? -1 : ta > tb ? 1 : 0;
+  });
 
   const headColor = isToday
     ? "text-cyan-300 border-cyan-400/50"
@@ -3372,8 +3385,11 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
         {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
-      {/* タスク一覧：プロジェクトごとにトグル + プロジェクト色の背景 */}
+      {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
+        {plainTasks.map((task) => (
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+        ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
           const isCol = collapsedProj[g.key];
@@ -3397,9 +3413,6 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
             </div>
           );
         })}
-        {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
-        ))}
       </div>
 
       {/* 追加入力（最後のタスクのすぐ下） */}
@@ -3712,22 +3725,31 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
             )}
 
             {rule.recurrence !== "none" && (
-              <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+              <>
                 <input
-                  type="date"
-                  value={rule.recurrenceStart || ""}
-                  onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
+                  type="time"
+                  value={rule.recurrenceTime || ""}
+                  onChange={(event) => updateProjectRule(category, project, { recurrenceTime: event.target.value })}
                   className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  title="開始日"
+                  title="表示時刻（7Daysでの並び順に使用）"
                 />
-                <input
-                  type="date"
-                  value={rule.recurrenceEnd || ""}
-                  onChange={(event) => updateProjectRule(category, project, { recurrenceEnd: event.target.value })}
-                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  title="終了日"
-                />
-              </div>
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+                  <input
+                    type="date"
+                    value={rule.recurrenceStart || ""}
+                    onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
+                    className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                    title="開始日"
+                  />
+                  <input
+                    type="date"
+                    value={rule.recurrenceEnd || ""}
+                    onChange={(event) => updateProjectRule(category, project, { recurrenceEnd: event.target.value })}
+                    className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                    title="終了日"
+                  />
+                </div>
+              </>
             )}
           </div>
         </PropertyRow>
