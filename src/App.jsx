@@ -384,9 +384,9 @@ function App() {
   const [notionAutoSync, setNotionAutoSync] = useState(() => localStorage.getItem("taskspace-notion-auto") !== "off");
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [panelOrder, setPanelOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "today", "board", "weekly", "calendar"]; } catch { return ["7days", "tray", "today", "board", "weekly", "calendar"]; }
+    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "board", "calendar"]; } catch { return ["7days", "tray", "board", "calendar"]; }
   });
-  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", board: "Board", calendar: "Calendar" };
+  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", board: "Project", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
     try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
   });
