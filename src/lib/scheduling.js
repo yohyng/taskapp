@@ -64,6 +64,12 @@ export function ruleMatchesWeekday(rule, date, dateKey) {
     return Number(rule.recurrenceDay ?? 1) === dow && diff >= 0 && Math.floor(diff / 7) % 2 === 0;
   }
   if (rule.recurrence === "monthlyDate") return date.getDate() === Number(rule.recurrenceDate ?? 1);
+  if (rule.recurrence === "monthlyDateRange") {
+    const d = date.getDate();
+    const from = Number(rule.recurrenceDateFrom ?? 1);
+    const to = Number(rule.recurrenceDateTo ?? 1);
+    return from <= to ? d >= from && d <= to : d >= from || d <= to;
+  }
   if (rule.recurrence === "monthlyNthWeekday") {
     const target = Number(rule.recurrenceDay ?? 1);
     const nth = Number(rule.recurrenceWeek ?? 1);

@@ -291,6 +291,12 @@ function matchesProjectRule(rule, date) {
     return Number(rule.recurrenceDay ?? 1) === day && dayDiff(start, key) >= 0 && Math.floor(dayDiff(start, key) / 7) % 2 === 0;
   }
   if (rule.recurrence === "monthlyDate") return date.getDate() === Number(rule.recurrenceDate ?? 1);
+  if (rule.recurrence === "monthlyDateRange") {
+    const d = date.getDate();
+    const from = Number(rule.recurrenceDateFrom ?? 1);
+    const to = Number(rule.recurrenceDateTo ?? 1);
+    return from <= to ? d >= from && d <= to : d >= from || d <= to;
+  }
   if (rule.recurrence === "monthlyNthWeekday") {
     const targetDate = getNthWeekdayDate(date.getFullYear(), date.getMonth(), Number(rule.recurrenceDay ?? 1), Number(rule.recurrenceWeek ?? 1));
     return date.getDate() === targetDate;
@@ -3992,6 +3998,7 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
               <option value="weekly">毎週</option>
               <option value="biweekly">隔週</option>
               <option value="monthlyDate">毎月・日付指定</option>
+              <option value="monthlyDateRange">毎月・日付範囲</option>
               <option value="monthlyNthWeekday">毎月・第n曜日</option>
             </select>
 
@@ -4031,6 +4038,31 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
                 className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
                 placeholder="毎月の日付"
               />
+            )}
+
+            {rule.recurrence === "monthlyDateRange" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={Number(rule.recurrenceDateFrom ?? 1)}
+                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateFrom: Number(e.target.value) })}
+                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                  placeholder="開始日"
+                />
+                <span className="shrink-0 text-xs text-neutral-500">〜</span>
+                <input
+                  type="number"
+                  min="1"
+                  max="31"
+                  value={Number(rule.recurrenceDateTo ?? 1)}
+                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateTo: Number(e.target.value) })}
+                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
+                  placeholder="終了日"
+                />
+                <span className="shrink-0 text-xs text-neutral-500">日</span>
+              </div>
             )}
 
             {rule.recurrence === "monthlyNthWeekday" && (
