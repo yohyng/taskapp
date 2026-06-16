@@ -3310,8 +3310,12 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
-                if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); commitTitle(); onIndent?.(); }
-                if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); commitTitle(); onOutdent?.(); }
+                if (e.key === "Tab") {
+                  e.preventDefault();
+                  commitTitle();
+                  if (e.shiftKey) { onOutdent?.(); }
+                  else { onIndent?.(); }
+                }
               }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
