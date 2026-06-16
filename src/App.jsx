@@ -1784,7 +1784,7 @@ function App() {
                 e.preventDefault();
                 const title = quickAddTitle.trim();
                 if (title) {
-                  addTask({ title, category: "", project: "" });
+                  addTask({ title, category: "", project: "", plain: true });
                   setToast(`「${title}」をTRAYに追加しました`);
                 }
                 setQuickAddTitle("");
