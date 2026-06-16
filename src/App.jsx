@@ -386,7 +386,7 @@ function App() {
   const [panelOrder, setPanelOrder] = useState(() => {
     try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "today", "board", "weekly", "calendar"]; } catch { return ["7days", "tray", "today", "board", "weekly", "calendar"]; }
   });
-  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "Weekly", board: "Board", calendar: "Calendar" };
+  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", board: "Board", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
     try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
   });
@@ -1879,18 +1879,22 @@ function App() {
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">セクション順序</div>
                     <div className="flex flex-col gap-1">
-                      {panelOrder.map((key, idx) => (
-                        <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
-                          <input
-                            value={sectionLabels[key] ?? DEFAULT_SECTION_LABELS[key] ?? key}
-                            onChange={(e) => updateSectionLabel(key, e.target.value)}
-                            className="flex-1 min-w-0 bg-transparent text-[11px] text-neutral-300 outline-none placeholder:text-neutral-600"
-                            placeholder={DEFAULT_SECTION_LABELS[key] || key}
-                          />
-                          <button onClick={() => movePanelSection(key, -1)} disabled={idx === 0} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronUp className="h-3 w-3" /></button>
-                          <button onClick={() => movePanelSection(key, 1)} disabled={idx === panelOrder.length - 1} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronDown className="h-3 w-3" /></button>
-                        </div>
-                      ))}
+                      {panelOrder.map((key, idx) => {
+                        const hints = { "7days": "横7曜日", tray: "受信トレイ", today: "今日のタスク", weekly: "週次リスト", board: "プロジェクト", calendar: "カレンダー" };
+                        return (
+                          <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
+                            <input
+                              value={sectionLabels[key] ?? DEFAULT_SECTION_LABELS[key] ?? key}
+                              onChange={(e) => updateSectionLabel(key, e.target.value)}
+                              className="flex-1 min-w-0 bg-transparent text-[11px] text-neutral-300 outline-none placeholder:text-neutral-600"
+                              placeholder={DEFAULT_SECTION_LABELS[key] || key}
+                            />
+                            <span className="shrink-0 text-[9px] text-neutral-600">{hints[key]}</span>
+                            <button onClick={() => movePanelSection(key, -1)} disabled={idx === 0} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronUp className="h-3 w-3" /></button>
+                            <button onClick={() => movePanelSection(key, 1)} disabled={idx === panelOrder.length - 1} className="rounded p-0.5 text-neutral-500 hover:text-neutral-200 disabled:opacity-20"><ChevronDown className="h-3 w-3" /></button>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
