@@ -1985,11 +1985,11 @@ function App() {
           <>
           {show7Days && (
             <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
           <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-            {/* TRAY + Today stacked in col 1 */}
+            {/* TRAY col */}
             <div className="flex min-w-[180px] flex-1 flex-col gap-2">
               <InboxTray
                 label={sectionLabels.tray}
@@ -2003,62 +2003,6 @@ function App() {
                 selectedTrayIds={selectedTrayIds}
                 onToggleTraySelect={onToggleTraySelect}
               />
-              <TodayColumn
-                label={sectionLabels.today}
-                wrapClass=""
-                todayTasks={todayTasks}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnToday={handleDropOnToday}
-                moveTodayTask={moveTodayTask}
-                acceptInboxItem={acceptInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                defaultCategory={quickCategory}
-                defaultProject={quickProject}
-                addTask={addTask}
-                selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-              />
-            </div>
-            {/* Weekly col */}
-            <div className="min-w-[180px] flex-1">
-              <WeeklyColumn
-                label={sectionLabels.weekly}
-                className="flex"
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                weeklyRoots={weeklyRoots}
-                weeklyFlat={weeklyFlat}
-                setWeeklyFlat={setWeeklyFlat}
-                childrenOf={childrenOf}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnWeekly={handleDropOnWeekly}
-                moveWeeklyTask={moveWeeklyTask}
-                addTask={addTask}
-                addInboxItem={addInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-              />
             </div>
             {/* Board category columns */}
             {categories.map((cat) => (
@@ -2066,23 +2010,6 @@ function App() {
                 <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
               </div>
             ))}
-            {/* Weekly as rightmost column */}
-            <div className="min-w-[180px] flex-1">
-              <WeeklyColumn
-                label={sectionLabels.weekly}
-                className="flex"
-                collapsed={collapsed} setCollapsed={setCollapsed}
-                weeklyRoots={weeklyRoots} weeklyFlat={weeklyFlat} setWeeklyFlat={setWeeklyFlat}
-                childrenOf={childrenOf} taskMap={taskMap} categoryTone={categoryTone}
-                upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask} handleDropOnWeekly={handleDropOnWeekly}
-                moveWeeklyTask={moveWeeklyTask} addTask={addTask} addInboxItem={addInboxItem}
-                returnTaskToTray={returnTaskToTray} selectMode={selectMode}
-                selectedIds={selectedIds} onToggleSelect={onToggleSelect}
-              />
-            </div>
           </div>
           </>
         )}
@@ -2234,7 +2161,7 @@ function App() {
               const { key } = chunk;
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
                 </div>
               );
               if (key === "calendar") return (
@@ -3060,8 +2987,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {task.memo?.trim() && <FileText className="h-3 w-3 text-neutral-500" title="メモあり" />}
-            <button onClick={(event) => { event.stopPropagation(); toggleToday(task); }} className={classNames("rounded border px-1.5 py-0.5 text-[9px] transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 text-neutral-500 hover:text-cyan-200")}>今日</button>
-            <button onClick={(event) => { event.stopPropagation(); toggleWeek(task); }} className={classNames("rounded border px-1.5 py-0.5 text-[9px] transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 text-neutral-500 hover:text-amber-100")}>週</button>
           </div>
         </div>
       </div>
@@ -3171,7 +3096,7 @@ function getWeekDays(base = new Date()) {
   });
 }
 
-function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
@@ -3182,17 +3107,36 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
     return getWeekDays(base);
   }, [weekOffset]);
 
-  function tasksForDay(dateKey) {
-    if (dateKey === todayKey) {
-      // today=true のタスク、scheduledDate が今日のタスク、
-      // さらに thisWeek=true でまだ日付未割当のタスクも今日列に浮かせる
-      return tasks.filter((t) => !t.archived && (
-        t.today ||
-        t.scheduledDate === dateKey ||
-        (t.thisWeek && !t.today && !t.scheduledDate)
-      ));
+  function tasksForDay(dateKey, date) {
+    const seen = new Set();
+    const result = [];
+    function add(t) { if (!seen.has(t.id)) { seen.add(t.id); result.push(t); } }
+
+    // 明示的に今日/scheduledDate指定されたタスク
+    tasks.filter((t) => !t.archived && (
+      t.scheduledDate === dateKey ||
+      (dateKey === todayKey && (t.today || (t.thisWeek && !t.today && !t.scheduledDate)))
+    )).forEach(add);
+
+    // プロジェクト繰り返しルールにマッチするタスク
+    if (projectRules && date) {
+      const dow = date.getDay(); // 0=Sun
+      Object.entries(projectRules).forEach(([ruleKey, rule]) => {
+        if (!rule.recurrence || rule.recurrence === "none") return;
+        // 週次繰り返し: recurrenceDay が曜日に一致
+        const dayMatch = rule.recurrence === "weekly" && Number(rule.recurrenceDay) === dow;
+        if (!dayMatch) return;
+        // 期間チェック
+        if (rule.recurrenceEnd && dateKey > rule.recurrenceEnd) return;
+        if (rule.recurrenceStart && dateKey < rule.recurrenceStart) return;
+        // そのプロジェクトのタスクを追加
+        const [cat, ...rest] = ruleKey.split("::");
+        const proj = rest.join("::");
+        tasks.filter((t) => !t.archived && t.category === cat && t.project === proj && !t.parentId).forEach(add);
+      });
     }
-    return tasks.filter((t) => !t.archived && t.scheduledDate === dateKey);
+
+    return result;
   }
 
   function handleAdd(dateKey) {
@@ -3245,7 +3189,7 @@ function SevenDayView({ tasks, upsertTask, addTask, toggleDone, categoryTone, se
           {weekDays.map((date, i) => {
             const dateKey = toDateKey(date);
             const isToday = dateKey === todayKey;
-            const dayTasks = tasksForDay(dateKey);
+            const dayTasks = tasksForDay(dateKey, date);
             const label = DAY_LABELS[i];
             const isSat = i === 5;
             const isSun = i === 6;
