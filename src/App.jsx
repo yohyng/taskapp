@@ -2842,6 +2842,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
+  const [editing, setEditing] = useState(false);
   const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [contextMenu, setContextMenu] = useState(null); // { x, y }
@@ -2937,7 +2938,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
         onContextMenu={e => e.preventDefault()}
-        onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } else { setSelectedTaskId(task.id); } }}
+        onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } }}
         data-draggable
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
@@ -2960,18 +2961,20 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
           <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
           {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
           <div className="min-w-0 flex-1">
-            {selected ? (
-              <input
+            {editing ? (
+              <textarea
                 value={titleDraft}
                 autoFocus
+                rows={Math.max(1, (titleDraft || "").split("\n").length)}
                 onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
                 onChange={(event) => setTitleDraft(event.target.value)}
-                onBlur={commitTitle}
+                onBlur={() => { commitTitle(); setEditing(false); }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") {
+                  if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
                     commitTitle();
+                    setEditing(false);
                     event.currentTarget.blur();
                   }
                   if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
@@ -2982,6 +2985,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                   if (event.key === "Escape") {
                     event.preventDefault();
                     cancelTitle();
+                    setEditing(false);
                     event.currentTarget.blur();
                   }
                   if (event.key === "Tab") {
@@ -2990,7 +2994,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                     const titleClean = normalizeTitle(titleDraft);
                     const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
                     if (event.shiftKey) {
-                      // Shift+Tab: 1つ浅く（タイトル保存と同時に1回のupsertで）
                       if (task.parentId) {
                         const parent = taskMap.get(task.parentId);
                         upsertTask({ id: task.id, ...titlePatch, parentId: parent?.parentId ?? null });
@@ -2998,7 +3001,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                         if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
                       }
                     } else {
-                      // Tab: 同じ project 内の直前の兄弟を親にする
                       if (depth < 3) {
                         const siblings = [...taskMap.values()].filter(
                           (t) => t.parentId === (task.parentId ?? null) &&
@@ -3013,15 +3015,30 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                         if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
                       }
                     }
+                    setEditing(false);
                   }
                 }}
                 className={classNames(
-                  "w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
+                  "w-full resize-none rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
                   task.status === "完了" && "line-through"
                 )}
               />
             ) : (
-              <div className={classNames("break-words text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}>{task.title}</div>
+              <div className="flex items-start gap-1 group/title">
+                <div
+                  onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+                  className={classNames("flex-1 break-words cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
+                >
+                  {task.title}
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
+                  title="詳細を開く"
+                  className="shrink-0 mt-0.5 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+              </div>
             )}
             {compact && (
               <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-neutral-500">
@@ -3239,7 +3256,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3284,18 +3301,21 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
         </button>
         <div className="min-w-0 flex-1">
           {editing ? (
-            <input
+            <textarea
               autoFocus
               value={draft}
+              rows={Math.max(1, (draft || "").split("\n").length)}
               onChange={(e) => setDraft(e.target.value)}
               onBlur={commitTitle}
               onKeyDown={(e) => {
-                if (e.key === "Enter") { e.preventDefault(); commitTitle(); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
+                if (e.key === "Tab" && !e.shiftKey) { e.preventDefault(); commitTitle(); onIndent?.(); }
+                if (e.key === "Tab" && e.shiftKey) { e.preventDefault(); commitTitle(); onOutdent?.(); }
               }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-full rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
+              className="w-full resize-none rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
             />
           ) : (
             <div className="flex items-start gap-1 group/title">
@@ -3362,6 +3382,21 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
     return ta < tb ? -1 : ta > tb ? 1 : 0;
   });
 
+  // Tab/Shift+Tab 用: 表示順のルートタスク一覧（plain → projectGroups の順）
+  const flatRoots = [...plainTasks, ...projectGroups.flatMap((g) => g.items)];
+
+  function makeIndent(taskId) {
+    const idx = flatRoots.findIndex((t) => t.id === taskId);
+    if (idx <= 0) return; // 先頭は親にできない
+    const prev = flatRoots[idx - 1];
+    const self = flatRoots[idx];
+    upsertTask({ id: taskId, parentId: prev.id, category: prev.category || self.category, project: prev.project || self.project });
+  }
+
+  function makeOutdent(taskId) {
+    upsertTask({ id: taskId, parentId: null });
+  }
+
   const headColor = isToday
     ? "text-cyan-300 border-cyan-400/50"
     : isSun ? "text-rose-300 border-white/10"
@@ -3387,7 +3422,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
         {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
         ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
@@ -3405,7 +3440,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
               {!isCol && (
                 <div className="flex flex-col gap-0.5">
                   {g.items.map((task) => (
-                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
                   ))}
                 </div>
               )}
