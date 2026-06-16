@@ -2967,7 +2967,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               {isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
             </button>
           )}
-          {!selectMode && <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-50 transition group-hover:opacity-100" />}
           <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
           {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
           <div className="min-w-0 flex-1">
