@@ -3280,11 +3280,27 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `traytask-${task.id}`,
+    data: { type: "task", id: task.id },
+    disabled: editing,
+  });
 
   useEffect(() => { setDraft(task.title); }, [task.title]);
 
   return (
-    <div className={classNames("flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition", selectedTaskId === task.id && "bg-white/[0.09]", editing && "bg-white/[0.07]")}>
+    <div
+      ref={setNodeRef}
+      {...(!editing ? attributes : {})}
+      {...(!editing ? listeners : {})}
+      className={classNames(
+        "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition",
+        editing ? "cursor-text" : "cursor-grab",
+        selectedTaskId === task.id && "bg-white/[0.09]",
+        editing && "bg-white/[0.07]",
+        isDragging && "opacity-30",
+      )}
+    >
       <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
       <div className="min-w-0 flex-1">
         {editing ? (
@@ -3299,6 +3315,7 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
               if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask(task.id); }
             }}
             onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
             className="w-full rounded border-b border-white/25 bg-transparent text-[11px] font-medium text-neutral-100 outline-none"
           />
         ) : (
