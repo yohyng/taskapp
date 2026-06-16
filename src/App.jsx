@@ -87,9 +87,9 @@ function taskFirstCollision(args) {
   }
 
   // タスク/TRAYアイテム: カード → 枠 の順で優先（カラム跨ぎ対応）
-  const cardHits = pick(["task-in-today", "task-in-weekly", "task", "tray"]);
+  const cardHits = pick(["task-in-day", "task-in-today", "task-in-weekly", "task", "tray"]);
   if (cardHits.length > 0) return cardHits;
-  const zoneHits = pick(["project", "today", "weekly", "tray-zone"]);
+  const zoneHits = pick(["project", "today", "weekly", "day-column", "tray-zone"]);
   if (zoneHits.length > 0) return zoneHits;
   return hits;
 }
@@ -617,6 +617,20 @@ function App() {
           moveProjectTask(src.id, dst.id, true);
         }
       }
+      return;
+    }
+
+    // Task → 別タスク(7Days内) : 親子化（プロジェクトにも反映）
+    if (src.type === "task" && dst.type === "task-in-day" && src.id !== dst.id) {
+      const target = taskMap.get(dst.id);
+      const dragged = taskMap.get(src.id);
+      if (!target || !dragged) return;
+      // 循環防止：対象が自分の子孫なら無視
+      if (collectDescendantIds(src.id).includes(dst.id)) return;
+      if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
+      // 親の category/project を継承し、子として紐付け。scheduledDate はクリア（親配下に表示）
+      upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project, scheduledDate: "", today: false, thisWeek: false });
+      setToast(`親子化：「${target.title}」の子タスクにしました`);
       return;
     }
 
@@ -3217,10 +3231,16 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
 }
 
 function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
   });
+  // 別タスクをこのタスクに重ねると親子化する（プロジェクトにも反映）
+  const { setNodeRef: dropRef, isOver } = useDroppable({
+    id: `daytask-drop-${task.id}`,
+    data: { type: "task-in-day", id: task.id },
+  });
+  const setNodeRef = (el) => { dragRef(el); dropRef(el); };
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
@@ -3244,6 +3264,7 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsert
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
           editing ? "cursor-text" : "cursor-grab",
           selectedTaskId === task.id && "bg-white/[0.09]",
+          isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
           isDragging && "opacity-30",
         )}
       >
