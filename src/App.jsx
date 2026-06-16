@@ -3266,6 +3266,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
                   onAdd={() => handleAdd(dateKey)}
                   toggleDone={toggleDone}
                   upsertTask={upsertTask}
+                  removeTask={removeTask}
                   categoryTone={categoryTone}
                   setSelectedTaskId={setSelectedTaskId}
                   selectedTaskId={selectedTaskId}
@@ -3378,7 +3379,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3440,6 +3441,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
+                if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask?.(task.id); }
                 if (e.key === "Tab") {
                   e.preventDefault();
                   e.stopPropagation();
@@ -3491,6 +3493,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           categoryTone={categoryTone}
           toggleDone={toggleDone}
           upsertTask={upsertTask}
+          removeTask={removeTask}
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
           dayDateKey={dayDateKey}
@@ -3509,7 +3512,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
 
@@ -3577,7 +3580,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
         {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
         ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
