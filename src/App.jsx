@@ -2018,7 +2018,10 @@ function App() {
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
-          <div className={classNames("grid grid-cols-1 gap-2 items-start pb-2 sm:grid-cols-2 lg:grid-cols-[180px_repeat(auto-fill,minmax(180px,1fr))]", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <div
+            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
+            className={classNames("grid gap-2 items-start pb-2", (selectedTask || selectedProject) && "md:pr-[384px]")}
+          >
             {/* TRAY column */}
             <div className="min-w-0">
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
