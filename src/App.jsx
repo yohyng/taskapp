@@ -3635,7 +3635,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   }
 
   const headColor = isToday
-    ? "text-cyan-300 border-cyan-400/50"
+    ? "text-emerald-300 border-emerald-400/50"
     : isSun ? "text-rose-300 border-white/10"
     : isSat ? "text-sky-300 border-white/10"
     : "text-neutral-300 border-white/10";
