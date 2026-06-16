@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay } from "./lib/scheduling";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -253,10 +254,6 @@ function normalizeTitle(title) {
   return title.trim().replace(/\s+/g, " ");
 }
 
-function toDateKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
 function projectKey(category, project) {
   return `${category}::${project}`;
 }
@@ -489,30 +486,30 @@ function App() {
       return;
     }
 
-    // Task → Today
+    // Task → Today (scheduledDate=今日 に集約)
     if (src.type === "task" && dst.type === "today") {
-      const dragged = taskMap.get(src.id);
-      upsertTask({ id: src.id, today: true, thisWeek: false });
-      setToast(dragged?.thisWeek ? "WeeklyからTodayに移動しました" : "Todayに追加しました");
+      const tKey = toDateKey(new Date());
+      upsertTask({ id: src.id, scheduledDate: tKey, today: false, thisWeek: false });
+      setToast("Todayに追加しました");
       return;
     }
 
-    // Task → Weekly
+    // Task → Weekly (今週・曜日未指定 = scheduledDateクリア + thisWeek)
     if (src.type === "task" && dst.type === "weekly") {
-      const dragged = taskMap.get(src.id);
       const relatedIds = [src.id, ...collectAncestorIds(src.id), ...collectDescendantIds(src.id)];
-      commitTasks((prev) => prev.map((t) => relatedIds.includes(t.id) ? { ...t, thisWeek: true, today: false } : t));
-      setToast(dragged?.today ? "TodayからWeeklyに移動しました" : "親子構造ごとWeekly Taskに追加しました");
+      commitTasks((prev) => prev.map((t) => relatedIds.includes(t.id) ? { ...t, thisWeek: true, today: false, scheduledDate: "" } : t));
+      setToast("Weekly Taskに追加しました");
       return;
     }
 
     // Task reorder / parent-child within Today
     if (src.type === "task" && dst.type === "task-in-today" && src.id !== dst.id) {
       const dragged = taskMap.get(src.id);
-      // Weekly タスクを Today タスクにドロップ → Today に移動（排他）
-      if (dragged?.thisWeek) {
-        upsertTask({ id: src.id, today: true, thisWeek: false });
-        setToast("WeeklyからTodayに移動しました");
+      const tKey = toDateKey(new Date());
+      // 今日でないタスクを Today タスクにドロップ → Today(今日)に配置（排他）
+      if (!schedIsToday(dragged, tKey)) {
+        upsertTask({ id: src.id, scheduledDate: tKey, today: false, thisWeek: false });
+        setToast("Todayに移動しました");
         return;
       }
       // 自分の親にドロップ → 並列化（親子解除）
@@ -539,10 +536,11 @@ function App() {
     // Task reorder / parent-child within Weekly
     if (src.type === "task" && dst.type === "task-in-weekly" && src.id !== dst.id) {
       const dragged = taskMap.get(src.id);
-      // Today タスクを Weekly タスクにドロップ → Weekly に移動（排他）
-      if (dragged?.today) {
-        upsertTask({ id: src.id, thisWeek: true, today: false });
-        setToast("TodayからWeeklyに移動しました");
+      const tKey = toDateKey(new Date());
+      // 今日タスクを Weekly タスクにドロップ → Weekly(曜日未指定)に移動（排他）
+      if (schedIsToday(dragged, tKey)) {
+        upsertTask({ id: src.id, thisWeek: true, today: false, scheduledDate: "" });
+        setToast("Weeklyに移動しました");
         return;
       }
       // 自分の親にドロップ → 並列化（親子解除）
@@ -604,16 +602,11 @@ function App() {
     }
 
     // Task → 7-day column
+    // scheduledDate を唯一の源として配置。legacy フラグ(today/thisWeek)はクリア。
     if (src.type === "task" && dst.type === "day-column") {
-      const todayKey = toDateKey(new Date());
-      const dragged = taskMap.get(src.id);
-      if (dst.date === todayKey) {
-        upsertTask({ id: src.id, today: true, scheduledDate: "" });
-        setToast("Todayに移動しました");
-      } else {
-        upsertTask({ id: src.id, today: false, thisWeek: true, scheduledDate: dst.date });
-        setToast(`${dst.label}に移動しました（Weekly）`);
-      }
+      const tKey = toDateKey(new Date());
+      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false });
+      setToast(dst.date === tKey ? "今日に配置しました" : `${dst.label}に配置しました`);
       return;
     }
 
@@ -1053,7 +1046,8 @@ function App() {
   }
 
   function toggleWeek(task) {
-    const nextValue = !task.thisWeek;
+    const wk = weekDateKeys(new Date());
+    const nextValue = !schedIsThisWeek(task, wk);
     if (!nextValue && (task.plain || !task.category)) {
       returnTaskToTray(task);
       return;
@@ -1061,12 +1055,16 @@ function App() {
     const relatedIds = nextValue
       ? [task.id, ...collectAncestorIds(task.id), ...collectDescendantIds(task.id)]
       : [task.id, ...collectDescendantIds(task.id)];
-    commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id) ? { ...item, thisWeek: nextValue, ...(nextValue ? { today: false } : {}) } : item)));
+    // 今週入り = thisWeek フラグ(曜日未指定)。今週外し = scheduledDate もクリア
+    commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id)
+      ? { ...item, thisWeek: nextValue, today: false, ...(nextValue ? {} : { scheduledDate: "" }) }
+      : item)));
     setToast(nextValue ? "Weekly Taskに追加しました" : "Weekly Taskから外しました");
   }
 
   function toggleToday(task) {
-    const nextValue = !task.today;
+    const tKey = toDateKey(new Date());
+    const nextValue = !schedIsToday(task, tKey);
     if (!nextValue && (task.plain || !task.category)) {
       returnTaskToTray(task);
       return;
@@ -1074,7 +1072,10 @@ function App() {
     const relatedIds = nextValue
       ? [task.id, ...collectAncestorIds(task.id), ...collectDescendantIds(task.id)]
       : [task.id, ...collectDescendantIds(task.id)];
-    commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id) ? { ...item, today: nextValue, ...(nextValue ? { thisWeek: false } : {}) } : item)));
+    // 今日入り = scheduledDate を今日に。今日外し = scheduledDate クリア
+    commitTasks((prev) => prev.map((item) => (relatedIds.includes(item.id)
+      ? { ...item, today: false, thisWeek: false, scheduledDate: nextValue ? tKey : "" }
+      : item)));
     setToast(nextValue ? "Todayに追加しました" : "Todayから外しました");
   }
 
@@ -1363,7 +1364,7 @@ function App() {
     const id = event.dataTransfer.getData("task/id");
     if (!id) return;
     const relatedIds = [id, ...collectAncestorIds(id), ...collectDescendantIds(id)];
-    commitTasks((prev) => prev.map((task) => (relatedIds.includes(task.id) ? { ...task, thisWeek: true } : task)));
+    commitTasks((prev) => prev.map((task) => (relatedIds.includes(task.id) ? { ...task, thisWeek: true, today: false, scheduledDate: "" } : task)));
     setToast("親子構造ごとWeekly Taskに追加しました");
   }
 
@@ -1379,7 +1380,7 @@ function App() {
 
     const id = event.dataTransfer.getData("task/id");
     if (!id) return;
-    upsertTask({ id, today: true });
+    upsertTask({ id, scheduledDate: toDateKey(new Date()), today: false, thisWeek: false });
     setToast("Todayに追加しました。今日のカレンダーにも表示されます");
   }
 
@@ -1441,9 +1442,11 @@ function App() {
       });
   }
 
+  const todayKey = toDateKey(new Date());
+
   const weeklyTasks = useMemo(() => {
     return filteredTasks
-      .filter((task) => task.thisWeek)
+      .filter((task) => isThisWeekUnscheduled(task))
       .sort((a, b) => {
         const ao = typeof a.weeklyOrder === "number" ? a.weeklyOrder : 999999;
         const bo = typeof b.weeklyOrder === "number" ? b.weeklyOrder : 999999;
@@ -1454,18 +1457,18 @@ function App() {
 
   const todayTasks = useMemo(() => {
     return filteredTasks
-      .filter((task) => task.today)
+      .filter((task) => schedIsToday(task, todayKey))
       .sort((a, b) => {
         const ao = typeof a.todayOrder === "number" ? a.todayOrder : 999999;
         const bo = typeof b.todayOrder === "number" ? b.todayOrder : 999999;
         if (ao !== bo) return ao - bo;
         return (a.category || "").localeCompare(b.category || "", "ja") || (a.project || "").localeCompare(b.project || "", "ja") || a.title.localeCompare(b.title, "ja");
       });
-  }, [filteredTasks]);
+  }, [filteredTasks, todayKey]);
 
   const weeklyRoots = weeklyFlat
     ? weeklyTasks
-    : weeklyTasks.filter((task) => !task.parentId || !taskMap.get(task.parentId)?.thisWeek);
+    : weeklyTasks.filter((task) => !task.parentId || !isThisWeekUnscheduled(taskMap.get(task.parentId)));
 
   async function syncNotion({ silent = false } = {}) {
     if (!notionToken || !notionDbId) {
@@ -1607,13 +1610,14 @@ function App() {
   }
 
   function bulkToday() {
-    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, today: true } : t));
+    const tKey = toDateKey(new Date());
+    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, scheduledDate: tKey, today: false, thisWeek: false } : t));
     setToast(`${selectedIds.size}件をTodayに追加しました`);
     exitSelectMode();
   }
 
   function bulkWeekly() {
-    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true } : t));
+    commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true, today: false, scheduledDate: "" } : t));
     setToast(`${selectedIds.size}件をWeeklyに追加しました`);
     exitSelectMode();
   }
@@ -1635,8 +1639,8 @@ function App() {
       commitTasks((prev) => prev.map((t) => toRemoveFromView.includes(t.id) ? { ...t, today: false, thisWeek: false } : t));
     }
     if (toDelete.length > 0) {
-      // plain タスク（today/thisWeek 付き）は TRAY に戻す、それ以外は完全削除
-      const toTray = toDelete.filter((id) => { const t = taskMap.get(id); return t && (t.today || t.thisWeek); });
+      // plain タスク（今日/今週/特定日に配置済み）は TRAY に戻す、それ以外は完全削除
+      const toTray = toDelete.filter((id) => { const t = taskMap.get(id); return t && (t.today || t.thisWeek || t.scheduledDate); });
       const toReallyDelete = toDelete.filter((id) => !toTray.includes(id));
       toTray.forEach((id) => {
         const t = taskMap.get(id);
@@ -2189,13 +2193,14 @@ function App() {
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
             <button onClick={() => {
-              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, today: true } : t));
-              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { today: true, plain: true })); }
+              const tKey = toDateKey(new Date());
+              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, scheduledDate: tKey, today: false, thisWeek: false } : t));
+              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { scheduledDate: tKey, plain: true })); }
               setToast(`${selectedIds.size + selectedTrayIds.size}件をTodayに追加しました`);
               exitSelectMode();
             }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
             <button onClick={() => {
-              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true } : t));
+              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true, today: false, scheduledDate: "" } : t));
               if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { thisWeek: true, plain: true })); }
               setToast(`${selectedIds.size + selectedTrayIds.size}件をWeeklyに追加しました`);
               exitSelectMode();
@@ -2272,7 +2277,7 @@ function TodayColumn({
   // プロジェクト側にもあるタスクはTodayから外すだけ。plainタスクはTRAYに戻す
   function removeTodayTask(id) {
     const t = taskMap.get(id);
-    if (t && !t.plain && t.category) { upsertTask({ id, today: false }); }
+    if (t && !t.plain && t.category) { upsertTask({ id, today: false, scheduledDate: "" }); }
     else if (t) { returnTaskToTray(t); }
   }
 
@@ -2375,7 +2380,7 @@ function WeeklyColumn({
 
   function removeWeeklyTask(id) {
     const t = taskMap.get(id);
-    if (t && !t.plain && t.category) { upsertTask({ id, thisWeek: false }); }
+    if (t && !t.plain && t.category) { upsertTask({ id, thisWeek: false, scheduledDate: "" }); }
     else if (t) { returnTaskToTray(t); }
   }
 
@@ -2415,7 +2420,7 @@ function WeeklyColumn({
             <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
           </div>
           <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => child.thisWeek)} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => isThisWeekUnscheduled(child))} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
             {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
           </div>
         </div>
@@ -2582,7 +2587,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
         </div>
         {!selectMode && (
           <div className="flex shrink-0 gap-1">
-            <button onClick={(e) => { e.stopPropagation(); acceptInboxItem(item.id, "", "", { today: true, plain: true }); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-neutral-500 transition hover:border-cyan-300/30 hover:bg-cyan-300/15 hover:text-cyan-100">今日</button>
+            <button onClick={(e) => { e.stopPropagation(); acceptInboxItem(item.id, "", "", { scheduledDate: toDateKey(new Date()), plain: true }); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-neutral-500 transition hover:border-cyan-300/30 hover:bg-cyan-300/15 hover:text-cyan-100">今日</button>
             <button onClick={(e) => { e.stopPropagation(); acceptInboxItem(item.id, "", "", { thisWeek: true, plain: true }); }} className="rounded border border-white/10 px-1.5 py-0.5 text-[9px] text-neutral-500 transition hover:border-amber-300/30 hover:bg-amber-300/15 hover:text-amber-100">週</button>
           </div>
         )}
@@ -2739,30 +2744,40 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
       style={{ left: Math.min(x, window.innerWidth - 196), top: Math.min(y, window.innerHeight - 300) }}
       onPointerDown={(e) => e.stopPropagation()}
     >
-      {!task.today && (
-        <button
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
-          onClick={() => { upsertTask({ id: task.id, today: true }); onClose(); }}
-        >Move to Today</button>
-      )}
-      {task.today && (
-        <button
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
-          onClick={() => { upsertTask({ id: task.id, today: false }); onClose(); }}
-        >Remove from Today</button>
-      )}
-      {!task.thisWeek && (
-        <button
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
-          onClick={() => { upsertTask({ id: task.id, thisWeek: true }); onClose(); }}
-        >Move to Weekly</button>
-      )}
-      {task.thisWeek && (
-        <button
-          className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
-          onClick={() => { upsertTask({ id: task.id, thisWeek: false }); onClose(); }}
-        >Remove from Weekly</button>
-      )}
+      {(() => {
+        const tKey = toDateKey(new Date());
+        const wk = weekDateKeys(new Date());
+        const taskIsToday = schedIsToday(task, tKey);
+        const taskIsWeek = schedIsThisWeek(task, wk);
+        return (
+          <>
+            {!taskIsToday && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
+                onClick={() => { upsertTask({ id: task.id, scheduledDate: tKey, today: false, thisWeek: false }); onClose(); }}
+              >Move to Today</button>
+            )}
+            {taskIsToday && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
+                onClick={() => { upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }); onClose(); }}
+              >Remove from Today</button>
+            )}
+            {!taskIsWeek && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
+                onClick={() => { upsertTask({ id: task.id, thisWeek: true, today: false, scheduledDate: "" }); onClose(); }}
+              >Move to Weekly</button>
+            )}
+            {taskIsWeek && (
+              <button
+                className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-400 hover:bg-white/10"
+                onClick={() => { upsertTask({ id: task.id, thisWeek: false, today: false, scheduledDate: "" }); onClose(); }}
+              >Remove from Weekly</button>
+            )}
+          </>
+        );
+      })()}
       <button
         className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/10"
         onClick={() => setShowProjectPicker((v) => !v)}
@@ -2850,9 +2865,10 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
     disabled: selectMode,
   });
 
-  // Drop target type: compact cards in Today/Weekly get special types for routing
+  // Drop target type: compact cards in Today/Weekly get special types for routing.
+  // scheduledDate ベースで判定（今日に配置=task-in-today、それ以外のWeekly=task-in-weekly）
   const dropType = compact
-    ? (task.today ? "task-in-today" : task.thisWeek ? "task-in-weekly" : "task")
+    ? (schedIsToday(task, toDateKey(new Date())) ? "task-in-today" : "task-in-weekly")
     : "task";
   const { setNodeRef: taskDropRef, isOver: isTaskOver } = useDroppable({
     id: `task-drop-${task.id}`,
@@ -3083,19 +3099,6 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
 
 const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 
-function getWeekDays(base = new Date()) {
-  const dow = base.getDay(); // 0=Sun
-  const diffToMon = dow === 0 ? -6 : 1 - dow;
-  const mon = new Date(base);
-  mon.setDate(base.getDate() + diffToMon);
-  mon.setHours(0, 0, 0, 0);
-  return Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(mon);
-    d.setDate(mon.getDate() + i);
-    return d;
-  });
-}
-
 function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
@@ -3108,43 +3111,15 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   }, [weekOffset]);
 
   function tasksForDay(dateKey, date) {
-    const seen = new Set();
-    const roots = [];
-    function addRoot(t) { if (!t.parentId && !seen.has(t.id)) { seen.add(t.id); roots.push(t); } }
-
-    // 明示的に今日/scheduledDate指定されたタスク（rootのみ）
-    tasks.filter((t) => !t.archived && !t.parentId && (
-      t.scheduledDate === dateKey ||
-      (dateKey === todayKey && (t.today || (t.thisWeek && !t.today && !t.scheduledDate)))
-    )).forEach(addRoot);
-
-    // プロジェクト繰り返しルールにマッチするタスク（rootのみ）
-    if (projectRules && date) {
-      const dow = date.getDay();
-      Object.entries(projectRules).forEach(([ruleKey, rule]) => {
-        if (!rule.recurrence || rule.recurrence === "none") return;
-        const dayMatch = rule.recurrence === "weekly" && Number(rule.recurrenceDay) === dow;
-        if (!dayMatch) return;
-        if (rule.recurrenceEnd && dateKey > rule.recurrenceEnd) return;
-        if (rule.recurrenceStart && dateKey < rule.recurrenceStart) return;
-        const [cat, ...rest] = ruleKey.split("::");
-        const proj = rest.join("::");
-        tasks.filter((t) => !t.archived && t.category === cat && t.project === proj && !t.parentId).forEach(addRoot);
-      });
-    }
-
-    return roots;
+    return rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey });
   }
 
   function handleAdd(dateKey) {
     const title = (newTitles[dateKey] || "").trim();
     if (!title) return;
-    if (dateKey === todayKey) {
-      addTask({ title, today: true, plain: true });
-    } else {
-      const t = addTask({ title, thisWeek: true, plain: true });
-      if (t) upsertTask({ id: t.id, scheduledDate: dateKey, thisWeek: true });
-    }
+    // 7Days への追加は scheduledDate を唯一の源として設定
+    const t = addTask({ title, plain: true });
+    if (t) upsertTask({ id: t.id, scheduledDate: dateKey, today: false, thisWeek: false });
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
@@ -3344,11 +3319,14 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
       map[key] = [];
       tasks.forEach((task) => {
         const exactDate = task.dueDate === key;
-        const todayMatch = task.today && key === toDateKey(new Date());
+        // scheduledDate で配置された日に表示。legacy today は当日扱い
+        const scheduledMatch = task.scheduledDate
+          ? task.scheduledDate === key
+          : (task.today && key === toDateKey(new Date()));
         const weeklyMatch = task.recurrence === "weekly" && Number(task.recurrenceDay) === date.getDay();
         const beforeEnd = !task.recurrenceEnd || key <= task.recurrenceEnd;
-        if ((exactDate || todayMatch || (weeklyMatch && beforeEnd)) && !map[key].some((item) => item.id === task.id)) {
-          map[key].push({ type: "task", ...task, calendarFromToday: todayMatch });
+        if ((exactDate || scheduledMatch || (weeklyMatch && beforeEnd)) && !map[key].some((item) => item.id === task.id)) {
+          map[key].push({ type: "task", ...task, calendarFromToday: scheduledMatch });
         }
       });
       Object.entries(projectRules || {}).forEach(([ruleKey, rule]) => {
@@ -3720,8 +3698,18 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
             )}
           </div>
         </PropertyRow>
-        <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, today: !task.today })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", task.today ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.today ? "今日やる" : "今日ではない"}</button></PropertyRow>
-        <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !task.thisWeek })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", task.thisWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{task.thisWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
+        {(() => {
+          const tdk = toDateKey(new Date());
+          const wk = weekDateKeys(new Date());
+          const tIsToday = schedIsToday(task, tdk);
+          const tIsWeek = schedIsThisWeek(task, wk);
+          return (
+            <>
+              <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, scheduledDate: tIsToday ? "" : tdk, today: false, thisWeek: false })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", tIsToday ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{tIsToday ? "今日やる" : "今日ではない"}</button></PropertyRow>
+              <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !tIsWeek, today: false, scheduledDate: "" })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", tIsWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{tIsWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
+            </>
+          );
+        })()}
         <PropertyRow label="Parent"><div className="rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs text-neutral-300">{parent ? parent.title : "親なし"}</div></PropertyRow>
         <PropertyRow label="Memo"><textarea value={task.memo || ""} onChange={(event) => upsertTask({ id: task.id, memo: event.target.value })} placeholder="メモ" rows={6} className="w-full resize-y rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs leading-5 outline-none placeholder:text-neutral-600" /></PropertyRow>
       </div>
