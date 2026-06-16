@@ -373,7 +373,7 @@ function App() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [showMovePanel, setShowMovePanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
-  const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1"));
+  const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1.2"));
   const [notionToken, setNotionToken] = useState(() => localStorage.getItem("taskspace-notion-token") || "");
   const [notionDbId, setNotionDbId] = useState(() => localStorage.getItem("taskspace-notion-dbid") || "");
   const [notionSyncing, setNotionSyncing] = useState(false);
@@ -1820,7 +1820,7 @@ function App() {
                       <button onClick={() => changeFontSize(fontSize - 0.1)} className="rounded border border-white/10 px-2 py-1 text-xs text-neutral-400 hover:bg-white/[0.07]">−</button>
                       <div className="flex-1 text-center text-xs text-neutral-300">{Math.round(fontSize * 100)}%</div>
                       <button onClick={() => changeFontSize(fontSize + 0.1)} className="rounded border border-white/10 px-2 py-1 text-xs text-neutral-400 hover:bg-white/[0.07]">＋</button>
-                      <button onClick={() => changeFontSize(1)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-500 hover:bg-white/[0.07]">reset</button>
+                      <button onClick={() => changeFontSize(1.2)} className="rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-500 hover:bg-white/[0.07]">reset</button>
                     </div>
                   </div>
 
