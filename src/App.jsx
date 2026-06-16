@@ -3195,7 +3195,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   );
 }
 
-function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSelectedTaskId, selectedTaskId }) {
+function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3203,15 +3203,25 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSel
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.title);
+  useEffect(() => { setDraft(task.title); }, [task.title]);
+  function commitTitle() {
+    const clean = (draft || "").trim();
+    if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
+    else setDraft(task.title);
+    setEditing(false);
+  }
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
         ref={setNodeRef}
-        {...attributes}
-        {...listeners}
-        onClick={() => setSelectedTaskId(task.id)}
+        {...(!editing ? attributes : {})}
+        {...(!editing ? listeners : {})}
+        onClick={() => { if (!editing) setSelectedTaskId(task.id); }}
         className={classNames(
-          "flex cursor-grab items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+          "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+          editing ? "cursor-text" : "cursor-grab",
           selectedTaskId === task.id && "bg-white/[0.09]",
           isDragging && "opacity-30",
         )}
@@ -3223,9 +3233,29 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSel
           {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
         </button>
         <div className="min-w-0 flex-1">
-          <div className={classNames("break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100", isDone && "line-through opacity-40")}>
-            {task.title}
-          </div>
+          {editing ? (
+            <input
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commitTitle}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { e.preventDefault(); commitTitle(); }
+                if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onPointerDown={(e) => e.stopPropagation()}
+              className="w-full rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
+            />
+          ) : (
+            <div
+              onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
+              title="ダブルクリックで名前を編集"
+              className={classNames("break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100", isDone && "line-through opacity-40")}
+            >
+              {task.title}
+            </div>
+          )}
           {task.project && depth === 0 && (
             <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
           )}
@@ -3239,6 +3269,7 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSel
           childrenOf={childrenOf}
           categoryTone={categoryTone}
           toggleDone={toggleDone}
+          upsertTask={upsertTask}
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
         />
@@ -3280,6 +3311,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
             childrenOf={childrenOf}
             categoryTone={categoryTone}
             toggleDone={toggleDone}
+            upsertTask={upsertTask}
             setSelectedTaskId={setSelectedTaskId}
             selectedTaskId={selectedTaskId}
           />
