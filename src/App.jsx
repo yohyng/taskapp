@@ -2038,6 +2038,29 @@ function App() {
             </div>
           )}
           <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+            {/* TRAY column */}
+            <div className="min-w-[180px] flex-1">
+              <div className="rounded-lg border border-white/10 bg-white/[0.02]">
+                <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
+                  <span className="text-sm font-bold text-neutral-200">TRAY</span>
+                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived).length + inboxItems.length}</span>
+                </div>
+                <div className="flex flex-col gap-0.5 px-2 py-2">
+                  {tasks.filter(t => !t.category && !t.project && !t.archived).map((task) => (
+                    <div key={task.id} onClick={() => setSelectedTaskId(task.id)} className={classNames("flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition cursor-pointer hover:bg-white/[0.07]", selectedTaskId === task.id && "bg-white/[0.09]")}>
+                      <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{task.status === "完了" ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
+                      <div className={classNames("flex-1 break-words text-[11px] text-neutral-100", task.status === "完了" && "line-through opacity-40")}>{task.title}</div>
+                    </div>
+                  ))}
+                  {inboxItems.map((item) => (
+                    <div key={item.id} className="rounded-md border border-neutral-700/40 bg-neutral-800/30 px-1.5 py-1 text-[11px] text-neutral-400 hover:bg-neutral-800/50 transition cursor-pointer">
+                      <div className="break-words">{item.title}</div>
+                      <div className="mt-0.5 text-[9px] text-neutral-600">{item.source}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-[180px] flex-1">
