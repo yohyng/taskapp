@@ -376,7 +376,7 @@ function App() {
   const [notionAutoSync, setNotionAutoSync] = useState(() => localStorage.getItem("taskspace-notion-auto") !== "off");
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [panelOrder, setPanelOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["tray", "today", "weekly", "7days", "board", "calendar"]; } catch { return ["tray", "today", "weekly", "7days", "board", "calendar"]; }
+    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "today", "board", "weekly", "calendar"]; } catch { return ["7days", "tray", "today", "board", "weekly", "calendar"]; }
   });
   const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly", "7days": "7Days", board: "Board", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
@@ -404,8 +404,8 @@ function App() {
   const [newColumn, setNewColumn] = useState({ key: "NEW", label: "NEW PJ", tone: "green" });
   const [calendarMonth, setCalendarMonth] = useState(() => new Date(2026, 4, 1));
   const [mobileView, setMobileView] = useState("board");
-  const [show7Days, setShow7Days] = useState(false);
-  const [show5col, setShow5col] = useState(() => localStorage.getItem("taskspace-show5col") === "true");
+  const [show7Days, setShow7Days] = useState(() => localStorage.getItem("taskspace-show7days") !== "false");
+  const [show5col, setShow5col] = useState(() => localStorage.getItem("taskspace-show5col") !== "false");
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1738,7 +1738,7 @@ function App() {
 
           <div className="ml-auto flex items-center gap-1.5">
             <button onClick={() => { const next = !show5col; setShow5col(next); localStorage.setItem("taskspace-show5col", String(next)); }} title="5列カラムビュー" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show5col ? "border-violet-400/40 bg-violet-500/15 text-violet-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>5列</button>
-            <button onClick={() => { setShow7Days((v) => !v); setMobileView("7days"); }} title="7 Days view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>7Days</button>
+            <button onClick={() => { const next = !show7Days; setShow7Days(next); localStorage.setItem("taskspace-show7days", String(next)); setMobileView("7days"); }} title="7 Days view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>7Days</button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
@@ -1983,6 +1983,11 @@ function App() {
 
         {show5col && (
           <>
+          {show7Days && (
+            <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+              <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+            </div>
+          )}
           <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* TRAY + Today stacked in col 1 */}
             <div className="flex min-w-[180px] flex-1 flex-col gap-2">
@@ -2061,12 +2066,24 @@ function App() {
                 <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
               </div>
             ))}
-          </div>
-          {show7Days && (
-            <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+            {/* Weekly as rightmost column */}
+            <div className="min-w-[180px] flex-1">
+              <WeeklyColumn
+                label={sectionLabels.weekly}
+                className="flex"
+                collapsed={collapsed} setCollapsed={setCollapsed}
+                weeklyRoots={weeklyRoots} weeklyFlat={weeklyFlat} setWeeklyFlat={setWeeklyFlat}
+                childrenOf={childrenOf} taskMap={taskMap} categoryTone={categoryTone}
+                upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone}
+                toggleWeek={toggleWeek} toggleToday={toggleToday}
+                selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask} handleDropOnWeekly={handleDropOnWeekly}
+                moveWeeklyTask={moveWeeklyTask} addTask={addTask} addInboxItem={addInboxItem}
+                returnTaskToTray={returnTaskToTray} selectMode={selectMode}
+                selectedIds={selectedIds} onToggleSelect={onToggleSelect}
+              />
             </div>
-          )}
+          </div>
           </>
         )}
 
