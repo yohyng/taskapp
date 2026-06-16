@@ -1981,24 +1981,6 @@ function App() {
           </div>
         </header>
 
-        <nav className="grid grid-cols-3 gap-1 md:hidden">
-          {[
-            ["board", "Board"],
-            ["7days", "Weekly"],
-            ["calendar", "Calendar"],
-          ].map(([key, label]) => (
-            <button
-              key={key}
-              onClick={() => setMobileView(key)}
-              className={classNames(
-                "rounded-md border px-2 py-2 text-xs transition",
-                mobileView === key ? "border-white/25 bg-white/12 text-neutral-100" : "border-white/10 bg-white/[0.03] text-neutral-500"
-              )}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
 
         {showColumnsPanel && (
           <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
