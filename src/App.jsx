@@ -1543,30 +1543,36 @@ function App() {
       const seenKey = "taskspace-notion-seen";
       const seenIds = new Set(JSON.parse(localStorage.getItem(seenKey) || "[]"));
 
-      setInboxItems((prev) => {
-        const existingIds = new Set(prev.map((item) => item.id));
-        const newItems = data.pages
-          .filter((p) => !existingIds.has(`notion-${p.id}`) && !seenIds.has(p.id))
-          .map((p) => ({
-            id: `notion-${p.id}`,
-            title: p.title,
-            source: "Notion",
-            createdAt: p.createdAt,
-          }));
+      const existingNotionIds = new Set(
+        tasks.filter((t) => t.notionId).map((t) => t.notionId)
+      );
+      const newPages = data.pages.filter(
+        (p) => !existingNotionIds.has(p.id) && !seenIds.has(p.id)
+      );
 
-        // 新規分のIDを seen に追加して保存
-        data.pages.forEach((p) => seenIds.add(p.id));
-        localStorage.setItem(seenKey, JSON.stringify([...seenIds]));
+      // 新規分のIDを seen に追加して保存
+      data.pages.forEach((p) => seenIds.add(p.id));
+      localStorage.setItem(seenKey, JSON.stringify([...seenIds]));
 
-        if (newItems.length === 0) {
-          addSyncLog(`✅ Notion取得 ${data.count ?? 0}件（新規なし）`);
-          if (!silent) setToast("新しいNotionページはありませんでした");
-          return prev;
-        }
-        addSyncLog(`✅ Notion取得 ${data.count ?? 0}件 → 新規${newItems.length}件をTRAYへ`);
-        setToast(`${newItems.length}件をTRAYに追加しました`);
-        return [...newItems, ...prev];
-      });
+      if (newPages.length === 0) {
+        addSyncLog(`✅ Notion取得 ${data.count ?? 0}件（新規なし）`);
+        if (!silent) setToast("新しいNotionページはありませんでした");
+      } else {
+        const newTasks = newPages.map((p) => normalizeTask({
+          id: uid(),
+          notionId: p.id,
+          title: `n_${p.title}`,
+          category: "",
+          project: "",
+          plain: true,
+          scheduledDate: toDateKey(new Date()),
+          status: "未着手",
+          parentId: null,
+        }));
+        commitTasks((prev) => [...newTasks, ...prev]);
+        addSyncLog(`✅ Notion取得 ${data.count ?? 0}件 → 新規${newPages.length}件をTRAYへ`);
+        setToast(`${newPages.length}件をTRAYに追加しました`);
+      }
 
       const now = new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" });
       setNotionLastSync(now);
