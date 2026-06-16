@@ -2019,7 +2019,7 @@ function App() {
             </div>
           )}
           <div
-            style={{ gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))" }}
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
             className={classNames("grid gap-2 items-start pb-2", (selectedTask || selectedProject) && "md:pr-[384px]")}
           >
             {/* TRAY column */}
