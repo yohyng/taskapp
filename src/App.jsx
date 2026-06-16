@@ -2912,6 +2912,11 @@ function autoResize(el) {
   el.style.height = "auto";
   el.style.height = el.scrollHeight + "px";
 }
+function focusEnd(el) {
+  if (!el) return;
+  const len = el.value.length;
+  el.setSelectionRange(len, len);
+}
 
 function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
   const hasChildren = children.length > 0;
@@ -3041,6 +3046,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 autoFocus
                 rows={1}
                 ref={autoResize}
+                onFocus={(e) => focusEnd(e.target)}
                 onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
                 onChange={(event) => { setTitleDraft(event.target.value); autoResize(event.target); }}
@@ -3458,6 +3464,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
               rows={1}
               ref={autoResize}
               value={draft}
+              onFocus={(e) => focusEnd(e.target)}
               onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
               onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
               onKeyDown={(e) => {
@@ -3563,6 +3570,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               value={draft}
               rows={1}
               ref={autoResize}
+              onFocus={(e) => focusEnd(e.target)}
               onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
               onBlur={(e) => {
                 // Tab キーによる blur は onKeyDown で処理するのでスキップ
