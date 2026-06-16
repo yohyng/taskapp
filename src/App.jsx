@@ -3549,7 +3549,6 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               >
                 {task.title}
               </div>
-              {task.__ghost && <span className="shrink-0 text-[11px] text-neutral-500">↺</span>}
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
                 title="詳細を開く"
@@ -3673,6 +3672,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
               >
                 {isCol ? <ChevronRight className="h-3 w-3 shrink-0 text-neutral-500" /> : <ChevronDown className="h-3 w-3 shrink-0 text-neutral-500" />}
                 <span className={classNames("min-w-0 flex-1 truncate text-[10px] font-semibold", tone.accent)}>{g.project}</span>
+                {g.items.some((t) => t.__ghost) && <span className="shrink-0 text-[9px] text-neutral-400">↺</span>}
                 <span className="shrink-0 text-[9px] text-neutral-500">{g.items.length}</span>
               </button>
               {!isCol && (
