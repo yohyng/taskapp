@@ -3381,6 +3381,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           upsertTask={upsertTask}
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
+          onOutdent={() => { upsertTask({ id: child.id, parentId: task.parentId || null }); }}
         />
       ))}
     </div>
