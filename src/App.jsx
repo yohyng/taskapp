@@ -1857,9 +1857,6 @@ function App() {
                     <button onClick={() => setShowDone((v) => !v)} className={classNames("mb-1.5 w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
                       {showDone ? "✓ 完了タスクを表示中" : "完了タスクを非表示中"}
                     </button>
-                    <button onClick={() => { const v = !leftPanelHorizontal; setLeftPanelHorizontal(v); localStorage.setItem("taskspace-left-horizontal", String(v)); }} className={classNames("w-full rounded border px-2 py-1.5 text-left text-xs transition", leftPanelHorizontal ? "border-sky-400/30 bg-sky-400/10 text-sky-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
-                      {leftPanelHorizontal ? "✓ TRAY/Today/Weekly 横並び" : "TRAY/Today/Weekly 横並び"}
-                    </button>
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
