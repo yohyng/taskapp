@@ -3446,9 +3446,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             upsertTask({ id: child.id, parentId: prevSibling.id });
           }}
           onOutdent={() => {
-            const patch = { id: child.id, parentId: task.parentId || null };
-            if (!child.scheduledDate && dayDateKey) patch.scheduledDate = dayDateKey;
-            upsertTask(patch);
+            upsertTask({ id: child.id, parentId: task.parentId || null, scheduledDate: dayDateKey || dateKey });
           }}
         />
       ))}
@@ -3496,11 +3494,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   }
 
   function makeOutdent(taskId) {
-    // 子タスクが scheduledDate を持っていない場合、この日付列の dateKey を引き継ぐ
-    const task = tasks.find((t) => t.id === taskId);
-    const patch = { id: taskId, parentId: null };
-    if (task && !task.scheduledDate) patch.scheduledDate = dateKey;
-    upsertTask(patch);
+    upsertTask({ id: taskId, parentId: null, scheduledDate: dateKey });
   }
 
   const headColor = isToday
