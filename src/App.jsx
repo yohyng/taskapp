@@ -3634,13 +3634,16 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs text-neutral-500">Project</div>
-          <input
-            value={nameInput}
-            onChange={(e) => setNameInput(e.target.value)}
-            onBlur={() => renameProject(category, project, nameInput)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
-            className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
-          />
+          <div className="flex items-baseline gap-2">
+            <input
+              value={nameInput}
+              onChange={(e) => setNameInput(e.target.value)}
+              onBlur={() => renameProject(category, project, nameInput)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
+              className="flex-1 bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
+            />
+            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">🔄</span>}
+          </div>
           <p className="mt-1 text-xs text-neutral-500">{category}</p>
         </div>
         <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button>
