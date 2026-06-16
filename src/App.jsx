@@ -3335,7 +3335,8 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if (e.key === "Tab") {
                   e.preventDefault();
-                  commitTitle();
+                  const clean = (draft || "").trim();
+                  if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
                   setEditing(false);
                   if (e.shiftKey) { onOutdent?.(); }
                   else { onIndent?.(); }
