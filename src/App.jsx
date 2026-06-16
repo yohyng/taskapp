@@ -3336,6 +3336,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 if (e.key === "Tab") {
                   e.preventDefault();
                   commitTitle();
+                  setEditing(false);
                   if (e.shiftKey) { onOutdent?.(); }
                   else { onIndent?.(); }
                 }
