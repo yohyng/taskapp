@@ -3192,38 +3192,46 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
       </div>
 
       <div className="overflow-x-auto pb-2">
-        {/* 幅広: 7列横並び / 幅狭: 縦積み */}
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-7 md:min-w-[700px]">
-          {weekDays.map((date, i) => {
-            const dateKey = toDateKey(date);
-            const isToday = dateKey === todayKey;
-            const dayTasks = tasksForDay(dateKey, date);
-            const label = DAY_LABELS[i];
-            const isSat = i === 5;
-            const isSun = i === 6;
-
+        {/* 幅広: 平日5列 + 土日まとめ1列 / 幅狭: 縦積み */}
+        <div className="grid grid-cols-1 gap-2 md:grid-cols-6 md:min-w-[660px]">
+          {(() => {
+            const renderDay = (i, stacked = false) => {
+              const date = weekDays[i];
+              const dateKey = toDateKey(date);
+              return (
+                <DayColumn
+                  key={dateKey}
+                  dateKey={dateKey}
+                  label={DAY_LABELS[i]}
+                  date={date}
+                  isToday={dateKey === todayKey}
+                  isSat={i === 5}
+                  isSun={i === 6}
+                  stacked={stacked}
+                  tasks={tasksForDay(dateKey, date)}
+                  childrenOf={childrenOf}
+                  newTitle={newTitles[dateKey] || ""}
+                  setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                  onAdd={() => handleAdd(dateKey)}
+                  toggleDone={toggleDone}
+                  upsertTask={upsertTask}
+                  categoryTone={categoryTone}
+                  setSelectedTaskId={setSelectedTaskId}
+                  selectedTaskId={selectedTaskId}
+                />
+              );
+            };
             return (
-              <DayColumn
-                key={dateKey}
-                dateKey={dateKey}
-                label={label}
-                date={date}
-                isToday={isToday}
-                isSat={isSat}
-                isSun={isSun}
-                tasks={dayTasks}
-                childrenOf={childrenOf}
-                newTitle={newTitles[dateKey] || ""}
-                setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                onAdd={() => handleAdd(dateKey)}
-                toggleDone={toggleDone}
-                upsertTask={upsertTask}
-                categoryTone={categoryTone}
-                setSelectedTaskId={setSelectedTaskId}
-                selectedTaskId={selectedTaskId}
-              />
+              <>
+                {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
+                {/* 土日は1列にまとめて縦積み（土が上・日が下） */}
+                <div className="flex flex-col gap-2">
+                  {renderDay(5, true)}
+                  {renderDay(6, true)}
+                </div>
+              </>
             );
-          })}
+          })()}
         </div>
       </div>
     </section>
@@ -3320,7 +3328,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
 
@@ -3352,7 +3360,8 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
     <div
       ref={setNodeRef}
       className={classNames(
-        "flex min-h-[160px] md:min-h-[420px] flex-col rounded-md p-1 transition",
+        "flex flex-col rounded-md p-1 transition",
+        stacked ? "min-h-[120px] md:min-h-[200px]" : "min-h-[160px] md:min-h-[420px]",
         isOver ? "bg-white/[0.06]" : "bg-transparent",
       )}
     >
