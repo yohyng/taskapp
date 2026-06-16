@@ -3230,7 +3230,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   );
 }
 
-function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3298,7 +3298,7 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsert
               {task.title}
             </div>
           )}
-          {task.project && depth === 0 && (
+          {task.project && depth === 0 && !hideProject && (
             <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
           )}
         </div>
@@ -3322,6 +3322,25 @@ function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, upsert
 
 function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
+  const [collapsedProj, setCollapsedProj] = useState({});
+
+  // プロジェクト所属タスクはプロジェクトごとにまとめ、それ以外(plain)はフラット表示
+  const projectGroups = [];
+  const pgMap = new Map();
+  const plainTasks = [];
+  for (const t of tasks) {
+    if (t.category && t.project) {
+      const key = `${t.category}::${t.project}`;
+      if (!pgMap.has(key)) {
+        const g = { key, category: t.category, project: t.project, items: [] };
+        pgMap.set(key, g);
+        projectGroups.push(g);
+      }
+      pgMap.get(key).items.push(t);
+    } else {
+      plainTasks.push(t);
+    }
+  }
 
   const headColor = isToday
     ? "text-cyan-300 border-cyan-400/50"
@@ -3344,19 +3363,33 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childre
         {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
-      {/* タスク一覧 */}
-      <div className="flex flex-col gap-0.5">
-        {tasks.map((task) => (
-          <DayTask
-            key={task.id}
-            task={task}
-            childrenOf={childrenOf}
-            categoryTone={categoryTone}
-            toggleDone={toggleDone}
-            upsertTask={upsertTask}
-            setSelectedTaskId={setSelectedTaskId}
-            selectedTaskId={selectedTaskId}
-          />
+      {/* タスク一覧：プロジェクトごとにトグル + プロジェクト色の背景 */}
+      <div className="flex flex-col gap-1">
+        {projectGroups.map((g) => {
+          const tone = categoryTone(g.category);
+          const isCol = collapsedProj[g.key];
+          return (
+            <div key={g.key} className={classNames("rounded-md border px-1 py-0.5", tone.panel)}>
+              <button
+                onClick={() => setCollapsedProj((p) => ({ ...p, [g.key]: !p[g.key] }))}
+                className="flex w-full items-center gap-1 px-0.5 py-0.5 text-left"
+              >
+                {isCol ? <ChevronRight className="h-3 w-3 shrink-0 text-neutral-500" /> : <ChevronDown className="h-3 w-3 shrink-0 text-neutral-500" />}
+                <span className={classNames("min-w-0 flex-1 truncate text-[10px] font-semibold", tone.accent)}>{g.project}</span>
+                <span className="shrink-0 text-[9px] text-neutral-500">{g.items.length}</span>
+              </button>
+              {!isCol && (
+                <div className="flex flex-col gap-0.5">
+                  {g.items.map((task) => (
+                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        {plainTasks.map((task) => (
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
         ))}
       </div>
 
