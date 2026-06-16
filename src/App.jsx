@@ -2015,7 +2015,7 @@ function App() {
           <>
           {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
           <div
@@ -2226,7 +2226,7 @@ function App() {
               const { key } = chunk;
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
                 </div>
               );
               if (key === "calendar") return (
@@ -3187,7 +3187,7 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
 
 const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 
-function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
