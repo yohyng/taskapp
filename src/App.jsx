@@ -1565,7 +1565,7 @@ function App() {
           category: "",
           project: "",
           plain: true,
-          scheduledDate: toDateKey(new Date()),
+          scheduledDate: "",
           status: "未着手",
           parentId: null,
         }));
