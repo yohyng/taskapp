@@ -1784,9 +1784,8 @@ function App() {
                 e.preventDefault();
                 const title = quickAddTitle.trim();
                 if (title) {
-                  const tKey = toDateKey(new Date());
-                  addTask({ title, scheduledDate: tKey, category: "", project: "" });
-                  setToast(`「${title}」をTodayに追加しました`);
+                  addTask({ title, category: "", project: "" });
+                  setToast(`「${title}」をTRAYに追加しました`);
                 }
                 setQuickAddTitle("");
                 setQuickAddOpen(false);
@@ -1804,7 +1803,7 @@ function App() {
                 <button type="button" onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }} className="rounded-md border border-white/10 bg-white/[0.03] p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"><X className="h-3.5 w-3.5" /></button>
               </form>
             ) : (
-              <button onClick={() => setQuickAddOpen(true)} title="タスクを追加" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><Plus className="h-3.5 w-3.5" /></button>
+              <button onClick={() => setQuickAddOpen(true)} title="タスクを追加" className="rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/25"><Plus className="h-3.5 w-3.5" /></button>
             )}
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
