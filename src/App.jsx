@@ -403,6 +403,15 @@ function App() {
   const [mobileView, setMobileView] = useState("board");
   const [show7Days, setShow7Days] = useState(() => localStorage.getItem("taskspace-show7days") !== "false");
   const [show5col, setShow5col] = useState(() => localStorage.getItem("taskspace-show5col") !== "false");
+  // md(768px)以上か。5列ビューと通常ビューを排他マウントし、ドラッグID重複を防ぐ
+  const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const handler = (e) => setIsDesktop(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, []);
+  const use5col = isDesktop && show5col;
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1985,14 +1994,14 @@ function App() {
           </section>
         )}
 
-        {show5col && (
+        {use5col && (
           <>
           {show7Days && (
-            <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+            <div className={classNames("block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
-          <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* TRAY col */}
             <div className="flex min-w-[180px] flex-1 flex-col gap-2">
               <InboxTray
@@ -2015,10 +2024,15 @@ function App() {
               </div>
             ))}
           </div>
+          {/* 5列モードでもカレンダーは下に残す */}
+          <div className={classNames("block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+            <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+          </div>
           </>
         )}
 
-        <div className={classNames("flex flex-col gap-2 transition-[padding] duration-200", show5col && "hidden md:hidden", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+        {!use5col && (
+        <div className={classNames("flex flex-col gap-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           {(() => {
             // Group consecutive board-type sections into a shared auto-fit grid
             const BOARD_KEYS = new Set(["tray", "today", "weekly", "board"]);
@@ -2177,6 +2191,7 @@ function App() {
             });
           })()}
         </div>
+        )}
 
         <div className={classNames("transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
