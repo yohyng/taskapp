@@ -2043,6 +2043,9 @@ function App() {
                         setSelectedTaskId={setSelectedTaskId}
                         selectedTaskId={selectedTaskId}
                         childrenOf={childrenOf}
+                        selectMode={selectMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={onToggleSelect}
                         onIndent={() => {
                           if (idx === 0) return;
                           const prev = rootTrayTasks[idx - 1];
@@ -3371,14 +3374,15 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   );
 }
 
-function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf }) {
+function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false, selectedIds, onToggleSelect }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
+  const isSelected = selectMode && selectedIds && selectedIds.has(task.id);
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `traytask-${task.id}`,
     data: { type: "task", id: task.id },
-    disabled: editing,
+    disabled: editing || selectMode,
   });
 
   useEffect(() => { setDraft(task.title); }, [task.title]);
@@ -3389,17 +3393,24 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
         ref={setNodeRef}
-        {...(!editing ? attributes : {})}
-        {...(!editing ? listeners : {})}
+        {...(!editing && !selectMode ? attributes : {})}
+        {...(!editing && !selectMode ? listeners : {})}
+        onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(task.id); }}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
-          editing ? "cursor-text" : "cursor-grab",
-          selectedTaskId === task.id && "bg-white/[0.09]",
+          selectMode ? "cursor-pointer" : editing ? "cursor-text" : "cursor-grab",
+          isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
           editing && "bg-white/[0.07]",
           isDragging && "opacity-30",
         )}
       >
-        <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
+        {selectMode ? (
+          <button onClick={(e) => { e.stopPropagation(); onToggleSelect?.(task.id); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300">
+            <CheckSquare className={classNames("h-3 w-3", isSelected && "text-sky-400")} />
+          </button>
+        ) : (
+          <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
+        )}
         <div className="min-w-0 flex-1">
           {editing ? (
             <textarea
@@ -3445,6 +3456,9 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
           childrenOf={childrenOf}
+          selectMode={selectMode}
+          selectedIds={selectedIds}
+          onToggleSelect={onToggleSelect}
           onIndent={() => {
             if (idx === 0) return;
             const prevSibling = children[idx - 1];
