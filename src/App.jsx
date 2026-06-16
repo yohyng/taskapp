@@ -3210,6 +3210,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
+  const [forceHorizontal, setForceHorizontal] = useState(false);
+
   const firstDay = weekDays[0];
   const lastDay = weekDays[6];
   const monthLabel = `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
@@ -3232,18 +3234,65 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-        {weekOffset !== 0 && (
+        <div className="flex items-center gap-2">
+          {weekOffset !== 0 && (
+            <button
+              onClick={() => setWeekOffset(0)}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              今週に戻す
+            </button>
+          )}
           <button
-            onClick={() => setWeekOffset(0)}
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            onClick={() => setForceHorizontal((v) => !v)}
+            title="7日横並び表示"
+            className={classNames(
+              "rounded border px-2 py-1 text-[11px] font-medium transition",
+              forceHorizontal
+                ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-300"
+            )}
           >
-            今週に戻す
+            月火水木金土日
           </button>
-        )}
+        </div>
       </div>
 
       <div className="pb-2">
-        {/* 幅広: 平日5列 + 土日まとめ1列 / 幅狭: 縦積み（各曜日1行） */}
+        {forceHorizontal ? (
+          <div className="overflow-x-auto">
+            <div className="grid min-w-[560px] gap-1" style={{ gridTemplateColumns: "repeat(7, minmax(0, 1fr))" }}>
+              {[0, 1, 2, 3, 4, 5, 6].map((i) => {
+                const date = weekDays[i];
+                const dateKey = toDateKey(date);
+                return (
+                  <DayColumn
+                    key={dateKey}
+                    dateKey={dateKey}
+                    label={DAY_LABELS[i]}
+                    date={date}
+                    isToday={dateKey === todayKey}
+                    isSat={i === 5}
+                    isSun={i === 6}
+                    stacked
+                    tasks={tasksForDay(dateKey, date)}
+                    childrenOf={childrenOf}
+                    newTitle={newTitles[dateKey] || ""}
+                    setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                    onAdd={() => handleAdd(dateKey)}
+                    toggleDone={toggleDone}
+                    upsertTask={upsertTask}
+                    removeTask={removeTask}
+                    categoryTone={categoryTone}
+                    setSelectedTaskId={setSelectedTaskId}
+                    selectedTaskId={selectedTaskId}
+                    projectRules={projectRules}
+                  />
+                );
+              })}
+            </div>
+          </div>
+        ) : (
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
           {(() => {
             const renderDay = (i, stacked = false) => {
@@ -3286,6 +3335,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             );
           })()}
         </div>
+        )}
       </div>
     </section>
   );
