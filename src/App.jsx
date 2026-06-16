@@ -3222,7 +3222,7 @@ function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, ca
 }
 
 function DayTask({ task, categoryTone, toggleDone, setSelectedTaskId, selectedTaskId }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
   });
@@ -3233,12 +3233,11 @@ function DayTask({ task, categoryTone, toggleDone, setSelectedTaskId, selectedTa
       ref={setNodeRef}
       {...attributes}
       {...listeners}
-      style={transform ? { transform: `translate(${transform.x}px,${transform.y}px)`, zIndex: 50 } : undefined}
       onClick={() => setSelectedTaskId(task.id)}
       className={classNames(
         "flex cursor-grab items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
         selectedTaskId === task.id && "bg-white/[0.09]",
-        isDragging && "opacity-40",
+        isDragging && "opacity-30",
       )}
     >
       <button
