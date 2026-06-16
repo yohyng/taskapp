@@ -3012,11 +3012,14 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                       }
                     } else {
                       if (depth < 3) {
-                        const siblings = [...taskMap.values()].filter(
-                          (t) => t.parentId === (task.parentId ?? null) &&
-                                 t.category === task.category &&
-                                 t.project === task.project
-                        );
+                        const siblings = [...taskMap.values()]
+                          .filter((t) => !t.archived && t.parentId === (task.parentId ?? null) && t.category === task.category && t.project === task.project)
+                          .sort((a, b) => {
+                            const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
+                            const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
+                            if (ao !== bo) return ao - bo;
+                            return a.title.localeCompare(b.title, "ja");
+                          });
                         const idx = siblings.findIndex((t) => t.id === task.id);
                         const prevSibling = siblings[idx - 1];
                         if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
