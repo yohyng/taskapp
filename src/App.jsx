@@ -3277,7 +3277,7 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
       {...(!editing ? attributes : {})}
       {...(!editing ? listeners : {})}
       className={classNames(
-        "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition",
+        "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
         editing ? "cursor-text" : "cursor-grab",
         selectedTaskId === task.id && "bg-white/[0.09]",
         editing && "bg-white/[0.07]",
@@ -3299,11 +3299,11 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
             }}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="w-full rounded border-b border-white/25 bg-transparent text-[11px] font-medium text-neutral-100 outline-none"
+            className="w-full rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium text-neutral-100 outline-none"
           />
         ) : (
           <div className="flex items-start gap-1 group/title">
-            <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words cursor-text text-[11px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
+            <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
             <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
           </div>
         )}
