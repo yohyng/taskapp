@@ -1998,11 +1998,11 @@ function App() {
         {use5col && (
           <>
           {show7Days && (
-            <div className={classNames("block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+            <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
-          <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-[180px] flex-1">
@@ -2011,14 +2011,14 @@ function App() {
             ))}
           </div>
           {/* 5列モードでもカレンダーは下に残す */}
-          <div className={classNames("block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
             <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
           </div>
           </>
         )}
 
         {!use5col && (
-        <div className={classNames("flex flex-col gap-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+        <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           {(() => {
             // Group consecutive board-type sections into a shared auto-fit grid
             const BOARD_KEYS = new Set(["tray", "today", "weekly", "board"]);
@@ -2179,7 +2179,7 @@ function App() {
         </div>
         )}
 
-        <div className={classNames("transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+        <div className={classNames("", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
         </div>
 
