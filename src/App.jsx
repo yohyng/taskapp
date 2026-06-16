@@ -371,6 +371,8 @@ function App() {
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddTitle, setQuickAddTitle] = useState("");
   const [showMovePanel, setShowMovePanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
   const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1.2"));
@@ -1772,11 +1774,38 @@ function App() {
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">Task Space</h1>
+            <h1 className="text-xl font-semibold tracking-tight">⚡ Task Space</h1>
             <span className="text-[11px] text-neutral-500">v{__APP_VERSION__}</span>
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
+            {quickAddOpen ? (
+              <form onSubmit={(e) => {
+                e.preventDefault();
+                const title = quickAddTitle.trim();
+                if (title) {
+                  const tKey = toDateKey(new Date());
+                  addTask({ title, scheduledDate: tKey, category: "", project: "" });
+                  setToast(`「${title}」をTodayに追加しました`);
+                }
+                setQuickAddTitle("");
+                setQuickAddOpen(false);
+              }} className="flex items-center gap-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={quickAddTitle}
+                  onChange={(e) => setQuickAddTitle(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); } }}
+                  placeholder="タスク名を入力…"
+                  className="w-44 rounded-md border border-white/20 bg-white/[0.07] px-2 py-1.5 text-xs text-neutral-100 placeholder-neutral-500 outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 sm:w-56"
+                />
+                <button type="submit" className="rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 py-1.5 text-xs text-emerald-200 transition hover:bg-emerald-500/25">追加</button>
+                <button type="button" onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }} className="rounded-md border border-white/10 bg-white/[0.03] p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"><X className="h-3.5 w-3.5" /></button>
+              </form>
+            ) : (
+              <button onClick={() => setQuickAddOpen(true)} title="タスクを追加" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><Plus className="h-3.5 w-3.5" /></button>
+            )}
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
