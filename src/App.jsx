@@ -2842,6 +2842,12 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
   );
 }
 
+function autoResize(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = el.scrollHeight + "px";
+}
+
 function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
@@ -2969,10 +2975,11 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               <textarea
                 value={titleDraft}
                 autoFocus
-                rows={Math.max(1, (titleDraft || "").split("\n").length)}
+                rows={1}
+                ref={autoResize}
                 onClick={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
-                onChange={(event) => setTitleDraft(event.target.value)}
+                onChange={(event) => { setTitleDraft(event.target.value); autoResize(event.target); }}
                 onBlur={() => { commitTitle(); setEditing(false); }}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
@@ -3023,7 +3030,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                   }
                 }}
                 className={classNames(
-                  "w-full resize-none rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
+                  "w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
                   task.status === "完了" && "line-through"
                 )}
               />
@@ -3287,19 +3294,21 @@ function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId,
       <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
       <div className="min-w-0 flex-1">
         {editing ? (
-          <input
+          <textarea
             autoFocus
+            rows={1}
+            ref={autoResize}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
             onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); if (!draft.trim()) { removeTask(task.id); } else { if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); } }
+              if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) { removeTask(task.id); } else { if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); } }
               if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
               if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask(task.id); }
             }}
             onClick={(e) => e.stopPropagation()}
             onPointerDown={(e) => e.stopPropagation()}
-            className="w-full rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium text-neutral-100 outline-none"
+            className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium text-neutral-100 outline-none"
           />
         ) : (
           <div className="flex items-start gap-1 group/title">
@@ -3360,8 +3369,9 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             <textarea
               autoFocus
               value={draft}
-              rows={Math.max(1, (draft || "").split("\n").length)}
-              onChange={(e) => setDraft(e.target.value)}
+              rows={1}
+              ref={autoResize}
+              onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
               onBlur={(e) => {
                 // Tab キーによる blur は onKeyDown で処理するのでスキップ
                 if (e.relatedTarget === null && e.nativeEvent?.relatedTarget === null) {
@@ -3389,7 +3399,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-full resize-none rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
+              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
             />
           ) : (
             <div className="flex items-start gap-1 group/title">
