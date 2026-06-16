@@ -2002,21 +2002,6 @@ function App() {
             </div>
           )}
           <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-            {/* TRAY col */}
-            <div className="flex min-w-[180px] flex-1 flex-col gap-2">
-              <InboxTray
-                label={sectionLabels.tray}
-                items={inboxItems}
-                updateInboxItem={updateInboxItem}
-                removeInboxItem={removeInboxItem}
-                moveInboxItem={moveInboxItem}
-                addInboxItem={addInboxItem}
-                acceptInboxItem={acceptInboxItem}
-                selectMode={selectMode}
-                selectedTrayIds={selectedTrayIds}
-                onToggleTraySelect={onToggleTraySelect}
-              />
-            </div>
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-[180px] flex-1">
