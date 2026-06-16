@@ -2090,9 +2090,12 @@ function App() {
                     ));
                   })()}
                   {inboxItems.map((item) => (
-                    <div key={item.id} className="rounded-md border border-neutral-700/40 bg-neutral-800/30 px-1.5 py-1 text-[11px] text-neutral-400 hover:bg-neutral-800/50 transition cursor-pointer">
-                      <div className="break-words">{item.title}</div>
-                      <div className="mt-0.5 text-[9px] text-neutral-600">{item.source}</div>
+                    <div key={item.id} onClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})} className="flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]">
+                      <span className="mt-0.5 shrink-0 text-[9px] text-neutral-600 font-bold">n</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-neutral-300">{item.title}</div>
+                        <div className="text-[9px] text-neutral-600">{item.source}</div>
+                      </div>
                     </div>
                   ))}
                 </div>
