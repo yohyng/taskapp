@@ -1985,7 +1985,7 @@ function App() {
           <>
           {show7Days && (
             <div className={classNames("hidden md:block transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} projectRules={projectRules} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
           <div className={classNames("hidden md:flex gap-2 items-start overflow-x-auto pb-2 transition-[padding] duration-200", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -2161,7 +2161,7 @@ function App() {
               const { key } = chunk;
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
                 </div>
               );
               if (key === "calendar") return (
@@ -3096,7 +3096,7 @@ function getWeekDays(base = new Date()) {
   });
 }
 
-function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
@@ -3109,34 +3109,31 @@ function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, ca
 
   function tasksForDay(dateKey, date) {
     const seen = new Set();
-    const result = [];
-    function add(t) { if (!seen.has(t.id)) { seen.add(t.id); result.push(t); } }
+    const roots = [];
+    function addRoot(t) { if (!t.parentId && !seen.has(t.id)) { seen.add(t.id); roots.push(t); } }
 
-    // 明示的に今日/scheduledDate指定されたタスク
-    tasks.filter((t) => !t.archived && (
+    // 明示的に今日/scheduledDate指定されたタスク（rootのみ）
+    tasks.filter((t) => !t.archived && !t.parentId && (
       t.scheduledDate === dateKey ||
       (dateKey === todayKey && (t.today || (t.thisWeek && !t.today && !t.scheduledDate)))
-    )).forEach(add);
+    )).forEach(addRoot);
 
-    // プロジェクト繰り返しルールにマッチするタスク
+    // プロジェクト繰り返しルールにマッチするタスク（rootのみ）
     if (projectRules && date) {
-      const dow = date.getDay(); // 0=Sun
+      const dow = date.getDay();
       Object.entries(projectRules).forEach(([ruleKey, rule]) => {
         if (!rule.recurrence || rule.recurrence === "none") return;
-        // 週次繰り返し: recurrenceDay が曜日に一致
         const dayMatch = rule.recurrence === "weekly" && Number(rule.recurrenceDay) === dow;
         if (!dayMatch) return;
-        // 期間チェック
         if (rule.recurrenceEnd && dateKey > rule.recurrenceEnd) return;
         if (rule.recurrenceStart && dateKey < rule.recurrenceStart) return;
-        // そのプロジェクトのタスクを追加
         const [cat, ...rest] = ruleKey.split("::");
         const proj = rest.join("::");
-        tasks.filter((t) => !t.archived && t.category === cat && t.project === proj && !t.parentId).forEach(add);
+        tasks.filter((t) => !t.archived && t.category === cat && t.project === proj && !t.parentId).forEach(addRoot);
       });
     }
 
-    return result;
+    return roots;
   }
 
   function handleAdd(dateKey) {
@@ -3204,6 +3201,7 @@ function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, ca
                 isSat={isSat}
                 isSun={isSun}
                 tasks={dayTasks}
+                childrenOf={childrenOf}
                 newTitle={newTitles[dateKey] || ""}
                 setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
                 onAdd={() => handleAdd(dateKey)}
@@ -3221,41 +3219,59 @@ function SevenDayView({ tasks, projectRules, upsertTask, addTask, toggleDone, ca
   );
 }
 
-function DayTask({ task, categoryTone, toggleDone, setSelectedTaskId, selectedTaskId }) {
+function DayTask({ task, depth = 0, childrenOf, categoryTone, toggleDone, setSelectedTaskId, selectedTaskId }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
   });
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
+  const children = childrenOf?.(task.id) || [];
   return (
-    <div
-      ref={setNodeRef}
-      {...attributes}
-      {...listeners}
-      onClick={() => setSelectedTaskId(task.id)}
-      className={classNames(
-        "flex cursor-grab items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
-        selectedTaskId === task.id && "bg-white/[0.09]",
-        isDragging && "opacity-30",
-      )}
-    >
-      <button
-        onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
-        className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+    <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
+      <div
+        ref={setNodeRef}
+        {...attributes}
+        {...listeners}
+        onClick={() => setSelectedTaskId(task.id)}
+        className={classNames(
+          "flex cursor-grab items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+          selectedTaskId === task.id && "bg-white/[0.09]",
+          isDragging && "opacity-30",
+        )}
       >
-        {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
-      </button>
-      <span className={classNames("min-w-0 flex-1 leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
-        {task.title}
-      </span>
-      {task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-cyan-400/70">今</span>}
-      {task.thisWeek && !task.today && <span className="shrink-0 rounded px-0.5 text-[8px] text-amber-400/70">週</span>}
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+          className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+        >
+          {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+        </button>
+        <div className="min-w-0 flex-1">
+          <div className={classNames("leading-snug break-words", isDone && "line-through opacity-40", task.category && tone.accent)}>
+            {task.title}
+          </div>
+          {task.project && depth === 0 && (
+            <div className={classNames("text-[9px] opacity-50 truncate", tone.accent)}>{task.project}</div>
+          )}
+        </div>
+      </div>
+      {children.map((child) => (
+        <DayTask
+          key={child.id}
+          task={child}
+          depth={depth + 1}
+          childrenOf={childrenOf}
+          categoryTone={categoryTone}
+          toggleDone={toggleDone}
+          setSelectedTaskId={setSelectedTaskId}
+          selectedTaskId={selectedTaskId}
+        />
+      ))}
     </div>
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
 
   const headColor = isToday
@@ -3285,6 +3301,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, tasks, newTitl
           <DayTask
             key={task.id}
             task={task}
+            childrenOf={childrenOf}
             categoryTone={categoryTone}
             toggleDone={toggleDone}
             setSelectedTaskId={setSelectedTaskId}
