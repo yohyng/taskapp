@@ -3439,6 +3439,12 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           setSelectedTaskId={setSelectedTaskId}
           selectedTaskId={selectedTaskId}
           dayDateKey={dayDateKey}
+          onIndent={() => {
+            const idx = children.findIndex((t) => t.id === child.id);
+            if (idx <= 0) return;
+            const prevSibling = children[idx - 1];
+            upsertTask({ id: child.id, parentId: prevSibling.id });
+          }}
           onOutdent={() => {
             const patch = { id: child.id, parentId: task.parentId || null };
             if (!child.scheduledDate && dayDateKey) patch.scheduledDate = dayDateKey;
