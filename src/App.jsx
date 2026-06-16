@@ -948,7 +948,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "" }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -966,6 +966,7 @@ function App() {
       plain,
       memo: parent ? `「${parent.title}」の子タスクとして追加` : "",
       dueDate,
+      scheduledDate,
     });
     commitTasks((prev) => [newTask, ...prev]);
     if (select) setSelectedTaskId(newTask.id);
@@ -2047,7 +2048,7 @@ function App() {
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
                   {tasks.filter(t => !t.category && !t.project && !t.archived).map((task) => (
-                    <TrayTask key={task.id} task={task} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                    <TrayTask key={task.id} task={task} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
                   ))}
                   {inboxItems.map((item) => (
                     <div key={item.id} className="rounded-md border border-neutral-700/40 bg-neutral-800/30 px-1.5 py-1 text-[11px] text-neutral-400 hover:bg-neutral-800/50 transition cursor-pointer">
@@ -2766,7 +2767,7 @@ function ProjectGroup({ category, project, roots, childrenOf, collapsed, setColl
             style={rule?.color ? { color: rule.color } : undefined}
             title={rule?.description || "Project settings"}
           >
-            {rule?.emoji ? `${rule.emoji} ` : ""}{rule?.recurrence && rule.recurrence !== "none" ? "↻ " : ""}{project}
+            {rule?.emoji ? `${rule.emoji} ` : ""}{rule?.recurrence && rule.recurrence !== "none" ? "↺ " : ""}{project}
           </span>
         </div>
         <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
@@ -3190,9 +3191,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   function handleAdd(dateKey) {
     const title = (newTitles[dateKey] || "").trim();
     if (!title) return;
-    // scheduledDate を一発でセット（addTask→upsertTask の2段階は state が stale になるため避ける）
-    const newTask = normalizeTask({ id: uid(), title, category: "", project: "", status: "未着手", parentId: null, plain: true, scheduledDate: dateKey, today: false, thisWeek: false, memo: "", dueDate: "" });
-    commitTasks((prev) => [newTask, ...prev]);
+    // addTask は App 側の commitTasks を内包しているので、scheduledDate を含むタスクを渡す
+    addTask({ title, category: "", project: "", scheduledDate: dateKey, plain: true, today: false, thisWeek: false });
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
@@ -3276,7 +3276,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
   );
 }
 
-function TrayTask({ task, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId }) {
+function TrayTask({ task, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
@@ -3294,8 +3294,9 @@ function TrayTask({ task, toggleDone, upsertTask, setSelectedTaskId, selectedTas
             onChange={(e) => setDraft(e.target.value)}
             onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }
+              if (e.key === "Enter") { e.preventDefault(); if (!draft.trim()) { removeTask(task.id); } else { if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); } }
               if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
+              if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask(task.id); }
             }}
             onClick={(e) => e.stopPropagation()}
             className="w-full rounded border-b border-white/25 bg-transparent text-[11px] font-medium text-neutral-100 outline-none"
@@ -3399,7 +3400,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               >
                 {task.title}
               </div>
-              {task.__ghost && <span className="shrink-0 text-[11px] text-neutral-500">🔄</span>}
+              {task.__ghost && <span className="shrink-0 text-[11px] text-neutral-500">↺</span>}
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
                 title="詳細を開く"
@@ -3645,7 +3646,7 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
                         }}
                         className="block w-full whitespace-normal break-words text-left font-semibold leading-snug"
                       >
-                        ↻ {item.title}
+                        ↺ {item.title}
                       </button>
                       <div className="mt-1 flex flex-col gap-0.5 border-l border-current/25 pl-1.5">
                         {(item.tasks || []).map((task) => (
@@ -3665,7 +3666,7 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
                       onClick={() => setSelectedTaskId(item.id)}
                       className={classNames("whitespace-normal break-words rounded border px-1.5 py-0.5 text-left text-[10px] leading-snug", categoryTone(item.category || "").tag)}
                     >
-                      {item.calendarFromToday ? "Today / " : item.recurrence === "weekly" ? "↻ " : ""}{item.title}
+                      {item.calendarFromToday ? "Today / " : item.recurrence === "weekly" ? "↺ " : ""}{item.title}
                     </button>
                   )
                 ))}
@@ -3715,7 +3716,7 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
               onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
               className="flex-1 bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
             />
-            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">↻</span>}
+            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">↺</span>}
           </div>
           <p className="mt-1 text-xs text-neutral-500">{category}</p>
         </div>
