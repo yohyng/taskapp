@@ -3253,7 +3253,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-300"
             )}
           >
-            月火水木金土日
+            6days
           </button>
         </div>
       </div>
