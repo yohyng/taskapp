@@ -3361,17 +3361,29 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               value={draft}
               rows={Math.max(1, (draft || "").split("\n").length)}
               onChange={(e) => setDraft(e.target.value)}
-              onBlur={commitTitle}
+              onBlur={(e) => {
+                // Tab キーによる blur は onKeyDown で処理するのでスキップ
+                if (e.relatedTarget === null && e.nativeEvent?.relatedTarget === null) {
+                  commitTitle();
+                } else {
+                  commitTitle();
+                }
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if (e.key === "Tab") {
                   e.preventDefault();
+                  e.stopPropagation();
+                  const isShift = e.shiftKey; // shiftKey をローカル変数にキャプチャ
                   const clean = (draft || "").trim();
                   if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
                   setEditing(false);
-                  if (e.shiftKey) { onOutdent?.(); }
-                  else { onIndent?.(); }
+                  // setTimeout で re-render 後に実行
+                  setTimeout(() => {
+                    if (isShift) { onOutdent?.(); }
+                    else { onIndent?.(); }
+                  }, 0);
                 }
               }}
               onClick={(e) => e.stopPropagation()}
