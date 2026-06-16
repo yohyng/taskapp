@@ -3835,12 +3835,12 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
               className={classNames(
                 "min-h-[96px] bg-neutral-950 p-1 align-top md:min-h-[140px] md:p-1.5",
                 !inMonth && "opacity-35",
-                isToday && "relative ring-2 ring-cyan-300/60 ring-inset bg-cyan-300/[0.055]"
+                isToday && "relative ring-2 ring-emerald-300/60 ring-inset bg-emerald-300/[0.055]"
               )}
             >
-              <div className={classNames("mb-1 flex items-center justify-between gap-1 text-[10px]", isToday ? "text-cyan-100" : "text-neutral-500")}>
-                <span className={classNames(isToday && "rounded-full bg-cyan-300/20 px-1.5 py-0.5 font-semibold text-cyan-100")}>{d.getDate()}</span>
-                {isToday && <span className="rounded-full border border-cyan-200/25 px-1.5 py-0.5 text-[9px] font-medium text-cyan-100">Today</span>}
+              <div className={classNames("mb-1 flex items-center justify-between gap-1 text-[10px]", isToday ? "text-emerald-100" : "text-neutral-500")}>
+                <span className={classNames(isToday && "rounded-full bg-emerald-300/20 px-1.5 py-0.5 font-semibold text-emerald-100")}>{d.getDate()}</span>
+                {isToday && <span className="rounded-full border border-emerald-200/25 px-1.5 py-0.5 text-[9px] font-medium text-emerald-100">Today</span>}
               </div>
               <div className="flex flex-col gap-1">
                 {list.map((item) => (
