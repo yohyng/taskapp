@@ -2257,19 +2257,18 @@ function App() {
             <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
-            <button onClick={() => {
-              const tKey = toDateKey(new Date());
-              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, scheduledDate: tKey, today: false, thisWeek: false } : t));
-              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { scheduledDate: tKey, plain: true })); }
-              setToast(`${selectedIds.size + selectedTrayIds.size}件をTodayに追加しました`);
-              exitSelectMode();
-            }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Today</button>
-            <button onClick={() => {
-              if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, thisWeek: true, today: false, scheduledDate: "" } : t));
-              if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { thisWeek: true, plain: true })); }
-              setToast(`${selectedIds.size + selectedTrayIds.size}件をWeeklyに追加しました`);
-              exitSelectMode();
-            }} className="flex-shrink-0 rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1.5 text-xs text-neutral-200 transition hover:bg-white/[0.12]">Weekly</button>
+            {getWeekDays().map((date, i) => {
+              const dKey = toDateKey(date);
+              const isToday = dKey === toDateKey(new Date());
+              return (
+                <button key={dKey} onClick={() => {
+                  if (selectedIds.size > 0) commitTasks((prev) => prev.map((t) => selectedIds.has(t.id) ? { ...t, scheduledDate: dKey, today: false, thisWeek: false } : t));
+                  if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { scheduledDate: dKey, plain: true })); }
+                  setToast(`${selectedIds.size + selectedTrayIds.size}件を${DAY_LABELS[i]}に追加しました`);
+                  exitSelectMode();
+                }} className={classNames("flex-shrink-0 rounded-md border px-2 py-1.5 text-xs transition", isToday ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>{DAY_LABELS[i]}</button>
+              );
+            })}
             <div className="relative flex-shrink-0">
               <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
             </div>
@@ -2282,8 +2281,6 @@ function App() {
           {showMovePanel && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
               <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
-              <button onClick={() => { bulkToday(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📅 Today</button>
-              <button onClick={() => { bulkWeekly(); setShowMovePanel(false); }} className="w-full rounded-lg px-3 py-2 text-left text-xs text-neutral-200 hover:bg-white/[0.07]">📆 Weekly</button>
               <div className="my-1 border-t border-white/10" />
               {categories.map((cat) => (
                 <div key={cat.key}>
