@@ -2046,12 +2046,37 @@ function App() {
                   <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived).length + inboxItems.length}</span>
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
-                  {tasks.filter(t => !t.category && !t.project && !t.archived).map((task) => (
-                    <div key={task.id} onClick={() => setSelectedTaskId(task.id)} className={classNames("flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition cursor-pointer hover:bg-white/[0.07]", selectedTaskId === task.id && "bg-white/[0.09]")}>
-                      <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{task.status === "完了" ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
-                      <div className={classNames("flex-1 break-words text-[11px] text-neutral-100", task.status === "完了" && "line-through opacity-40")}>{task.title}</div>
-                    </div>
-                  ))}
+                  {tasks.filter(t => !t.category && !t.project && !t.archived).map((task) => {
+                    const [editing, setEditing] = React.useState(false);
+                    const [draft, setDraft] = React.useState(task.title);
+                    const isDone = task.status === "完了";
+                    return (
+                      <div key={task.id} className={classNames("flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition", selectedTaskId === task.id && "bg-white/[0.09]", editing && "bg-white/[0.07]")}>
+                        <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
+                        <div className="min-w-0 flex-1">
+                          {editing ? (
+                            <input
+                              autoFocus
+                              value={draft}
+                              onChange={(e) => setDraft(e.target.value)}
+                              onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter") { e.preventDefault(); if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }
+                                if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full rounded border-b border-white/25 bg-transparent text-[11px] font-medium text-neutral-100 outline-none"
+                            />
+                          ) : (
+                            <div className="flex items-start gap-1 group/title">
+                              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words cursor-text text-[11px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
+                              <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                   {inboxItems.map((item) => (
                     <div key={item.id} className="rounded-md border border-neutral-700/40 bg-neutral-800/30 px-1.5 py-1 text-[11px] text-neutral-400 hover:bg-neutral-800/50 transition cursor-pointer">
                       <div className="break-words">{item.title}</div>
@@ -3488,7 +3513,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
         <input
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && onAdd()}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(); } }}
           placeholder="追加…"
           className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20 focus:bg-white/[0.025]"
         />
