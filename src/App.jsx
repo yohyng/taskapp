@@ -422,7 +422,7 @@ function App() {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, []);
-  const use5col = isDesktop && show5col;
+  const use5col = true; // 7days上 + Board下 固定レイアウト
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1777,8 +1777,6 @@ function App() {
           </div>
 
           <div className="ml-auto flex items-center gap-1.5">
-            <button onClick={() => { const next = !show5col; setShow5col(next); localStorage.setItem("taskspace-show5col", String(next)); }} title="5列カラムビュー" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show5col ? "border-violet-400/40 bg-violet-500/15 text-violet-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>5列</button>
-            <button onClick={() => { const next = !show7Days; setShow7Days(next); localStorage.setItem("taskspace-show7days", String(next)); setMobileView("7days"); }} title="Weekly view" className={classNames("rounded-md border px-2 py-1.5 text-xs transition hidden md:block", show7Days ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>Weekly</button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
@@ -2033,7 +2031,7 @@ function App() {
 
         {use5col && (
           <>
-          {show7Days && (
+          {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
@@ -3228,9 +3226,9 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
         )}
       </div>
 
-      <div className="overflow-x-auto pb-2">
-        {/* 幅広: 平日5列 + 土日まとめ1列 / 幅狭: 縦積み */}
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-6 md:min-w-[660px]">
+      <div className="pb-2">
+        {/* 幅広: 平日5列 + 土日まとめ1列 / 幅狭: 縦積み（各曜日1行） */}
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
           {(() => {
             const renderDay = (i, stacked = false) => {
               const date = weekDays[i];
@@ -3262,7 +3260,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
             return (
               <>
                 {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
-                {/* 土日は1列にまとめて縦積み（土が上・日が下） */}
+                {/* 土日は1列にまとめて縦積み（土が上・日が下）。広い幅では1列に収める */}
                 <div className="flex flex-col gap-2">
                   {renderDay(5, true)}
                   {renderDay(6, true)}
