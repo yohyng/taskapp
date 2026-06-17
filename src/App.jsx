@@ -290,7 +290,15 @@ function matchesProjectRule(rule, date) {
     const start = rule.recurrenceStart || toDateKey(new Date());
     return Number(rule.recurrenceDay ?? 1) === day && dayDiff(start, key) >= 0 && Math.floor(dayDiff(start, key) / 7) % 2 === 0;
   }
-  if (rule.recurrence === "monthlyDate") return date.getDate() === Number(rule.recurrenceDate ?? 1);
+  if (rule.recurrence === "monthlyDate") {
+    const d = date.getDate();
+    const from = Number(rule.recurrenceDate ?? 1);
+    if (rule.recurrenceDateTo != null) {
+      const to = Number(rule.recurrenceDateTo);
+      return from <= to ? d >= from && d <= to : d >= from || d <= to;
+    }
+    return d === from;
+  }
   if (rule.recurrence === "monthlyDateRange") {
     const d = date.getDate();
     const from = Number(rule.recurrenceDateFrom ?? 1);
@@ -3343,9 +3351,14 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             if (rule.recurrenceStart && weekEnd < rule.recurrenceStart) return;
             const { category, project } = (() => { const [cat, ...rest] = ruleKey.split("::"); return { category: cat, project: rest.join("::") }; })();
 
-            // monthlyDateRange: 当月にどの日が今週に含まれるか
-            if (rule.recurrence === "monthlyDateRange") {
-              const from = Number(rule.recurrenceDateFrom ?? 1);
+            // 範囲バー表示: monthlyDateRange または monthlyDate+recurrenceDateTo
+            const isRangeBar =
+              rule.recurrence === "monthlyDateRange" ||
+              (rule.recurrence === "monthlyDate" && rule.recurrenceDateTo != null);
+            if (isRangeBar) {
+              const from = rule.recurrence === "monthlyDateRange"
+                ? Number(rule.recurrenceDateFrom ?? 1)
+                : Number(rule.recurrenceDate ?? 1);
               const to = Number(rule.recurrenceDateTo ?? 1);
               // 今週の各日でマッチするものを見つける
               const matchingKeys = weekDays.filter((d) => {
@@ -4111,7 +4124,6 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
               <option value="weekly">毎週</option>
               <option value="biweekly">隔週</option>
               <option value="monthlyDate">毎月・日付指定</option>
-              <option value="monthlyDateRange">毎月・日付範囲</option>
               <option value="monthlyNthWeekday">毎月・第n曜日</option>
             </select>
 
@@ -4139,37 +4151,25 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
             )}
 
             {rule.recurrence === "monthlyDate" && (
-              <input
-                type="number"
-                min="1"
-                max="31"
-                value={Number(rule.recurrenceDate ?? 1)}
-                onChange={(event) => updateProjectRule(category, project, { recurrenceDate: Number(event.target.value) })}
-                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                placeholder="毎月の日付"
-              />
-            )}
-
-            {rule.recurrence === "monthlyDateRange" && (
               <div className="flex items-center gap-2">
                 <input
                   type="number"
                   min="1"
                   max="31"
-                  value={Number(rule.recurrenceDateFrom ?? 1)}
-                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateFrom: Number(e.target.value) })}
+                  value={Number(rule.recurrenceDate ?? 1)}
+                  onChange={(e) => updateProjectRule(category, project, { recurrenceDate: Number(e.target.value) })}
                   className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  placeholder="開始日"
+                  placeholder="日付"
                 />
                 <span className="shrink-0 text-xs text-neutral-500">〜</span>
                 <input
                   type="number"
                   min="1"
                   max="31"
-                  value={Number(rule.recurrenceDateTo ?? 1)}
-                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateTo: Number(e.target.value) })}
+                  value={rule.recurrenceDateTo != null ? Number(rule.recurrenceDateTo) : ""}
+                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateTo: e.target.value === "" ? null : Number(e.target.value) })}
                   className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  placeholder="終了日"
+                  placeholder="終了日（省略可）"
                 />
                 <span className="shrink-0 text-xs text-neutral-500">日</span>
               </div>
