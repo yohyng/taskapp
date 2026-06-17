@@ -3338,7 +3338,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         const ruleBars = [];
         if (projectRules) {
           Object.entries(projectRules).forEach(([ruleKey, rule]) => {
-            if (!rule || rule.recurrence === "none") return;
+            if (!rule || rule.recurrence === "none" || !rule.showRepeatBar) return;
             if (rule.recurrenceEnd && weekStart > rule.recurrenceEnd) return;
             if (rule.recurrenceStart && weekEnd < rule.recurrenceStart) return;
             const { category, project } = (() => { const [cat, ...rest] = ruleKey.split("::"); return { category: cat, project: rest.join("::") }; })();
@@ -4208,6 +4208,15 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
                     <DueDatePicker value={rule.recurrenceEnd || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceEnd: v })} />
                   </div>
                 </div>
+                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 transition hover:bg-black/30">
+                  <input
+                    type="checkbox"
+                    checked={!!rule.showRepeatBar}
+                    onChange={(e) => updateProjectRule(category, project, { showRepeatBar: e.target.checked })}
+                    className="accent-violet-400"
+                  />
+                  <span className="text-xs text-neutral-300">7Daysのバーに表示</span>
+                </label>
               </>
             )}
           </div>
