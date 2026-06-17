@@ -3410,8 +3410,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                   )}
                 >
                   <span className="truncate">{bar.label}</span>
-                  {bar.kind === "due" && !bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.dueDate.slice(8)}</span>}
-                  {bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                  {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
+                  {bar.kind === "repeat" && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
                 </div>
               );
             })}
