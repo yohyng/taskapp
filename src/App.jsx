@@ -4084,13 +4084,10 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
             )}
 
             {rule.recurrence === "biweekly" && (
-              <input
-                type="date"
-                value={rule.recurrenceStart || ""}
-                onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
-                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                title="隔週の起点日"
-              />
+              <div>
+                <div className="mb-1 text-[10px] text-neutral-600">起点日</div>
+                <DueDatePicker value={rule.recurrenceStart || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceStart: v })} />
+              </div>
             )}
 
             {rule.recurrence === "monthlyDate" && (
@@ -4154,20 +4151,14 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
                   title="表示時刻（7Daysでの並び順に使用）"
                 />
                 <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                  <input
-                    type="date"
-                    value={rule.recurrenceStart || ""}
-                    onChange={(event) => updateProjectRule(category, project, { recurrenceStart: event.target.value })}
-                    className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                    title="開始日"
-                  />
-                  <input
-                    type="date"
-                    value={rule.recurrenceEnd || ""}
-                    onChange={(event) => updateProjectRule(category, project, { recurrenceEnd: event.target.value })}
-                    className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                    title="終了日"
-                  />
+                  <div>
+                    <div className="mb-1 text-[10px] text-neutral-600">開始日</div>
+                    <DueDatePicker value={rule.recurrenceStart || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceStart: v })} />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-[10px] text-neutral-600">終了日</div>
+                    <DueDatePicker value={rule.recurrenceEnd || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceEnd: v })} />
+                  </div>
                 </div>
               </>
             )}
@@ -4234,7 +4225,7 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
         <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
         <PropertyRow label="Project"><select value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{task.category ? "（未選択）" : NO_CATEGORY_LABEL}</option>{siblingProjects.map((project) => <option key={project} value={project}>{project}</option>)}{task.project && !siblingProjects.includes(task.project) && <option value={task.project}>{task.project}</option>}</select></PropertyRow>
         <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
-        <PropertyRow label="Due"><input type="date" value={task.dueDate || ""} onChange={(event) => upsertTask({ id: task.id, dueDate: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" /></PropertyRow>
+        <PropertyRow label="Due"><DueDatePicker value={task.dueDate || ""} onChange={(v) => upsertTask({ id: task.id, dueDate: v })} /></PropertyRow>
         <PropertyRow label="Repeat">
           <div className="grid min-w-0 gap-1.5">
             <select value={task.recurrence || "none"} onChange={(event) => upsertTask({ id: task.id, recurrence: event.target.value, recurrenceDay: event.target.value === "weekly" ? Number(task.recurrenceDay ?? 3) : null })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
@@ -4281,6 +4272,111 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
       </div>
       <button onClick={() => removeTask(task.id)} className="mt-3 w-full rounded-xl border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs text-red-100 transition hover:bg-red-400/15">Delete Task</button>
     </aside>
+  );
+}
+
+function DueDatePicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const todayKey = toDateKey(new Date());
+
+  // 表示用の月（開いた時点のvalueまたは今月）
+  const initMonth = () => {
+    if (value) { const [y, m] = value.split("-"); return new Date(Number(y), Number(m) - 1, 1); }
+    const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), 1);
+  };
+  const [month, setMonth] = useState(initMonth);
+
+  // 開くたびに月をリセット
+  useEffect(() => { if (open) setMonth(initMonth()); }, [open]);
+
+  // 外クリックで閉じる
+  useEffect(() => {
+    if (!open) return;
+    function handler(e) { if (ref.current && !ref.current.contains(e.target)) setOpen(false); }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const year = month.getFullYear();
+  const mon = month.getMonth();
+  const first = new Date(year, mon, 1);
+  const startDow = first.getDay();
+  const daysInMonth = new Date(year, mon + 1, 0).getDate();
+  const cells = Array.from({ length: Math.ceil((startDow + daysInMonth) / 7) * 7 }, (_, i) => {
+    const d = i - startDow + 1;
+    return d >= 1 && d <= daysInMonth ? d : null;
+  });
+
+  const displayLabel = value
+    ? (() => { const [y, m, d] = value.split("-"); return `${y}/${m}/${d}`; })()
+    : "日付を選択";
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className={classNames(
+          "flex w-full items-center gap-2 rounded-lg border px-2 py-1.5 text-xs transition",
+          value ? "border-white/10 bg-black/25 text-neutral-200 hover:bg-black/40" : "border-white/10 bg-black/25 text-neutral-500 hover:bg-black/40"
+        )}
+      >
+        <CalendarDays className="h-3.5 w-3.5 shrink-0 text-neutral-500" />
+        <span className="flex-1 text-left">{displayLabel}</span>
+        {value && (
+          <span onClick={(e) => { e.stopPropagation(); onChange(""); }} className="shrink-0 text-neutral-600 hover:text-red-400 transition">
+            <X className="h-3 w-3" />
+          </span>
+        )}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-white/15 bg-neutral-900 p-3 shadow-2xl">
+          {/* 月ナビ */}
+          <div className="mb-2 flex items-center justify-between">
+            <button onClick={() => setMonth(new Date(year, mon - 1, 1))} className="rounded p-1 text-neutral-400 hover:bg-white/10"><ChevronLeft className="h-3.5 w-3.5" /></button>
+            <span className="text-xs font-semibold text-neutral-300">{year}年{mon + 1}月</span>
+            <button onClick={() => setMonth(new Date(year, mon + 1, 1))} className="rounded p-1 text-neutral-400 hover:bg-white/10"><ChevronRight className="h-3.5 w-3.5" /></button>
+          </div>
+          {/* 曜日ヘッダ */}
+          <div className="mb-1 grid grid-cols-7 text-center">
+            {["日","月","火","水","木","金","土"].map((d, i) => (
+              <div key={d} className={classNames("text-[10px] font-medium", i === 0 ? "text-rose-400" : i === 6 ? "text-sky-400" : "text-neutral-600")}>{d}</div>
+            ))}
+          </div>
+          {/* 日付グリッド */}
+          <div className="grid grid-cols-7 gap-px">
+            {cells.map((d, i) => {
+              if (!d) return <div key={i} />;
+              const key = `${year}-${String(mon + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+              const isToday = key === todayKey;
+              const isSelected = key === value;
+              const dow = i % 7;
+              return (
+                <button
+                  key={key}
+                  onClick={() => { onChange(key); setOpen(false); }}
+                  className={classNames(
+                    "rounded py-1 text-[11px] transition",
+                    isSelected ? "bg-emerald-500 font-semibold text-white" :
+                    isToday ? "bg-emerald-500/20 font-semibold text-emerald-300 hover:bg-emerald-500/30" :
+                    dow === 0 ? "text-rose-300 hover:bg-white/10" :
+                    dow === 6 ? "text-sky-300 hover:bg-white/10" :
+                    "text-neutral-300 hover:bg-white/10"
+                  )}
+                >{d}</button>
+              );
+            })}
+          </div>
+          {/* Today shortcut */}
+          <button
+            onClick={() => { onChange(todayKey); setOpen(false); }}
+            className="mt-2 w-full rounded-lg border border-emerald-400/25 bg-emerald-500/10 py-1 text-[11px] text-emerald-300 transition hover:bg-emerald-500/20"
+          >今日</button>
+        </div>
+      )}
+    </div>
   );
 }
 
