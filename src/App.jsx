@@ -3307,6 +3307,63 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         </div>
       </div>
 
+      {/* 締め切りバー */}
+      {(() => {
+        const weekKeys = weekDays.map(toDateKey);
+        const weekStart = weekKeys[0];
+        const weekEnd = weekKeys[6];
+        // dueDateがある未完了タスクで今週に関係するもの
+        const bars = tasks.filter((t) =>
+          t.dueDate && !t.archived && t.status !== "完了" &&
+          t.dueDate >= weekStart
+        ).map((t) => {
+          const rawStart = t.scheduledDate && t.scheduledDate >= weekStart ? t.scheduledDate : weekStart;
+          const rawEnd = t.dueDate <= weekEnd ? t.dueDate : weekEnd;
+          // weekKeys内での列インデックス（0-4=月〜金, 5=土日）
+          const toCol = (key) => {
+            const idx = weekKeys.indexOf(key);
+            if (idx < 0) {
+              if (key < weekStart) return 0;
+              return 5;
+            }
+            return Math.min(idx, 5);
+          };
+          const startCol = toCol(rawStart);
+          const endCol = toCol(rawEnd);
+          const isOverdue = t.dueDate < toDateKey(new Date());
+          return { ...t, startCol, endCol, isOverdue };
+        }).filter((b) => b.endCol >= b.startCol);
+
+        if (bars.length === 0) return null;
+        return (
+          <div className="mb-1.5 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+            {bars.map((bar) => {
+              const span = bar.endCol - bar.startCol + 1;
+              const isPastWeek = bar.dueDate > weekEnd;
+              return (
+                <div
+                  key={bar.id}
+                  style={{ gridColumn: `${bar.startCol + 1} / span ${span}` }}
+                  title={`${bar.title}（締め切り: ${bar.dueDate}）`}
+                  className={classNames(
+                    "flex h-4 items-center overflow-hidden rounded px-1.5 text-[9px] font-medium leading-none",
+                    bar.isOverdue
+                      ? "bg-red-500/25 text-red-200"
+                      : isPastWeek
+                      ? "rounded-r-none bg-sky-500/20 text-sky-200"
+                      : "bg-sky-500/20 text-sky-200"
+                  )}
+                >
+                  <span className="truncate">{bar.title}</span>
+                  {!isPastWeek && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.dueDate.slice(8)}</span>}
+                  {isPastWeek && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
+
       <div className="pb-2">
         {forceHorizontal ? (
           <div className="overflow-x-auto">
