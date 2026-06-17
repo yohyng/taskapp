@@ -3338,7 +3338,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             const endCol = toCol(rawEnd);
             const isOverdue = t.dueDate < toDateKey(new Date());
             const extendsRight = t.dueDate > weekEnd;
-            return { kind: "due", id: t.id, label: t.title, startCol, endCol, isOverdue, extendsRight, dueDate: t.dueDate };
+            return { kind: "due", id: t.id, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsRight, dueDate: t.dueDate };
           })
           .filter((b) => b.endCol >= b.startCol);
 
@@ -3404,8 +3404,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                     "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
                     bar.extendsLeft ? "rounded-l-none" : "rounded-l",
                     bar.extendsRight ? "rounded-r-none" : "rounded-r",
-                    bar.kind === "due"
-                      ? bar.isOverdue ? "bg-red-500/25 text-red-200" : "bg-sky-500/20 text-sky-200"
+                    bar.isOverdue
+                      ? "bg-red-500/25 text-red-200"
                       : categoryTone(bar.category).tag
                   )}
                 >
