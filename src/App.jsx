@@ -39,6 +39,7 @@ import {
   CheckSquare,
   FileText,
   Info,
+  Pin,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -328,6 +329,7 @@ const FONT_OPTIONS = [
 function normalizeTask(task) {
   return {
     dueDate: "",
+    pinnedDate: "",
     today: false,
     todayOrder: null,
     weeklyOrder: null,
@@ -3132,6 +3134,12 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 </button>
               </div>
             )}
+            {task.pinnedDate && (
+              <div className="mt-0.5 flex items-center gap-0.5 text-[9px] text-amber-300/80">
+                <Pin className="h-2.5 w-2.5" />
+                <span>{task.pinnedDate.slice(5).replace("-", "/")}</span>
+              </div>
+            )}
             {compact && (
               <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-neutral-500">
                 {task.category || task.project ? (
@@ -3142,7 +3150,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 ) : (
                   <span>{NO_CATEGORY_LABEL}</span>
                 )}
-                {task.dueDate && <span>・{task.dueDate}</span>}
+                {task.dueDate && <span>・〆{task.dueDate.slice(5).replace("-", "/")}</span>}
               </div>
             )}
           </div>
@@ -3607,6 +3615,12 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
             <div className="flex items-start gap-1 group/title">
               <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
+            </div>
+          )}
+          {task.pinnedDate && (
+            <div className="flex items-center gap-0.5 text-[9px] text-amber-300/80">
+              <Pin className="h-2.5 w-2.5" />
+              <span>{task.pinnedDate.slice(5).replace("-", "/")}</span>
             </div>
           )}
         </div>
@@ -4284,6 +4298,7 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
         <PropertyRow label="Project"><select value={task.project || ""} onChange={(event) => upsertTask({ id: task.id, project: event.target.value, plain: !task.category && !event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{task.category ? "（未選択）" : NO_CATEGORY_LABEL}</option>{siblingProjects.map((project) => <option key={project} value={project}>{project}</option>)}{task.project && !siblingProjects.includes(task.project) && <option value={task.project}>{task.project}</option>}</select></PropertyRow>
         <PropertyRow label="Status"><select value={task.status} onChange={(event) => upsertTask({ id: task.id, status: event.target.value })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option>未着手</option><option>進行中</option><option>完了</option></select></PropertyRow>
         <PropertyRow label="Due"><DueDatePicker value={task.dueDate || ""} onChange={(v) => upsertTask({ id: task.id, dueDate: v })} /></PropertyRow>
+        <PropertyRow label="Pin日"><DueDatePicker value={task.pinnedDate || ""} onChange={(v) => upsertTask({ id: task.id, pinnedDate: v })} /></PropertyRow>
         <PropertyRow label="Repeat">
           <div className="grid min-w-0 gap-1.5">
             <select value={task.recurrence || "none"} onChange={(event) => upsertTask({ id: task.id, recurrence: event.target.value, recurrenceDay: event.target.value === "weekly" ? Number(task.recurrenceDay ?? 3) : null })} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">

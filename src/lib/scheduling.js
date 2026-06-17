@@ -102,7 +102,8 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
   // 1) 明示的に配置されたタスク（rootのみ）
   tasks.filter((t) => !t.archived && !t.parentId && (
     t.scheduledDate === dateKey ||
-    (!t.scheduledDate && dateKey === todayKey && (t.today || (t.thisWeek && !t.today)))
+    (!t.scheduledDate && dateKey === todayKey && (t.today || (t.thisWeek && !t.today))) ||
+    (t.pinnedDate === dateKey && t.scheduledDate !== dateKey)
   )).forEach(addRoot);
 
   // 2) プロジェクト繰り返しルール由来のゴースト（rootのみ）
