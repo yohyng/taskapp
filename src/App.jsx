@@ -3482,11 +3482,16 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
   const isSelected = selectMode && selectedIds && selectedIds.has(task.id);
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+  const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `traytask-${task.id}`,
     data: { type: "task", id: task.id },
     disabled: editing || selectMode,
   });
+  const { setNodeRef: dropRef, isOver } = useDroppable({
+    id: `traytask-drop-${task.id}`,
+    data: { type: "task", id: task.id },
+  });
+  const setNodeRef = (el) => { dragRef(el); dropRef(el); };
 
   useEffect(() => { setDraft(task.title); }, [task.title]);
 
@@ -3505,6 +3510,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
           isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
           editing && "bg-white/[0.07]",
           isDragging && "opacity-30",
+          isOver && !isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
         )}
       >
         {selectMode ? (
