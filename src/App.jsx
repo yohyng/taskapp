@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
-import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay } from "./lib/scheduling";
+import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
@@ -3307,56 +3307,98 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         </div>
       </div>
 
-      {/* 締め切りバー */}
+      {/* 締め切り & リピートバー */}
       {(() => {
         const weekKeys = weekDays.map(toDateKey);
         const weekStart = weekKeys[0];
         const weekEnd = weekKeys[6];
-        // dueDateがある未完了タスクで今週に関係するもの
-        const bars = tasks.filter((t) =>
-          t.dueDate && !t.archived && t.status !== "完了" &&
-          t.dueDate >= weekStart
-        ).map((t) => {
-          const rawStart = t.scheduledDate && t.scheduledDate >= weekStart ? t.scheduledDate : weekStart;
-          const rawEnd = t.dueDate <= weekEnd ? t.dueDate : weekEnd;
-          // weekKeys内での列インデックス（0-4=月〜金, 5=土日）
-          const toCol = (key) => {
-            const idx = weekKeys.indexOf(key);
-            if (idx < 0) {
-              if (key < weekStart) return 0;
-              return 5;
-            }
-            return Math.min(idx, 5);
-          };
-          const startCol = toCol(rawStart);
-          const endCol = toCol(rawEnd);
-          const isOverdue = t.dueDate < toDateKey(new Date());
-          return { ...t, startCol, endCol, isOverdue };
-        }).filter((b) => b.endCol >= b.startCol);
 
-        if (bars.length === 0) return null;
+        // 列インデックス（0-4=月〜金, 5=土日）
+        const toCol = (key) => {
+          const idx = weekKeys.indexOf(key);
+          if (idx < 0) return key < weekStart ? 0 : 5;
+          return Math.min(idx, 5);
+        };
+
+        // 1) dueDateバー（タスク締め切り）
+        const dueBars = tasks
+          .filter((t) => t.dueDate && !t.archived && t.status !== "完了" && t.dueDate >= weekStart)
+          .map((t) => {
+            const rawStart = t.scheduledDate && t.scheduledDate >= weekStart ? t.scheduledDate : weekStart;
+            const rawEnd = t.dueDate <= weekEnd ? t.dueDate : weekEnd;
+            const startCol = toCol(rawStart);
+            const endCol = toCol(rawEnd);
+            const isOverdue = t.dueDate < toDateKey(new Date());
+            const extendsRight = t.dueDate > weekEnd;
+            return { kind: "due", id: t.id, label: t.title, startCol, endCol, isOverdue, extendsRight, dueDate: t.dueDate };
+          })
+          .filter((b) => b.endCol >= b.startCol);
+
+        // 2) リピートルールバー（プロジェクト繰り返し）
+        const ruleBars = [];
+        if (projectRules) {
+          Object.entries(projectRules).forEach(([ruleKey, rule]) => {
+            if (!rule || rule.recurrence === "none") return;
+            if (rule.recurrenceEnd && weekStart > rule.recurrenceEnd) return;
+            if (rule.recurrenceStart && weekEnd < rule.recurrenceStart) return;
+            const { category, project } = (() => { const [cat, ...rest] = ruleKey.split("::"); return { category: cat, project: rest.join("::") }; })();
+
+            // monthlyDateRange: 当月にどの日が今週に含まれるか
+            if (rule.recurrence === "monthlyDateRange") {
+              const from = Number(rule.recurrenceDateFrom ?? 1);
+              const to = Number(rule.recurrenceDateTo ?? 1);
+              // 今週の各日でマッチするものを見つける
+              const matchingKeys = weekDays.filter((d) => {
+                const dd = d.getDate();
+                const m = from <= to ? dd >= from && dd <= to : dd >= from || dd <= to;
+                const key = toDateKey(d);
+                if (rule.recurrenceStart && key < rule.recurrenceStart) return false;
+                if (rule.recurrenceEnd && key > rule.recurrenceEnd) return false;
+                return m;
+              }).map(toDateKey);
+              if (matchingKeys.length === 0) return;
+              const startCol = toCol(matchingKeys[0]);
+              const endCol = toCol(matchingKeys[matchingKeys.length - 1]);
+              // 範囲が今週をまたぐか（月末が今週外にある）
+              const extendsLeft = from > 1 && weekDays[0].getDate() > from && weekDays[0].getDate() <= to;
+              const extendsRight = to > weekDays[6].getDate() && weekDays[6].getDate() < to;
+              ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}`, label: project, category, startCol, endCol, extendsLeft: startCol === 0 && matchingKeys[0] === weekKeys[0], extendsRight: endCol === 5 && matchingKeys[matchingKeys.length - 1] === weekKeys[5] && to !== weekDays[Math.min(5, weekDays.length - 1)].getDate() });
+            } else {
+              // その他リピート（daily, weekdays, weekly等）：各曜日にマッチする日をバーとして1日ずつ
+              weekDays.forEach((d, i) => {
+                const key = toDateKey(d);
+                if (!ruleMatchesWeekday(rule, d, key)) return;
+                const col = Math.min(i, 5);
+                ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}-${key}`, label: project, category, startCol: col, endCol: col, extendsLeft: false, extendsRight: false });
+              });
+            }
+          });
+        }
+
+        const allBars = [...dueBars, ...ruleBars];
+        if (allBars.length === 0) return null;
+
         return (
           <div className="mb-1.5 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-            {bars.map((bar) => {
+            {allBars.map((bar) => {
               const span = bar.endCol - bar.startCol + 1;
-              const isPastWeek = bar.dueDate > weekEnd;
               return (
                 <div
                   key={bar.id}
                   style={{ gridColumn: `${bar.startCol + 1} / span ${span}` }}
-                  title={`${bar.title}（締め切り: ${bar.dueDate}）`}
+                  title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
                   className={classNames(
-                    "flex h-4 items-center overflow-hidden rounded px-1.5 text-[9px] font-medium leading-none",
-                    bar.isOverdue
-                      ? "bg-red-500/25 text-red-200"
-                      : isPastWeek
-                      ? "rounded-r-none bg-sky-500/20 text-sky-200"
-                      : "bg-sky-500/20 text-sky-200"
+                    "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
+                    bar.extendsLeft ? "rounded-l-none" : "rounded-l",
+                    bar.extendsRight ? "rounded-r-none" : "rounded-r",
+                    bar.kind === "due"
+                      ? bar.isOverdue ? "bg-red-500/25 text-red-200" : "bg-sky-500/20 text-sky-200"
+                      : categoryTone(bar.category).tag
                   )}
                 >
-                  <span className="truncate">{bar.title}</span>
-                  {!isPastWeek && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.dueDate.slice(8)}</span>}
-                  {isPastWeek && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                  <span className="truncate">{bar.label}</span>
+                  {bar.kind === "due" && !bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.dueDate.slice(8)}</span>}
+                  {bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
                 </div>
               );
             })}
