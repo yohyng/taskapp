@@ -3375,7 +3375,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
               // 範囲が今週をまたぐか（月末が今週外にある）
               const extendsLeft = from > 1 && weekDays[0].getDate() > from && weekDays[0].getDate() <= to;
               const extendsRight = to > weekDays[6].getDate() && weekDays[6].getDate() < to;
-              ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}`, label: project, category, startCol, endCol, extendsLeft: startCol === 0 && matchingKeys[0] === weekKeys[0], extendsRight: endCol === 5 && matchingKeys[matchingKeys.length - 1] === weekKeys[5] && to !== weekDays[Math.min(5, weekDays.length - 1)].getDate() });
+              ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}`, label: project, category, startCol, endCol, rangeEndDay: to, extendsLeft: startCol === 0 && matchingKeys[0] === weekKeys[0], extendsRight: endCol === 5 && matchingKeys[matchingKeys.length - 1] === weekKeys[5] && to !== weekDays[Math.min(5, weekDays.length - 1)].getDate() });
             } else {
               // その他リピート（daily, weekdays, weekly等）：各曜日にマッチする日をバーとして1日ずつ
               weekDays.forEach((d, i) => {
@@ -3411,7 +3411,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 >
                   <span className="truncate">{bar.label}</span>
                   {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
-                  {bar.kind === "repeat" && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                  {bar.kind === "repeat" && bar.rangeEndDay != null && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
+                  {bar.kind === "repeat" && bar.rangeEndDay == null && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
                 </div>
               );
             })}
