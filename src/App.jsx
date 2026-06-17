@@ -2692,7 +2692,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
           ) : (
             <div
               onClick={(e) => { if (selectMode) { e.stopPropagation(); return; } setEditing(true); }}
-              className="block w-full break-words text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
+              className="block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
             </div>
@@ -3119,7 +3119,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               <div className="flex items-start gap-1 group/title">
                 <div
                   onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-                  className={classNames("flex-1 break-words cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
+                  className={classNames("flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
                 >
                   {task.title}
                 </div>
@@ -3605,7 +3605,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
             />
           ) : (
             <div className="flex items-start gap-1 group/title">
-              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -3726,7 +3726,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               <div
                 onClick={(e) => { e.stopPropagation(); setEditing(true); }}
                 title="クリックで名前を編集"
-                className={classNames("flex-1 break-words text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
+                className={classNames("flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
               >
                 {task.title}
               </div>
