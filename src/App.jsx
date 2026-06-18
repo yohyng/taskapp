@@ -3505,15 +3505,14 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 </div>
               </div>
             ) : (
-              /* colsPerRow に応じてグループ数が変わる（1列→6グループ, 2列→3グループ, 6列→1グループ）
-                 各グループの上にその列範囲に対応するバーを表示 */
-              <div className="flex flex-col gap-2">
-                {responsiveGroups.map(({ groupStart, groupEnd }) => {
-                  const groupSize = groupEnd - groupStart + 1;
-                  return (
-                    <div key={groupStart} className="min-w-0">
-                      {renderBarSlice(groupStart, groupEnd)}
-                      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+              /* 通常モード: バーは1本横一直線 → colsPerRow に応じたグループ列でタスクを表示 */
+              <>
+                {barRow}
+                <div className="flex flex-col gap-2">
+                  {responsiveGroups.map(({ groupStart, groupEnd }) => {
+                    const groupSize = groupEnd - groupStart + 1;
+                    return (
+                      <div key={groupStart} className="grid gap-1 min-w-0" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
                         {Array.from({ length: groupSize }, (_, j) => {
                           const dayIdx = groupStart + j;
                           if (dayIdx === 5) {
@@ -3527,10 +3526,10 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                           return <DayColumn key={dayIdx} {...dayColumnProps(dayIdx)} />;
                         })}
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
           </div>
         );
