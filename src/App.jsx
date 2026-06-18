@@ -3118,10 +3118,10 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 )}
               />
             ) : (
-              <div className="flex items-start gap-1 group/title">
+              <div className="flex min-w-0 items-start gap-1 group/title">
                 <div
                   onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-                  className={classNames("flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
+                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
                 >
                   {task.title}
                 </div>
@@ -3612,8 +3612,8 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
               className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium text-neutral-100 outline-none"
             />
           ) : (
-            <div className="flex items-start gap-1 group/title">
-              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
+            <div className="flex min-w-0 items-start gap-1 group/title">
+              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -3736,11 +3736,11 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
             />
           ) : (
-            <div className="flex items-start gap-1 group/title">
+            <div className="flex min-w-0 items-start gap-1 group/title">
               <div
                 onClick={(e) => { e.stopPropagation(); setEditing(true); }}
                 title="クリックで名前を編集"
-                className={classNames("flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
+                className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
               >
                 {task.title}
               </div>
