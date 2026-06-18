@@ -3323,7 +3323,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         </div>
       </div>
 
-      {/* 締め切り & リピートバー */}
+      {/* 締め切り & リピートバー + 曜日カラム */}
       {(() => {
         const weekKeys = weekDays.map(toDateKey);
         const weekStart = weekKeys[0];
@@ -3336,7 +3336,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
           return Math.min(idx, 5);
         };
 
-        // 1) dueDateバー（タスク締め切り）
+        // 1) dueDateバー
         const dueBars = tasks
           .filter((t) => t.dueDate && !t.archived && t.status !== "完了" && t.dueDate >= weekStart)
           .map((t) => {
@@ -3350,7 +3350,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
           })
           .filter((b) => b.endCol >= b.startCol);
 
-        // 2) リピートルールバー（プロジェクト繰り返し）
+        // 2) リピートルールバー
         const ruleBars = [];
         if (projectRules) {
           Object.entries(projectRules).forEach(([ruleKey, rule]) => {
@@ -3359,7 +3359,6 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             if (rule.recurrenceStart && weekEnd < rule.recurrenceStart) return;
             const { category, project } = (() => { const [cat, ...rest] = ruleKey.split("::"); return { category: cat, project: rest.join("::") }; })();
 
-            // 範囲バー表示: monthlyDateRange または monthlyDate+recurrenceDateTo
             const isRangeBar =
               rule.recurrence === "monthlyDateRange" ||
               (rule.recurrence === "monthlyDate" && rule.recurrenceDateTo != null);
@@ -3368,7 +3367,6 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 ? Number(rule.recurrenceDateFrom ?? 1)
                 : Number(rule.recurrenceDate ?? 1);
               const to = Number(rule.recurrenceDateTo ?? 1);
-              // 今週の各日でマッチするものを見つける
               const matchingKeys = weekDays.filter((d) => {
                 const dd = d.getDate();
                 const m = from <= to ? dd >= from && dd <= to : dd >= from || dd <= to;
@@ -3380,12 +3378,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
               if (matchingKeys.length === 0) return;
               const startCol = toCol(matchingKeys[0]);
               const endCol = toCol(matchingKeys[matchingKeys.length - 1]);
-              // 範囲が今週をまたぐか（月末が今週外にある）
-              const extendsLeft = from > 1 && weekDays[0].getDate() > from && weekDays[0].getDate() <= to;
-              const extendsRight = to > weekDays[6].getDate() && weekDays[6].getDate() < to;
               ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}`, label: project, category, startCol, endCol, rangeEndDay: to, extendsLeft: startCol === 0 && matchingKeys[0] === weekKeys[0], extendsRight: endCol === 5 && matchingKeys[matchingKeys.length - 1] === weekKeys[5] && to !== weekDays[Math.min(5, weekDays.length - 1)].getDate() });
             } else {
-              // その他リピート（daily, weekdays, weekly等）：各曜日にマッチする日をバーとして1日ずつ
               weekDays.forEach((d, i) => {
                 const key = toDateKey(d);
                 if (!ruleMatchesWeekday(rule, d, key)) return;
@@ -3397,9 +3391,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         }
 
         const allBars = [...dueBars, ...ruleBars];
-        if (allBars.length === 0) return null;
-
-        return (
+        const barRow = allBars.length > 0 ? (
           <div className="mb-1.5 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
             {allBars.map((bar) => {
               const span = bar.endCol - bar.startCol + 1;
@@ -3425,118 +3417,126 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
               );
             })}
           </div>
-        );
-      })()}
+        ) : null;
 
-      <div className="pb-2">
-        {forceHorizontal ? (
-          <div className="overflow-x-auto">
-            <div className="grid min-w-[480px] gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-              {[0, 1, 2, 3, 4].map((i) => {
-                const date = weekDays[i];
-                const dateKey = toDateKey(date);
-                return (
-                  <DayColumn
-                    key={dateKey}
-                    dateKey={dateKey}
-                    label={DAY_LABELS[i]}
-                    date={date}
-                    isToday={dateKey === todayKey}
-                    isSat={false}
-                    isSun={false}
-                    stacked
-                    tasks={tasksForDay(dateKey, date)}
-                    childrenOf={childrenOf}
-                    newTitle={newTitles[dateKey] || ""}
-                    setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                    onAdd={() => handleAdd(dateKey)}
-                    toggleDone={toggleDone}
-                    upsertTask={upsertTask}
-                    removeTask={removeTask}
-                    categoryTone={categoryTone}
-                    setSelectedTaskId={setSelectedTaskId}
-                    selectedTaskId={selectedTaskId}
-                    projectRules={projectRules}
-                  />
-                );
-              })}
-              <div className="flex flex-col gap-1">
-                {[5, 6].map((i) => {
-                  const date = weekDays[i];
-                  const dateKey = toDateKey(date);
-                  return (
-                    <DayColumn
-                      key={dateKey}
-                      dateKey={dateKey}
-                      label={DAY_LABELS[i]}
-                      date={date}
-                      isToday={dateKey === todayKey}
-                      isSat={i === 5}
-                      isSun={i === 6}
-                      stacked
-                      tasks={tasksForDay(dateKey, date)}
-                      childrenOf={childrenOf}
-                      newTitle={newTitles[dateKey] || ""}
-                      setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                      onAdd={() => handleAdd(dateKey)}
-                      toggleDone={toggleDone}
-                      upsertTask={upsertTask}
-                      removeTask={removeTask}
-                      categoryTone={categoryTone}
-                      setSelectedTaskId={setSelectedTaskId}
-                      selectedTaskId={selectedTaskId}
-                      projectRules={projectRules}
-                    />
-                  );
-                })}
+        return (
+          <div className="pb-2">
+            {forceHorizontal ? (
+              <div className="overflow-x-auto">
+                <div className="min-w-[480px]">
+                  {barRow}
+                  <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+                    {[0, 1, 2, 3, 4].map((i) => {
+                      const date = weekDays[i];
+                      const dateKey = toDateKey(date);
+                      return (
+                        <DayColumn
+                          key={dateKey}
+                          dateKey={dateKey}
+                          label={DAY_LABELS[i]}
+                          date={date}
+                          isToday={dateKey === todayKey}
+                          isSat={false}
+                          isSun={false}
+                          stacked
+                          tasks={tasksForDay(dateKey, date)}
+                          childrenOf={childrenOf}
+                          newTitle={newTitles[dateKey] || ""}
+                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                          onAdd={() => handleAdd(dateKey)}
+                          toggleDone={toggleDone}
+                          upsertTask={upsertTask}
+                          removeTask={removeTask}
+                          categoryTone={categoryTone}
+                          setSelectedTaskId={setSelectedTaskId}
+                          selectedTaskId={selectedTaskId}
+                          projectRules={projectRules}
+                        />
+                      );
+                    })}
+                    <div className="flex flex-col gap-1">
+                    {[5, 6].map((i) => {
+                      const date = weekDays[i];
+                      const dateKey = toDateKey(date);
+                      return (
+                        <DayColumn
+                          key={dateKey}
+                          dateKey={dateKey}
+                          label={DAY_LABELS[i]}
+                          date={date}
+                          isToday={dateKey === todayKey}
+                          isSat={i === 5}
+                          isSun={i === 6}
+                          stacked
+                          tasks={tasksForDay(dateKey, date)}
+                          childrenOf={childrenOf}
+                          newTitle={newTitles[dateKey] || ""}
+                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                          onAdd={() => handleAdd(dateKey)}
+                          toggleDone={toggleDone}
+                          upsertTask={upsertTask}
+                          removeTask={removeTask}
+                          categoryTone={categoryTone}
+                          setSelectedTaskId={setSelectedTaskId}
+                          selectedTaskId={selectedTaskId}
+                          projectRules={projectRules}
+                        />
+                      );
+                    })}
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        ) : (
-        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
-          {(() => {
-            const renderDay = (i, stacked = false) => {
-              const date = weekDays[i];
-              const dateKey = toDateKey(date);
-              return (
-                <DayColumn
-                  key={dateKey}
-                  dateKey={dateKey}
-                  label={DAY_LABELS[i]}
-                  date={date}
-                  isToday={dateKey === todayKey}
-                  isSat={i === 5}
-                  isSun={i === 6}
-                  stacked={stacked}
-                  tasks={tasksForDay(dateKey, date)}
-                  childrenOf={childrenOf}
-                  newTitle={newTitles[dateKey] || ""}
-                  setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                  onAdd={() => handleAdd(dateKey)}
-                  toggleDone={toggleDone}
-                  upsertTask={upsertTask}
-                  removeTask={removeTask}
-                  categoryTone={categoryTone}
-                  setSelectedTaskId={setSelectedTaskId}
-                  selectedTaskId={selectedTaskId}
-                  projectRules={projectRules}
-                />
-              );
-            };
-            return (
+            ) : (
               <>
-                {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
-                {/* 土日は1列にまとめて縦積み（土が上・日が下）。広い幅では1列に収める */}
-                <div className="flex flex-col gap-2">
-                  {renderDay(5, true)}
-                  {renderDay(6, true)}
+                {/* レスポンシブ時: lg以上のみバー表示（6列レイアウトに一致する場合のみ） */}
+                {barRow && <div className="hidden lg:block">{barRow}</div>}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
+                  {(() => {
+                    const renderDay = (i, stacked = false) => {
+                      const date = weekDays[i];
+                      const dateKey = toDateKey(date);
+                      return (
+                        <DayColumn
+                          key={dateKey}
+                          dateKey={dateKey}
+                          label={DAY_LABELS[i]}
+                          date={date}
+                          isToday={dateKey === todayKey}
+                          isSat={i === 5}
+                          isSun={i === 6}
+                          stacked={stacked}
+                          tasks={tasksForDay(dateKey, date)}
+                          childrenOf={childrenOf}
+                          newTitle={newTitles[dateKey] || ""}
+                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
+                          onAdd={() => handleAdd(dateKey)}
+                          toggleDone={toggleDone}
+                          upsertTask={upsertTask}
+                          removeTask={removeTask}
+                          categoryTone={categoryTone}
+                          setSelectedTaskId={setSelectedTaskId}
+                          selectedTaskId={selectedTaskId}
+                          projectRules={projectRules}
+                        />
+                      );
+                    };
+                    return (
+                      <>
+                        {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
+                        <div className="flex flex-col gap-2">
+                          {renderDay(5, true)}
+                          {renderDay(6, true)}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               </>
-            );
-          })()}
-        </div>
-        )}
-      </div>
+            )}
+          </div>
+        );
+      })()}
     </section>
   );
 }
