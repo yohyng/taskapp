@@ -3276,9 +3276,9 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   }
 
   const [forceHorizontal, setForceHorizontal] = useState(false);
-  const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 2 : 1);
+  const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
   useEffect(() => {
-    const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 2 : 1);
+    const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
