@@ -3276,6 +3276,12 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   }
 
   const [forceHorizontal, setForceHorizontal] = useState(false);
+  const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 2 : 1);
+  useEffect(() => {
+    const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 640 ? 2 : 1);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   const firstDay = weekDays[0];
   const lastDay = weekDays[6];
@@ -3476,6 +3482,14 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
           };
         };
 
+        // 1列あたり何曜日か（JS検知済み colsPerRow: 1/2/6）をもとにグループを構築
+        const numGroups = Math.ceil(6 / colsPerRow);
+        const responsiveGroups = Array.from({ length: numGroups }, (_, g) => {
+          const groupStart = g * colsPerRow;
+          const groupEnd = Math.min(groupStart + colsPerRow - 1, 5);
+          return { groupStart, groupEnd };
+        });
+
         return (
           <div className="pb-2">
             {forceHorizontal ? (
@@ -3491,37 +3505,31 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 </div>
               </div>
             ) : (
-              /* レスポンシブ: 3グループ（月火 / 水木 / 金・土日）
-                 lg: グループを横並び → 実質6列と同等
-                 sm以下: グループを縦積み → 各グループにバーを表示 */
-              <div className="flex flex-col gap-2 lg:flex-row lg:gap-1">
-                {/* グループA: 月・火 (cols 0-1) */}
-                <div className="min-w-0 flex-1">
-                  {renderBarSlice(0, 1)}
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    <DayColumn {...dayColumnProps(0)} />
-                    <DayColumn {...dayColumnProps(1)} />
-                  </div>
-                </div>
-                {/* グループB: 水・木 (cols 2-3) */}
-                <div className="min-w-0 flex-1">
-                  {renderBarSlice(2, 3)}
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    <DayColumn {...dayColumnProps(2)} />
-                    <DayColumn {...dayColumnProps(3)} />
-                  </div>
-                </div>
-                {/* グループC: 金・土日 (cols 4-5) */}
-                <div className="min-w-0 flex-1">
-                  {renderBarSlice(4, 5)}
-                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
-                    <DayColumn {...dayColumnProps(4)} />
-                    <div className="flex flex-col gap-1">
-                      <DayColumn {...dayColumnProps(5, true)} />
-                      <DayColumn {...dayColumnProps(6, true)} />
+              /* colsPerRow に応じてグループ数が変わる（1列→6グループ, 2列→3グループ, 6列→1グループ）
+                 各グループの上にその列範囲に対応するバーを表示 */
+              <div className="flex flex-col gap-2">
+                {responsiveGroups.map(({ groupStart, groupEnd }) => {
+                  const groupSize = groupEnd - groupStart + 1;
+                  return (
+                    <div key={groupStart} className="min-w-0">
+                      {renderBarSlice(groupStart, groupEnd)}
+                      <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+                        {Array.from({ length: groupSize }, (_, j) => {
+                          const dayIdx = groupStart + j;
+                          if (dayIdx === 5) {
+                            return (
+                              <div key="satsu" className="flex flex-col gap-1">
+                                <DayColumn {...dayColumnProps(5, true)} />
+                                <DayColumn {...dayColumnProps(6, true)} />
+                              </div>
+                            );
+                          }
+                          return <DayColumn key={dayIdx} {...dayColumnProps(dayIdx)} />;
+                        })}
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             )}
           </div>
