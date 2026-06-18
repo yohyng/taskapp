@@ -3419,6 +3419,63 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
           </div>
         ) : null;
 
+        // 列グループ [groupStart, groupEnd] に対応するバーをスライスして描画
+        const renderBarSlice = (groupStart, groupEnd) => {
+          const groupSize = groupEnd - groupStart + 1;
+          const sliceBars = allBars
+            .filter((b) => b.endCol >= groupStart && b.startCol <= groupEnd)
+            .map((b) => ({
+              ...b,
+              adjStart: Math.max(b.startCol, groupStart) - groupStart,
+              adjEnd: Math.min(b.endCol, groupEnd) - groupStart,
+              sliceExtendsLeft: b.startCol < groupStart,
+              sliceExtendsRight: b.endCol > groupEnd,
+            }));
+          if (sliceBars.length === 0) return null;
+          return (
+            <div className="mb-1 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+              {sliceBars.map((bar) => {
+                const span = bar.adjEnd - bar.adjStart + 1;
+                const leftRound = bar.extendsLeft || bar.sliceExtendsLeft;
+                const rightRound = bar.extendsRight || bar.sliceExtendsRight;
+                return (
+                  <div
+                    key={bar.id}
+                    style={{ gridColumn: `${bar.adjStart + 1} / span ${span}` }}
+                    title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
+                    className={classNames(
+                      "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
+                      leftRound ? "rounded-l-none" : "rounded-l",
+                      rightRound ? "rounded-r-none" : "rounded-r",
+                      bar.isOverdue ? "bg-red-500/25 text-red-200" : categoryTone(bar.category).tag
+                    )}
+                  >
+                    <span className="truncate">{bar.label}</span>
+                    {bar.kind === "due" && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
+                    {bar.kind === "repeat" && bar.rangeEndDay != null && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
+                    {bar.kind === "repeat" && bar.rangeEndDay == null && (bar.extendsRight && !bar.sliceExtendsRight) && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                    {bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        };
+
+        const dayColumnProps = (i, stacked = false) => {
+          const date = weekDays[i];
+          const dateKey = toDateKey(date);
+          return {
+            key: dateKey, dateKey, label: DAY_LABELS[i], date,
+            isToday: dateKey === todayKey, isSat: i === 5, isSun: i === 6, stacked,
+            tasks: tasksForDay(dateKey, date), childrenOf,
+            newTitle: newTitles[dateKey] || "",
+            setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
+            onAdd: () => handleAdd(dateKey),
+            toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules,
+          };
+        };
+
         return (
           <div className="pb-2">
             {forceHorizontal ? (
@@ -3426,113 +3483,46 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                 <div className="min-w-[480px]">
                   {barRow}
                   <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-                    {[0, 1, 2, 3, 4].map((i) => {
-                      const date = weekDays[i];
-                      const dateKey = toDateKey(date);
-                      return (
-                        <DayColumn
-                          key={dateKey}
-                          dateKey={dateKey}
-                          label={DAY_LABELS[i]}
-                          date={date}
-                          isToday={dateKey === todayKey}
-                          isSat={false}
-                          isSun={false}
-                          stacked
-                          tasks={tasksForDay(dateKey, date)}
-                          childrenOf={childrenOf}
-                          newTitle={newTitles[dateKey] || ""}
-                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                          onAdd={() => handleAdd(dateKey)}
-                          toggleDone={toggleDone}
-                          upsertTask={upsertTask}
-                          removeTask={removeTask}
-                          categoryTone={categoryTone}
-                          setSelectedTaskId={setSelectedTaskId}
-                          selectedTaskId={selectedTaskId}
-                          projectRules={projectRules}
-                        />
-                      );
-                    })}
+                    {[0, 1, 2, 3, 4].map((i) => <DayColumn {...dayColumnProps(i, true)} />)}
                     <div className="flex flex-col gap-1">
-                    {[5, 6].map((i) => {
-                      const date = weekDays[i];
-                      const dateKey = toDateKey(date);
-                      return (
-                        <DayColumn
-                          key={dateKey}
-                          dateKey={dateKey}
-                          label={DAY_LABELS[i]}
-                          date={date}
-                          isToday={dateKey === todayKey}
-                          isSat={i === 5}
-                          isSun={i === 6}
-                          stacked
-                          tasks={tasksForDay(dateKey, date)}
-                          childrenOf={childrenOf}
-                          newTitle={newTitles[dateKey] || ""}
-                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                          onAdd={() => handleAdd(dateKey)}
-                          toggleDone={toggleDone}
-                          upsertTask={upsertTask}
-                          removeTask={removeTask}
-                          categoryTone={categoryTone}
-                          setSelectedTaskId={setSelectedTaskId}
-                          selectedTaskId={selectedTaskId}
-                          projectRules={projectRules}
-                        />
-                      );
-                    })}
+                      {[5, 6].map((i) => <DayColumn {...dayColumnProps(i, true)} />)}
                     </div>
                   </div>
                 </div>
               </div>
             ) : (
-              <>
-                {/* レスポンシブ時: lg以上のみバー表示（6列レイアウトに一致する場合のみ） */}
-                {barRow && <div className="hidden lg:block">{barRow}</div>}
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-6">
-                  {(() => {
-                    const renderDay = (i, stacked = false) => {
-                      const date = weekDays[i];
-                      const dateKey = toDateKey(date);
-                      return (
-                        <DayColumn
-                          key={dateKey}
-                          dateKey={dateKey}
-                          label={DAY_LABELS[i]}
-                          date={date}
-                          isToday={dateKey === todayKey}
-                          isSat={i === 5}
-                          isSun={i === 6}
-                          stacked={stacked}
-                          tasks={tasksForDay(dateKey, date)}
-                          childrenOf={childrenOf}
-                          newTitle={newTitles[dateKey] || ""}
-                          setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                          onAdd={() => handleAdd(dateKey)}
-                          toggleDone={toggleDone}
-                          upsertTask={upsertTask}
-                          removeTask={removeTask}
-                          categoryTone={categoryTone}
-                          setSelectedTaskId={setSelectedTaskId}
-                          selectedTaskId={selectedTaskId}
-                          projectRules={projectRules}
-                        />
-                      );
-                    };
-                    return (
-                      <>
-                        {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
-                        <div className="flex flex-col gap-2">
-                          {renderDay(5, true)}
-                          {renderDay(6, true)}
-                        </div>
-                      </>
-                    );
-                  })()}
+              /* レスポンシブ: 3グループ（月火 / 水木 / 金・土日）
+                 lg: グループを横並び → 実質6列と同等
+                 sm以下: グループを縦積み → 各グループにバーを表示 */
+              <div className="flex flex-col gap-2 lg:flex-row lg:gap-1">
+                {/* グループA: 月・火 (cols 0-1) */}
+                <div className="min-w-0 flex-1">
+                  {renderBarSlice(0, 1)}
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    <DayColumn {...dayColumnProps(0)} />
+                    <DayColumn {...dayColumnProps(1)} />
+                  </div>
                 </div>
-              </>
+                {/* グループB: 水・木 (cols 2-3) */}
+                <div className="min-w-0 flex-1">
+                  {renderBarSlice(2, 3)}
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    <DayColumn {...dayColumnProps(2)} />
+                    <DayColumn {...dayColumnProps(3)} />
+                  </div>
+                </div>
+                {/* グループC: 金・土日 (cols 4-5) */}
+                <div className="min-w-0 flex-1">
+                  {renderBarSlice(4, 5)}
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    <DayColumn {...dayColumnProps(4)} />
+                    <div className="flex flex-col gap-1">
+                      <DayColumn {...dayColumnProps(5, true)} />
+                      <DayColumn {...dayColumnProps(6, true)} />
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         );
