@@ -49,15 +49,45 @@ export function isThisWeekUnscheduled(task) {
   return !!task.thisWeek && !task.today;
 }
 
-// 指定日付(date)にプロジェクト繰り返しルールがマッチするか
+// 指定日付(date)にプロジェクト繰り返しルールがマッチするか（全ルール対応）
 export function ruleMatchesWeekday(rule, date, dateKey) {
   if (!rule || !rule.recurrence || rule.recurrence === "none") return false;
-  const dow = date.getDay();
-  const dayMatch = rule.recurrence === "weekly" && Number(rule.recurrenceDay) === dow;
-  if (!dayMatch) return false;
-  if (rule.recurrenceEnd && dateKey > rule.recurrenceEnd) return false;
   if (rule.recurrenceStart && dateKey < rule.recurrenceStart) return false;
-  return true;
+  if (rule.recurrenceEnd && dateKey > rule.recurrenceEnd) return false;
+  const dow = date.getDay();
+  if (rule.recurrence === "daily") return true;
+  if (rule.recurrence === "weekdays") return dow >= 1 && dow <= 5;
+  if (rule.recurrence === "weekly") return Number(rule.recurrenceDay ?? 1) === dow;
+  if (rule.recurrence === "biweekly") {
+    const start = rule.recurrenceStart || dateKey;
+    const diff = Math.round((date - new Date(start)) / 86400000);
+    return Number(rule.recurrenceDay ?? 1) === dow && diff >= 0 && Math.floor(diff / 7) % 2 === 0;
+  }
+  if (rule.recurrence === "monthlyDate") {
+    const d = date.getDate();
+    const from = Number(rule.recurrenceDate ?? 1);
+    if (rule.recurrenceDateTo != null) {
+      const to = Number(rule.recurrenceDateTo);
+      return from <= to ? d >= from && d <= to : d >= from || d <= to;
+    }
+    return d === from;
+  }
+  if (rule.recurrence === "monthlyDateRange") {
+    const d = date.getDate();
+    const from = Number(rule.recurrenceDateFrom ?? 1);
+    const to = Number(rule.recurrenceDateTo ?? 1);
+    return from <= to ? d >= from && d <= to : d >= from || d <= to;
+  }
+  if (rule.recurrence === "monthlyNthWeekday") {
+    const target = Number(rule.recurrenceDay ?? 1);
+    const nth = Number(rule.recurrenceWeek ?? 1);
+    if (dow !== target) return false;
+    const firstOfMonth = new Date(date.getFullYear(), date.getMonth(), 1);
+    const firstTarget = (target - firstOfMonth.getDay() + 7) % 7;
+    const nthDate = firstTarget + (nth - 1) * 7 + 1;
+    return date.getDate() === nthDate;
+  }
+  return false;
 }
 
 // 7Days の各日に表示する「ルートタスク」を集める純粋関数。
@@ -72,7 +102,8 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
   // 1) 明示的に配置されたタスク（rootのみ）
   tasks.filter((t) => !t.archived && !t.parentId && (
     t.scheduledDate === dateKey ||
-    (!t.scheduledDate && dateKey === todayKey && (t.today || (t.thisWeek && !t.today)))
+    (!t.scheduledDate && dateKey === todayKey && (t.today || (t.thisWeek && !t.today))) ||
+    (t.pinnedDate === dateKey && t.scheduledDate !== dateKey)
   )).forEach(addRoot);
 
   // 2) プロジェクト繰り返しルール由来のゴースト（rootのみ）
