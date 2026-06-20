@@ -3287,27 +3287,18 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
 
   const monthWeeks = useMemo(() => {
     if (!forceMonth) return null;
-    const y = weekDays[0].getFullYear();
-    const m = weekDays[0].getMonth();
-    const firstOfMonth = new Date(y, m, 1);
-    const lastOfMonth = new Date(y, m + 1, 0);
-    const startMon = getWeekDays(firstOfMonth)[0];
+    // 今日を含む週を起点に4週分（約1か月）
+    const startMon = weekDays[0];
     const weeks = [];
-    let d = new Date(startMon);
-    while (d <= lastOfMonth) {
-      weeks.push(getWeekDays(new Date(d)));
-      d.setDate(d.getDate() + 7);
+    for (let i = 0; i < 4; i++) {
+      const d = new Date(startMon);
+      d.setDate(startMon.getDate() + i * 7);
+      weeks.push(getWeekDays(d));
     }
     return weeks;
   }, [forceMonth, weekOffset]);
 
-  const navigateMonth = (dir) => {
-    const cur = weekDays[0];
-    const target = new Date(cur.getFullYear(), cur.getMonth() + dir, 1);
-    const targetMon = getWeekDays(target)[0];
-    const todayMon = getWeekDays(new Date())[0];
-    setWeekOffset(Math.round((targetMon - todayMon) / (7 * 86400000)));
-  };
+  const navigateMonth = (dir) => setWeekOffset((v) => v + dir * 4);
 
   // Builds allBars for any given weekDays array (reused for each week in month view)
   const computeWeekBars = (wDays) => {
@@ -3411,7 +3402,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   const firstDay = weekDays[0];
   const lastDay = weekDays[6];
   const headerLabel = forceMonth
-    ? `${weekDays[0].getFullYear()}年${weekDays[0].getMonth() + 1}月`
+    ? (() => { const end = new Date(weekDays[0]); end.setDate(end.getDate() + 27); return `${firstDay.getMonth()+1}/${firstDay.getDate()} - ${end.getMonth()+1}/${end.getDate()}`; })()
     : `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
 
   return (
@@ -3438,7 +3429,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
               onClick={() => setWeekOffset(0)}
               className="text-xs text-neutral-500 hover:text-neutral-300"
             >
-              {forceMonth ? "今月に戻す" : "今週に戻す"}
+              {forceMonth ? "今日に戻す" : "今週に戻す"}
             </button>
           )}
           <button
