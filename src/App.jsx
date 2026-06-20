@@ -4381,8 +4381,6 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
           const tIsWeek = schedIsThisWeek(task, wk);
           return (
             <>
-              <PropertyRow label="Today"><button onClick={() => upsertTask({ id: task.id, scheduledDate: tIsToday ? "" : tdk, today: false, thisWeek: false })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", tIsToday ? "border-cyan-300/30 bg-cyan-300/15 text-cyan-100" : "border-white/10 bg-black/25 text-neutral-400")}>{tIsToday ? "今日やる" : "今日ではない"}</button></PropertyRow>
-              <PropertyRow label="This Week"><button onClick={() => upsertTask({ id: task.id, thisWeek: !tIsWeek, today: false, scheduledDate: "" })} className={classNames("w-full rounded-lg border px-2 py-1.5 text-left text-xs transition", tIsWeek ? "border-amber-300/30 bg-amber-300/15 text-amber-100" : "border-white/10 bg-black/25 text-neutral-400")}>{tIsWeek ? "今週やる" : "今週ではない"}</button></PropertyRow>
             </>
           );
         })()}
