@@ -2034,7 +2034,7 @@ function App() {
           <>
           {show7Days && (
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
             </div>
           )}
           <div className={classNames("flex gap-2 items-start overflow-x-auto pb-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -2223,7 +2223,7 @@ function App() {
               const { key } = chunk;
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
                 </div>
               );
               if (key === "calendar") return (
@@ -3175,7 +3175,7 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
 
 const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 
-function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
@@ -3186,95 +3186,327 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, ad
     return getWeekDays(base);
   }, [weekOffset]);
 
-  function tasksForDay(dateKey, date) {
-    return rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey });
-  }
-
   function handleAdd(dateKey) {
     const title = (newTitles[dateKey] || "").trim();
     if (!title) return;
-    // scheduledDate を一発でセット（addTask→upsertTask の2段階は state が stale になるため避ける）
-    const newTask = normalizeTask({ id: uid(), title, category: "", project: "", status: "未着手", parentId: null, plain: true, scheduledDate: dateKey, today: false, thisWeek: false, memo: "", dueDate: "" });
-    commitTasks((prev) => [newTask, ...prev]);
+    addTask({ title, category: "", project: "", scheduledDate: dateKey, plain: true, today: false, thisWeek: false });
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
   }
 
+  const [forceHorizontal, setForceHorizontal] = useState(false);
+  const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
+  useEffect(() => {
+    const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  const [forceMonth, setForceMonth] = useState(false);
+
+  const monthWeeks = useMemo(() => {
+    if (!forceMonth) return null;
+    const y = weekDays[0].getFullYear();
+    const m = weekDays[0].getMonth();
+    const firstOfMonth = new Date(y, m, 1);
+    const lastOfMonth = new Date(y, m + 1, 0);
+    const startMon = getWeekDays(firstOfMonth)[0];
+    const weeks = [];
+    let d = new Date(startMon);
+    while (d <= lastOfMonth) {
+      weeks.push(getWeekDays(new Date(d)));
+      d.setDate(d.getDate() + 7);
+    }
+    return weeks;
+  }, [forceMonth, weekOffset]);
+
+  const navigateMonth = (dir) => {
+    const cur = weekDays[0];
+    const target = new Date(cur.getFullYear(), cur.getMonth() + dir, 1);
+    const targetMon = getWeekDays(target)[0];
+    const todayMon = getWeekDays(new Date())[0];
+    setWeekOffset(Math.round((targetMon - todayMon) / (7 * 86400000)));
+  };
+
+  // Builds allBars for any given weekDays array (reused for each week in month view)
+  const computeWeekBars = (wDays) => {
+    const wKeys = wDays.map(toDateKey);
+    const wStart = wKeys[0];
+    const wEnd = wKeys[6];
+    const toCol = (key) => { const idx = wKeys.indexOf(key); if (idx < 0) return key < wStart ? 0 : 5; return Math.min(idx, 5); };
+    const dueBars = tasks
+      .filter((t) => t.dueDate && !t.archived && t.status !== "完了" && t.dueDate >= wStart)
+      .map((t) => {
+        const rawStart = t.scheduledDate && t.scheduledDate >= wStart ? t.scheduledDate : wStart;
+        const rawEnd = t.dueDate <= wEnd ? t.dueDate : wEnd;
+        const startCol = toCol(rawStart);
+        const endCol = toCol(rawEnd);
+        const isOverdue = t.dueDate < todayKey;
+        const extendsLeft = !!(t.scheduledDate && t.scheduledDate < wStart);
+        const extendsRight = t.dueDate > wEnd;
+        return { kind: "due", id: `${t.id}-${wStart}`, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsLeft, extendsRight, dueDate: t.dueDate };
+      })
+      .filter((b) => b.endCol >= b.startCol);
+    const ruleBars = [];
+    if (projectRules) {
+      Object.entries(projectRules).forEach(([ruleKey, rule]) => {
+        if (!rule || rule.recurrence === "none" || !rule.showRepeatBar) return;
+        if (rule.recurrenceEnd && wStart > rule.recurrenceEnd) return;
+        if (rule.recurrenceStart && wEnd < rule.recurrenceStart) return;
+        const { category, project } = (() => { const [cat, ...rest] = ruleKey.split("::"); return { category: cat, project: rest.join("::") }; })();
+        const isRangeBar = rule.recurrence === "monthlyDateRange" || (rule.recurrence === "monthlyDate" && rule.recurrenceDateTo != null);
+        if (isRangeBar) {
+          const from = rule.recurrence === "monthlyDateRange" ? Number(rule.recurrenceDateFrom ?? 1) : Number(rule.recurrenceDate ?? 1);
+          const to = Number(rule.recurrenceDateTo ?? 1);
+          const matchingKeys = wDays.filter((d) => {
+            const dd = d.getDate();
+            const match = from <= to ? dd >= from && dd <= to : dd >= from || dd <= to;
+            const key = toDateKey(d);
+            if (rule.recurrenceStart && key < rule.recurrenceStart) return false;
+            if (rule.recurrenceEnd && key > rule.recurrenceEnd) return false;
+            return match;
+          }).map(toDateKey);
+          if (matchingKeys.length === 0) return;
+          const startCol = toCol(matchingKeys[0]);
+          const endCol = toCol(matchingKeys[matchingKeys.length - 1]);
+          ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}-${wStart}`, label: project, category, startCol, endCol, rangeEndDay: to, extendsLeft: startCol === 0 && matchingKeys[0] === wKeys[0], extendsRight: endCol === 5 && matchingKeys[matchingKeys.length - 1] === wKeys[5] && to !== wDays[Math.min(5, wDays.length - 1)].getDate() });
+        } else {
+          wDays.forEach((d, i) => {
+            const key = toDateKey(d);
+            if (!ruleMatchesWeekday(rule, d, key)) return;
+            const col = Math.min(i, 5);
+            ruleBars.push({ kind: "repeat", id: `rule-${ruleKey}-${key}`, label: project, category, startCol: col, endCol: col, extendsLeft: false, extendsRight: false });
+          });
+        }
+      });
+    }
+    return [...dueBars, ...ruleBars];
+  };
+
+  const renderBarRow = (bars) => {
+    if (bars.length === 0) return null;
+    return (
+      <div className="mb-1.5 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+        {bars.map((bar) => {
+          const span = bar.endCol - bar.startCol + 1;
+          return (
+            <div
+              key={bar.id}
+              style={{ gridColumn: `${bar.startCol + 1} / span ${span}` }}
+              title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
+              className={classNames(
+                "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
+                bar.extendsLeft ? "rounded-l-none" : "rounded-l",
+                bar.extendsRight ? "rounded-r-none" : "rounded-r",
+                bar.isOverdue ? "bg-red-500/25 text-red-200" : categoryTone(bar.category).tag
+              )}
+            >
+              <span className="truncate">{bar.label}</span>
+              {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
+              {bar.kind === "repeat" && bar.rangeEndDay != null && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
+              {bar.kind === "repeat" && bar.rangeEndDay == null && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const dayColPropsFor = (wDays, i, stacked = false) => {
+    const date = wDays[i];
+    const dateKey = toDateKey(date);
+    return {
+      key: dateKey, dateKey, label: DAY_LABELS[i], date,
+      isToday: dateKey === todayKey, isSat: i === 5, isSun: i === 6, stacked,
+      tasks: rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }),
+      childrenOf,
+      newTitle: newTitles[dateKey] || "",
+      setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
+      onAdd: () => handleAdd(dateKey),
+      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules,
+    };
+  };
+
   const firstDay = weekDays[0];
   const lastDay = weekDays[6];
-  const monthLabel = `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
+  const headerLabel = forceMonth
+    ? `${weekDays[0].getFullYear()}年${weekDays[0].getMonth() + 1}月`
+    : `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
 
   return (
     <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-1.5">
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setWeekOffset((v) => v - 1)}
+            onClick={() => forceMonth ? navigateMonth(-1) : setWeekOffset((v) => v - 1)}
             className="rounded border border-white/10 p-1.5 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
           >
             <ChevronLeft className="h-4 w-4" />
           </button>
-          <span className="text-sm font-semibold text-neutral-300 min-w-[120px] text-center">{monthLabel}</span>
+          <span className="text-sm font-semibold text-neutral-300 min-w-[120px] text-center">{headerLabel}</span>
           <button
-            onClick={() => setWeekOffset((v) => v + 1)}
+            onClick={() => forceMonth ? navigateMonth(1) : setWeekOffset((v) => v + 1)}
             className="rounded border border-white/10 p-1.5 text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
           >
             <ChevronRight className="h-4 w-4" />
           </button>
         </div>
-        {weekOffset !== 0 && (
+        <div className="flex items-center gap-2">
+          {weekOffset !== 0 && (
+            <button
+              onClick={() => setWeekOffset(0)}
+              className="text-xs text-neutral-500 hover:text-neutral-300"
+            >
+              {forceMonth ? "今月に戻す" : "今週に戻す"}
+            </button>
+          )}
           <button
-            onClick={() => setWeekOffset(0)}
-            className="text-xs text-neutral-500 hover:text-neutral-300"
+            onClick={() => { setForceHorizontal((v) => !v); setForceMonth(false); }}
+            title="7日横並び表示"
+            className={classNames(
+              "rounded border px-2 py-1 text-[11px] font-medium transition",
+              forceHorizontal
+                ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300"
+                : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-300"
+            )}
           >
-            今週に戻す
+            6d
           </button>
-        )}
-      </div>
-
-      <div className="overflow-x-auto pb-2">
-        {/* 幅広: 平日5列 + 土日まとめ1列 / 幅狭: 縦積み */}
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-6 md:min-w-[660px]">
-          {(() => {
-            const renderDay = (i, stacked = false) => {
-              const date = weekDays[i];
-              const dateKey = toDateKey(date);
-              return (
-                <DayColumn
-                  key={dateKey}
-                  dateKey={dateKey}
-                  label={DAY_LABELS[i]}
-                  date={date}
-                  isToday={dateKey === todayKey}
-                  isSat={i === 5}
-                  isSun={i === 6}
-                  stacked={stacked}
-                  tasks={tasksForDay(dateKey, date)}
-                  childrenOf={childrenOf}
-                  newTitle={newTitles[dateKey] || ""}
-                  setNewTitle={(v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v }))}
-                  onAdd={() => handleAdd(dateKey)}
-                  toggleDone={toggleDone}
-                  upsertTask={upsertTask}
-                  categoryTone={categoryTone}
-                  setSelectedTaskId={setSelectedTaskId}
-                  selectedTaskId={selectedTaskId}
-                  projectRules={projectRules}
-                />
-              );
-            };
-            return (
-              <>
-                {[0, 1, 2, 3, 4].map((i) => renderDay(i))}
-                {/* 土日は1列にまとめて縦積み（土が上・日が下） */}
-                <div className="flex flex-col gap-2">
-                  {renderDay(5, true)}
-                  {renderDay(6, true)}
-                </div>
-              </>
-            );
-          })()}
+          <button
+            onClick={() => { setForceMonth((v) => !v); setForceHorizontal(false); }}
+            title="1か月表示"
+            className={classNames(
+              "rounded border px-2 py-1 text-[11px] font-medium transition",
+              forceMonth
+                ? "border-violet-400/40 bg-violet-400/10 text-violet-300"
+                : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-300"
+            )}
+          >
+            1m
+          </button>
         </div>
       </div>
+
+      {/* 締め切り & リピートバー + 曜日カラム */}
+      {forceMonth ? (
+        /* 月ビュー: 各週をブロックとして縦積み */
+        <div className="overflow-x-auto pb-2">
+          <div className="min-w-[480px] flex flex-col gap-3">
+            {(monthWeeks || []).map((wDays) => {
+              const wBars = computeWeekBars(wDays);
+              const wStart = toDateKey(wDays[0]);
+              const wLabel = `${wDays[0].getMonth() + 1}/${wDays[0].getDate()}（${["日","月","火","水","木","金","土"][wDays[0].getDay()]}）〜`;
+              return (
+                <div key={wStart} className="border-t border-white/[0.06] pt-1.5">
+                  <div className="mb-1 text-[10px] text-neutral-600">{wLabel}</div>
+                  {renderBarRow(wBars)}
+                  <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+                    {[0, 1, 2, 3, 4].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i)} />)}
+                    <div className="flex flex-col gap-1">
+                      {[5, 6].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i, true)} />)}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (() => {
+        const allBars = computeWeekBars(weekDays);
+        const barRow = renderBarRow(allBars);
+
+        // 列グループ [groupStart, groupEnd] に対応するバーをスライスして描画
+        const renderBarSlice = (groupStart, groupEnd) => {
+          const groupSize = groupEnd - groupStart + 1;
+          const sliceBars = allBars
+            .filter((b) => b.endCol >= groupStart && b.startCol <= groupEnd)
+            .map((b) => ({
+              ...b,
+              adjStart: Math.max(b.startCol, groupStart) - groupStart,
+              adjEnd: Math.min(b.endCol, groupEnd) - groupStart,
+              sliceExtendsLeft: b.startCol < groupStart,
+              sliceExtendsRight: b.endCol > groupEnd,
+            }));
+          if (sliceBars.length === 0) return null;
+          return (
+            <div className="mb-1 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+              {sliceBars.map((bar) => {
+                const span = bar.adjEnd - bar.adjStart + 1;
+                const leftRound = bar.extendsLeft || bar.sliceExtendsLeft;
+                const rightRound = bar.extendsRight || bar.sliceExtendsRight;
+                return (
+                  <div
+                    key={bar.id}
+                    style={{ gridColumn: `${bar.adjStart + 1} / span ${span}` }}
+                    title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
+                    className={classNames(
+                      "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
+                      leftRound ? "rounded-l-none" : "rounded-l",
+                      rightRound ? "rounded-r-none" : "rounded-r",
+                      bar.isOverdue ? "bg-red-500/25 text-red-200" : categoryTone(bar.category).tag
+                    )}
+                  >
+                    <span className="truncate">{bar.label}</span>
+                    {bar.kind === "due" && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
+                    {bar.kind === "repeat" && bar.rangeEndDay != null && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
+                    {bar.kind === "repeat" && bar.rangeEndDay == null && (bar.extendsRight && !bar.sliceExtendsRight) && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                    {bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+                  </div>
+                );
+              })}
+            </div>
+          );
+        };
+
+        const numGroups = Math.ceil(6 / colsPerRow);
+        const responsiveGroups = Array.from({ length: numGroups }, (_, g) => {
+          const groupStart = g * colsPerRow;
+          const groupEnd = Math.min(groupStart + colsPerRow - 1, 5);
+          return { groupStart, groupEnd };
+        });
+
+        return (
+          <div className="pb-2">
+            {forceHorizontal ? (
+              <div className="overflow-x-auto">
+                <div className="min-w-[480px]">
+                  {barRow}
+                  <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+                    {[0, 1, 2, 3, 4].map((i) => <DayColumn key={i} {...dayColPropsFor(weekDays, i, true)} />)}
+                    <div className="flex flex-col gap-1">
+                      {[5, 6].map((i) => <DayColumn key={i} {...dayColPropsFor(weekDays, i, true)} />)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <>
+                {barRow}
+                <div className="flex flex-col gap-2">
+                  {responsiveGroups.map(({ groupStart, groupEnd }) => {
+                    const groupSize = groupEnd - groupStart + 1;
+                    return (
+                      <div key={groupStart} className="grid gap-1 min-w-0" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+                        {Array.from({ length: groupSize }, (_, j) => {
+                          const dayIdx = groupStart + j;
+                          if (dayIdx === 5) {
+                            return (
+                              <div key="satsu" className="flex flex-col gap-1">
+                                <DayColumn {...dayColPropsFor(weekDays, 5, true)} />
+                                <DayColumn {...dayColPropsFor(weekDays, 6, true)} />
+                              </div>
+                            );
+                          }
+                          return <DayColumn key={dayIdx} {...dayColPropsFor(weekDays, dayIdx)} />;
+                        })}
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        );
+      })()}
     </section>
   );
 }
