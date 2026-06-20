@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cp \"/root/.claude/uploads/a02d7608-7294-42a6-8229-521183055c64/23f6e3c4-notion_task_manager_prototype_flexible_columns_calendar.jsx\" /home/user/taskapp/src/App.jsx && wc -l /home/user/taskapp/src/App.jsx)"
+    ]
+  }
+}
