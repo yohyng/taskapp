@@ -3473,7 +3473,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                   <div className="mb-1 text-[10px] text-neutral-600">{wLabel}</div>
                   {renderBarRow(wBars)}
                   <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-                    {[0, 1, 2, 3, 4].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i)} />)}
+                    {[0, 1, 2, 3, 4].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i, true)} />)}
                     <div className="flex flex-col gap-1">
                       {[5, 6].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i, true)} />)}
                     </div>
@@ -3846,6 +3846,16 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
     } else {
       plainTasks.push(t);
     }
+  }
+  // 繰り返しルールがマッチする日には、タスクがなくてもプロジェクトグループを表示
+  if (projectRules && date) {
+    Object.entries(projectRules).forEach(([ruleKey, rule]) => {
+      if (pgMap.has(ruleKey)) return;
+      if (!ruleMatchesWeekday(rule, date, dateKey)) return;
+      const [cat, ...rest] = ruleKey.split("::");
+      const proj = rest.join("::");
+      pgMap.set(ruleKey, { key: ruleKey, category: cat, project: proj, items: [] });
+    });
   }
   // 並び順: 時刻未設定プロジェクト → 時刻設定プロジェクト（時刻昇順）
   const projectGroups = [...pgMap.values()].sort((a, b) => {
