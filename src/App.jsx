@@ -3847,13 +3847,16 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       plainTasks.push(t);
     }
   }
-  // 繰り返しルールがマッチする日には、タスクがなくてもプロジェクトグループを表示
+  // 繰り返しルールがマッチする日に、実タスクがあるプロジェクトのグループを確保
+  // （全タスクが他の日にscheduledされていてもグループヘッダーを表示するため）
   if (projectRules && date) {
     Object.entries(projectRules).forEach(([ruleKey, rule]) => {
       if (pgMap.has(ruleKey)) return;
       if (!ruleMatchesWeekday(rule, date, dateKey)) return;
       const [cat, ...rest] = ruleKey.split("::");
       const proj = rest.join("::");
+      // 実際にそのプロジェクトにタスクが存在する場合のみ表示（孤立ルールを除外）
+      if (!tasks.some((t) => !t.archived && t.category === cat && t.project === proj)) return;
       pgMap.set(ruleKey, { key: ruleKey, category: cat, project: proj, items: [] });
     });
   }
