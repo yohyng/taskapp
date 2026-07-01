@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -2025,6 +2026,17 @@ function App() {
                       <RotateCcw className="h-3 w-3" />サンプルデータに戻す
                     </button>
                   </div>
+
+                  {isSupabaseEnabled && (
+                    <div className="mt-3 border-t border-white/10 pt-3">
+                      <button
+                        onClick={async () => { await supabase.auth.signOut(); setShowSettingsPanel(false); }}
+                        className="flex w-full items-center gap-1.5 rounded border border-red-500/20 bg-red-500/[0.06] px-2 py-1.5 text-xs text-red-400 transition hover:bg-red-500/[0.12]"
+                      >
+                        ログアウト
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
