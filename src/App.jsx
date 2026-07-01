@@ -3298,7 +3298,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     return weeks;
   }, [forceMonth, weekOffset]);
 
-  const navigateMonth = (dir) => setWeekOffset((v) => v + dir * 4);
+  const navigateMonth = (dir) => setWeekOffset((v) => v + dir);
 
   // Builds allBars for any given weekDays array (reused for each week in month view)
   const computeWeekBars = (wDays) => {
