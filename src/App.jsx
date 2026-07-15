@@ -3403,6 +3403,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       key: dateKey, dateKey, label: DAY_LABELS[i], date,
       isToday: dateKey === todayKey, isSat: i === 5, isSun: i === 6, stacked,
       tasks: rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }),
+      allTasks: tasks,
       childrenOf,
       newTitle: newTitles[dateKey] || "",
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
@@ -3867,7 +3868,7 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [pendingEditId, setPendingEditId] = useState(null);
@@ -3887,24 +3888,27 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       if (!pgMap.has(key)) {
         pgMap.set(key, { key, category: t.category, project: t.project, items: [] });
       }
-      pgMap.get(key).items.push(t);
+      // アイテムはallTasksから全件取得するので、ここでは登録だけ行う
     } else {
       plainTasks.push(t);
     }
   }
   // 繰り返しルールがマッチする日に、実タスクがあるプロジェクトのグループを確保
-  // （全タスクが他の日にscheduledされていてもグループヘッダーを表示するため）
+  const src = allTasks || tasks;
   if (projectRules && date) {
     Object.entries(projectRules).forEach(([ruleKey, rule]) => {
       if (pgMap.has(ruleKey)) return;
       if (!ruleMatchesWeekday(rule, date, dateKey)) return;
       const [cat, ...rest] = ruleKey.split("::");
       const proj = rest.join("::");
-      // 実際にそのプロジェクトにタスクが存在する場合のみ表示（孤立ルールを除外）
-      if (!tasks.some((t) => !t.archived && t.category === cat && t.project === proj)) return;
+      if (!src.some((t) => !t.archived && !t.plain && t.category === cat && t.project === proj)) return;
       pgMap.set(ruleKey, { key: ruleKey, category: cat, project: proj, items: [] });
     });
   }
+  // プロジェクトグループのタスク一覧はallTasksから全件引く（PJボードと同じ表示）
+  pgMap.forEach((g) => {
+    g.items = src.filter((t) => !t.archived && !t.plain && !t.parentId && t.category === g.category && t.project === g.project);
+  });
   // 並び順: 時刻未設定プロジェクト → 時刻設定プロジェクト（時刻昇順）
   const projectGroups = [...pgMap.values()].sort((a, b) => {
     const ta = projectRules?.[a.key]?.recurrenceTime || "";
