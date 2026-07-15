@@ -3901,7 +3901,6 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       if (!ruleMatchesWeekday(rule, date, dateKey)) return;
       const [cat, ...rest] = ruleKey.split("::");
       const proj = rest.join("::");
-      if (!src.some((t) => !t.archived && !t.plain && t.category === cat && t.project === proj)) return;
       pgMap.set(ruleKey, { key: ruleKey, category: cat, project: proj, items: [] });
     });
   }
