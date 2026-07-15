@@ -3708,7 +3708,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onFocusAdd }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3769,7 +3769,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onFocusAdd?.(), 0); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask?.(task.id); }
                 if (e.key === "Tab") {
@@ -3844,6 +3844,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
 function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
+  const addInputRef = useRef(null);
 
   // プロジェクト所属タスクはプロジェクトごとにまとめ、それ以外(plain)はフラット表示
   const pgMap = new Map();
@@ -3922,7 +3923,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
         {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onFocusAdd={() => addInputRef.current?.focus()} />
         ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
@@ -3941,7 +3942,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
               {!isCol && (
                 <div className="flex flex-col gap-0.5">
                   {g.items.map((task) => (
-                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} />
+                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onFocusAdd={() => addInputRef.current?.focus()} />
                   ))}
                 </div>
               )}
@@ -3953,9 +3954,18 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* 追加入力（最後のタスクのすぐ下） */}
       <div className="mt-0.5 flex gap-1">
         <input
+          ref={addInputRef}
           value={newTitle}
           onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); onAdd(); } }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (newTitle.trim()) {
+                onAdd();
+                setTimeout(() => addInputRef.current?.focus(), 0);
+              }
+            }
+          }}
           placeholder="追加…"
           className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20 focus:bg-white/[0.025]"
         />
