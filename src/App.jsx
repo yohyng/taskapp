@@ -967,7 +967,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "" }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -987,7 +987,17 @@ function App() {
       dueDate,
       scheduledDate,
     });
-    commitTasks((prev) => [newTask, ...prev]);
+    commitTasks((prev) => {
+      if (afterId) {
+        const idx = prev.findIndex((t) => t.id === afterId);
+        if (idx >= 0) {
+          const next = [...prev];
+          next.splice(idx + 1, 0, newTask);
+          return next;
+        }
+      }
+      return [newTask, ...prev];
+    });
     if (select) setSelectedTaskId(newTask.id);
     setToast(parent ? "子タスクを追加：親のCategory / Projectを継承しました" : "タスクを追加しました");
     return newTask;
@@ -3408,7 +3418,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       newTitle: newTitles[dateKey] || "",
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
       onAdd: () => handleAdd(dateKey),
-      onAddBlank: () => addTask({ title: "新規タスク", category: "", project: "", scheduledDate: dateKey, plain: true }),
+      onAddBlank: (afterId) => addTask({ title: "新規タスク", category: "", project: "", scheduledDate: dateKey, plain: true, afterId }),
       toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules,
     };
   };
@@ -3772,7 +3782,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onAddBelow?.(), 0); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onAddBelow?.(task.id), 0); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask?.(task.id); }
                 if (e.key === "Tab") {
@@ -3874,8 +3884,8 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   const [pendingEditId, setPendingEditId] = useState(null);
   const addInputRef = useRef(null);
 
-  const handleAddBelow = () => {
-    const newTask = onAddBlank?.();
+  const handleAddBelow = (afterId) => {
+    const newTask = onAddBlank?.(afterId);
     if (newTask) setPendingEditId(newTask.id);
   };
 
