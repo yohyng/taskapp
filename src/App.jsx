@@ -3735,13 +3735,13 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
   const [editing, setEditing] = useState(!!autoEdit);
-  const [draft, setDraft] = useState(task.title);
-  useEffect(() => { if (autoEdit) { setEditing(true); setDraft(task.title); onEditDone?.(); } }, [autoEdit]);
+  const [draft, setDraft] = useState(autoEdit ? "" : task.title);
+  useEffect(() => { if (autoEdit) { setEditing(true); setDraft(""); onEditDone?.(); } }, [autoEdit]);
   useEffect(() => { if (!editing) setDraft(task.title); }, [task.title]);
   function commitTitle() {
     const clean = (draft || "").trim();
-    if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
-    else setDraft(task.title);
+    if (!clean) { removeTask?.(task.id); return; }
+    if (clean !== task.title) upsertTask?.({ id: task.id, title: clean });
     setEditing(false);
   }
   return (
