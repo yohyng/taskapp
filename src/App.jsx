@@ -3407,6 +3407,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       newTitle: newTitles[dateKey] || "",
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
       onAdd: () => handleAdd(dateKey),
+      onAddBlank: () => addTask({ title: "新規タスク", category: "", project: "", scheduledDate: dateKey, plain: true }),
       toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules,
     };
   };
@@ -3708,7 +3709,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onFocusAdd }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onAddBelow, autoEdit, onEditDone }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3722,9 +3723,10 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(!!autoEdit);
   const [draft, setDraft] = useState(task.title);
-  useEffect(() => { setDraft(task.title); }, [task.title]);
+  useEffect(() => { if (autoEdit) { setEditing(true); setDraft(task.title); onEditDone?.(); } }, [autoEdit]);
+  useEffect(() => { if (!editing) setDraft(task.title); }, [task.title]);
   function commitTitle() {
     const clean = (draft || "").trim();
     if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
@@ -3769,7 +3771,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onFocusAdd?.(), 0); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onAddBelow?.(), 0); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask?.(task.id); }
                 if (e.key === "Tab") {
@@ -3841,10 +3843,16 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
+  const [pendingEditId, setPendingEditId] = useState(null);
   const addInputRef = useRef(null);
+
+  const handleAddBelow = () => {
+    const newTask = onAddBlank?.();
+    if (newTask) setPendingEditId(newTask.id);
+  };
 
   // プロジェクト所属タスクはプロジェクトごとにまとめ、それ以外(plain)はフラット表示
   const pgMap = new Map();
@@ -3923,7 +3931,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
       <div className="flex flex-col gap-1">
         {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onFocusAdd={() => addInputRef.current?.focus()} />
+          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onAddBelow={handleAddBelow} autoEdit={pendingEditId === task.id} onEditDone={() => setPendingEditId(null)} />
         ))}
         {projectGroups.map((g) => {
           const tone = categoryTone(g.category);
@@ -3942,7 +3950,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
               {!isCol && (
                 <div className="flex flex-col gap-0.5">
                   {g.items.map((task) => (
-                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onFocusAdd={() => addInputRef.current?.focus()} />
+                    <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onAddBelow={handleAddBelow} autoEdit={pendingEditId === task.id} onEditDone={() => setPendingEditId(null)} />
                   ))}
                 </div>
               )}
