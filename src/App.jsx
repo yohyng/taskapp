@@ -3750,7 +3750,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
       <div
         ref={(el) => { setNodeRef(el); cardRef.current = el; }}
         tabIndex={editing ? -1 : 0}
-        onKeyDown={!editing ? (e) => { if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(); } } : undefined}
+        onKeyDown={!editing ? (e) => { if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(task.id); } } : undefined}
         {...(!editing ? attributes : {})}
         {...(!editing ? listeners : {})}
         className={classNames(
