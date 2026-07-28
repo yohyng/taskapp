@@ -3735,10 +3735,18 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
   const cardRef = useRef(null);
+  const textareaRef = useRef(null);
   const [editing, setEditing] = useState(!!autoEdit);
   const [draft, setDraft] = useState(autoEdit ? "" : task.title);
   useEffect(() => { if (autoEdit) { setEditing(true); setDraft(""); onEditDone?.(); } }, [autoEdit]);
-  useEffect(() => { if (autoFocusEnd) { setEditing(true); setDraft(task.title); onFocusEndDone?.(); } }, [autoFocusEnd]);
+  useEffect(() => {
+    if (autoFocusEnd) {
+      setEditing(true);
+      setDraft(task.title);
+      onFocusEndDone?.();
+      setTimeout(() => { if (textareaRef.current) { textareaRef.current.focus(); focusEnd(textareaRef.current); } }, 0);
+    }
+  }, [autoFocusEnd]);
   useEffect(() => { if (!editing) setDraft(task.title); }, [task.title]);
   function commitTitle() {
     const clean = (draft || "").trim();
@@ -3774,7 +3782,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               autoFocus
               value={draft}
               rows={1}
-              ref={autoResize}
+              ref={(el) => { textareaRef.current = el; autoResize(el); }}
               onFocus={(e) => focusEnd(e.target)}
               onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
               onBlur={(e) => {
