@@ -3734,6 +3734,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
+  const cardRef = useRef(null);
   const [editing, setEditing] = useState(!!autoEdit);
   const [draft, setDraft] = useState(autoEdit ? "" : task.title);
   useEffect(() => { if (autoEdit) { setEditing(true); setDraft(""); onEditDone?.(); } }, [autoEdit]);
@@ -3747,11 +3748,13 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
-        ref={setNodeRef}
+        ref={(el) => { setNodeRef(el); cardRef.current = el; }}
+        tabIndex={editing ? -1 : 0}
+        onKeyDown={!editing ? (e) => { if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(); } } : undefined}
         {...(!editing ? attributes : {})}
         {...(!editing ? listeners : {})}
         className={classNames(
-          "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07]",
+          "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
           editing ? "cursor-text" : "cursor-grab",
           selectedTaskId === task.id && "bg-white/[0.09]",
           isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
@@ -3782,7 +3785,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => onAddBelow?.(task.id), 0); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => cardRef.current?.focus(), 0); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask?.(task.id); }
                 if (e.key === "Tab") {
