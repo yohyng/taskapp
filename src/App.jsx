@@ -3963,7 +3963,10 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   });
 
   // Tab/Shift+Tab 用: 表示順のルートタスク一覧（plain → projectGroups の順）
-  const flatRoots = [...plainTasks, ...projectGroups.flatMap((g) => g.items)];
+  const allProjectTasks = (allTasks || []).filter((t) => !t.archived && !t.plain && !t.parentId);
+  const flatRoots = flatView
+    ? [...plainTasks, ...allProjectTasks]
+    : [...plainTasks, ...projectGroups.flatMap((g) => g.items)];
 
   const handleDeleteFocusPrev = (taskId) => {
     const idx = flatRoots.findIndex((t) => t.id === taskId);
