@@ -3298,6 +3298,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   }
 
   const [forceHorizontal, setForceHorizontal] = useState(false);
+  const [flatView, setFlatView] = useState(false);
   const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
   useEffect(() => {
     const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
@@ -3419,7 +3420,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
       onAdd: () => handleAdd(dateKey),
       onAddBlank: (afterId) => addTask({ title: "新規タスク", category: "", project: "", scheduledDate: dateKey, plain: true, afterId }),
-      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules,
+      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView,
     };
   };
 
@@ -3479,6 +3480,18 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             )}
           >
             1m
+          </button>
+          <button
+            onClick={() => setFlatView((v) => !v)}
+            title="フラット表示（タスク名＋プロジェクトチップ）"
+            className={classNames(
+              "rounded border px-2 py-1 text-[11px] font-medium transition",
+              flatView
+                ? "border-rose-400/40 bg-rose-400/10 text-rose-300"
+                : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-300"
+            )}
+          >
+            flat
           </button>
         </div>
       </div>
@@ -3720,7 +3733,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onAddBelow, autoEdit, onEditDone, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev }) {
+function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onAddBelow, autoEdit, onEditDone, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3817,12 +3830,19 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div
-                onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-                title="クリックで名前を編集"
-                className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
-              >
-                {task.title}
+              <div className="min-w-0 flex-1">
+                <div
+                  onClick={(e) => { e.stopPropagation(); setEditing(true); }}
+                  title="クリックで名前を編集"
+                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
+                >
+                  {task.title}
+                </div>
+                {showProjectChip && task.project && (
+                  <span className={classNames("mt-0.5 inline-block rounded border px-1 py-px text-[9px] leading-none", tone.panel, tone.accent)}>
+                    {task.project}
+                  </span>
+                )}
               </div>
               <button
                 onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
@@ -3833,7 +3853,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               </button>
             </div>
           )}
-          {task.project && depth === 0 && !hideProject && (
+          {!showProjectChip && task.project && depth === 0 && !hideProject && (
             <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
           )}
         </div>
@@ -3890,7 +3910,7 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [pendingEditId, setPendingEditId] = useState(null);
@@ -3983,35 +4003,45 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
         {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
-      {/* タスク一覧：plain が上、プロジェクトグループが下（recurrenceTime順） */}
+      {/* タスク一覧 */}
       <div className="flex flex-col gap-1">
-        {plainTasks.map((task) => (
-          <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onAddBelow={handleAddBelow} autoEdit={pendingEditId === task.id} onEditDone={() => setPendingEditId(null)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
-        ))}
-        {projectGroups.map((g) => (
-          <DayProjectGroup
-            key={g.key}
-            g={g}
-            tone={categoryTone(g.category)}
-            collapsed={!!collapsedProj[g.key]}
-            onToggle={() => setCollapsedProj((p) => ({ ...p, [g.key]: !p[g.key] }))}
-            childrenOf={childrenOf}
-            categoryTone={categoryTone}
-            toggleDone={toggleDone}
-            upsertTask={upsertTask}
-            setSelectedTaskId={setSelectedTaskId}
-            selectedTaskId={selectedTaskId}
-            dateKey={dateKey}
-            onIndent={makeIndent}
-            onOutdent={makeOutdent}
-            onAddBelow={handleAddBelow}
-            pendingEditId={pendingEditId}
-            onEditDone={() => setPendingEditId(null)}
-            focusEndId={focusEndId}
-            onFocusEndDone={() => setFocusEndId(null)}
-            onDeleteFocusPrev={handleDeleteFocusPrev}
-          />
-        ))}
+        {flatView ? (
+          // Bモード: フラット表示（全タスク＋プロジェクトチップ）
+          flatRoots.map((task) => (
+            <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onAddBelow={handleAddBelow} autoEdit={pendingEditId === task.id} onEditDone={() => setPendingEditId(null)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} showProjectChip />
+          ))
+        ) : (
+          // Aモード: プロジェクトグループヘッダーあり（現状）
+          <>
+            {plainTasks.map((task) => (
+              <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} onAddBelow={handleAddBelow} autoEdit={pendingEditId === task.id} onEditDone={() => setPendingEditId(null)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
+            ))}
+            {projectGroups.map((g) => (
+              <DayProjectGroup
+                key={g.key}
+                g={g}
+                tone={categoryTone(g.category)}
+                collapsed={!!collapsedProj[g.key]}
+                onToggle={() => setCollapsedProj((p) => ({ ...p, [g.key]: !p[g.key] }))}
+                childrenOf={childrenOf}
+                categoryTone={categoryTone}
+                toggleDone={toggleDone}
+                upsertTask={upsertTask}
+                setSelectedTaskId={setSelectedTaskId}
+                selectedTaskId={selectedTaskId}
+                dateKey={dateKey}
+                onIndent={makeIndent}
+                onOutdent={makeOutdent}
+                onAddBelow={handleAddBelow}
+                pendingEditId={pendingEditId}
+                onEditDone={() => setPendingEditId(null)}
+                focusEndId={focusEndId}
+                onFocusEndDone={() => setFocusEndId(null)}
+                onDeleteFocusPrev={handleDeleteFocusPrev}
+              />
+            ))}
+          </>
+        )}
       </div>
 
       {/* 追加入力（最後のタスクのすぐ下） */}
