@@ -3941,12 +3941,12 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   const pgMap = new Map();
   const plainTasks = [];
   for (const t of tasks) {
-    if (t.category && t.project) {
-      const key = `${t.category}::${t.project}`;
+    const key = `${t.category}::${t.project}`;
+    // 繰り返しルールに登録されているプロジェクトのみグループ化
+    if (t.category && t.project && projectRules?.[key]) {
       if (!pgMap.has(key)) {
         pgMap.set(key, { key, category: t.category, project: t.project, items: [] });
       }
-      // アイテムはallTasksから全件取得するので、ここでは登録だけ行う
     } else {
       plainTasks.push(t);
     }
