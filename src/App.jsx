@@ -2100,7 +2100,7 @@ function App() {
           <>
           {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
             </div>
           )}
           <div
@@ -2317,7 +2317,7 @@ function App() {
               const { key } = chunk;
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} />
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
                 </div>
               );
               if (key === "calendar") return (
@@ -3287,7 +3287,7 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
 
 const DAY_LABELS = ["🌙月", "🔥火", "🌊水", "🌳木", "🪙金", "🪐土", "☀️日"];
 
-function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId }) {
+function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId, setSelectedProject }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
   const [newTitles, setNewTitles] = useState({});
@@ -3433,7 +3433,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
       onAdd: () => handleAdd(dateKey),
       onAddBlank: (afterId) => addTask({ title: "新規タスク", category: "", project: "", scheduledDate: dateKey, plain: true, afterId }),
-      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView,
+      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject,
     };
   };
 
@@ -3914,19 +3914,23 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   );
 }
 
-function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, dateKey, onIndent, onOutdent, onAddBelow, pendingEditId, onEditDone, focusEndId, onFocusEndDone, onDeleteFocusPrev }) {
+function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, dateKey, onIndent, onOutdent, onAddBelow, pendingEditId, onEditDone, focusEndId, onFocusEndDone, onDeleteFocusPrev, onOpenInspector }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-proj-drop-${dateKey}-${g.key}`,
     data: { type: "project", category: g.category, project: g.project },
   });
   return (
     <div ref={setNodeRef} className={classNames("rounded-md border px-1 py-0.5 transition", tone.panel, isOver && "ring-1 ring-inset ring-white/30 brightness-110")}>
-      <button onClick={onToggle} className="flex w-full items-center gap-1 px-0.5 py-0.5 text-left">
-        {collapsed ? <ChevronRight className="h-3 w-3 shrink-0 text-neutral-500" /> : <ChevronDown className="h-3 w-3 shrink-0 text-neutral-500" />}
-        <span className={classNames("min-w-0 flex-1 truncate text-[10px] font-semibold", tone.accent)}>{g.project}</span>
+      <div className="flex w-full items-center gap-1 px-0.5 py-0.5">
+        <button onClick={onToggle} className="shrink-0 text-neutral-500 hover:text-neutral-300">
+          {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+        </button>
+        <button onClick={onOpenInspector} className={classNames("min-w-0 flex-1 truncate text-left text-[10px] font-semibold hover:underline", tone.accent)}>
+          {g.project || g.category}
+        </button>
         {g.items.some((t) => t.__ghost) && <span className="shrink-0 text-[9px] text-neutral-400">↺</span>}
         <span className="shrink-0 text-[9px] text-neutral-500">{g.items.length}</span>
-      </button>
+      </div>
       {!collapsed && (
         <div className="flex flex-col gap-0.5">
           {g.items.map((task) => (
@@ -3938,7 +3942,7 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, onAddBlank, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [pendingEditId, setPendingEditId] = useState(null);
@@ -4069,6 +4073,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
                 focusEndId={focusEndId}
                 onFocusEndDone={() => setFocusEndId(null)}
                 onDeleteFocusPrev={handleDeleteFocusPrev}
+                onOpenInspector={setSelectedProject ? () => setSelectedProject({ category: g.category, project: g.project }) : undefined}
               />
             ))}
           </>
