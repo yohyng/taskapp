@@ -366,14 +366,7 @@ function App() {
 
   const [tasks, setTasks] = useState(boot.tasks);
   const [categories, setCategories] = useState(boot.categories);
-  const [projectRules, setProjectRules] = useState(() => {
-    const rules = boot.projectRules || DEFAULT_PROJECT_RULES;
-    // 対応するタスクが存在しないプロジェクトの孤立ルールを起動時に除去
-    const existingKeys = new Set(
-      (boot.tasks || []).filter((t) => t.category && t.project).map((t) => `${t.category}::${t.project}`)
-    );
-    return Object.fromEntries(Object.entries(rules).filter(([k]) => existingKeys.has(k)));
-  });
+  const [projectRules, setProjectRules] = useState(boot.projectRules || DEFAULT_PROJECT_RULES);
   const [projectOrder, setProjectOrder] = useState(boot.projectOrder || DEFAULT_PROJECT_ORDER);
   const [inboxItems, setInboxItems] = useState(boot.inboxItems || SAMPLE_INBOX);
   const [search, setSearch] = useState("");
@@ -911,6 +904,19 @@ function App() {
   function commitTasks(updater) {
     commitState((current) => ({ ...current, tasks: typeof updater === "function" ? updater(current.tasks) : updater }));
   }
+
+  // 起動時に1回だけ: タスクが存在しない孤立 projectRules を永続削除
+  useEffect(() => {
+    const existingKeys = new Set(
+      tasks.filter((t) => t.category && t.project).map((t) => `${t.category}::${t.project}`)
+    );
+    const orphaned = Object.keys(projectRules).filter((k) => !existingKeys.has(k));
+    if (orphaned.length === 0) return;
+    commitState((current) => ({
+      ...current,
+      projectRules: Object.fromEntries(Object.entries(current.projectRules || {}).filter(([k]) => existingKeys.has(k))),
+    }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   function undo() {
     if (!history.past.length) return;
