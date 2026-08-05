@@ -366,7 +366,14 @@ function App() {
 
   const [tasks, setTasks] = useState(boot.tasks);
   const [categories, setCategories] = useState(boot.categories);
-  const [projectRules, setProjectRules] = useState(boot.projectRules || DEFAULT_PROJECT_RULES);
+  const [projectRules, setProjectRules] = useState(() => {
+    const rules = boot.projectRules || DEFAULT_PROJECT_RULES;
+    // 対応するタスクが存在しないプロジェクトの孤立ルールを起動時に除去
+    const existingKeys = new Set(
+      (boot.tasks || []).filter((t) => t.category && t.project).map((t) => `${t.category}::${t.project}`)
+    );
+    return Object.fromEntries(Object.entries(rules).filter(([k]) => existingKeys.has(k)));
+  });
   const [projectOrder, setProjectOrder] = useState(boot.projectOrder || DEFAULT_PROJECT_ORDER);
   const [inboxItems, setInboxItems] = useState(boot.inboxItems || SAMPLE_INBOX);
   const [search, setSearch] = useState("");
