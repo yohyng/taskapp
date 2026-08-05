@@ -3771,8 +3771,23 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
         ref={(el) => { setNodeRef(el); cardRef.current = el; }}
+        data-daytask="true"
         tabIndex={editing ? -1 : 0}
-        onKeyDown={!editing ? (e) => { if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(task.id); } } : undefined}
+        onKeyDown={!editing ? (e) => {
+          if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(task.id); return; }
+          if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+            e.preventDefault();
+            const all = Array.from(document.querySelectorAll("[data-daytask]"));
+            const idx = all.indexOf(e.currentTarget);
+            const next = e.key === "ArrowUp" ? all[idx - 1] : all[idx + 1];
+            next?.focus();
+            return;
+          }
+          if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            setDraft(e.key);
+            setEditing(true);
+          }
+        } : undefined}
         {...(!editing ? attributes : {})}
         {...(!editing ? listeners : {})}
         className={classNames(
