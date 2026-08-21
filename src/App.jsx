@@ -42,6 +42,7 @@ import {
   Info,
   Pin,
   Focus,
+  Airplay,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -1872,6 +1873,7 @@ function App() {
             >
               <Focus className="h-3.5 w-3.5" />
             </button>
+            <PipButton />
             <div className="relative">
               <button
                 onClick={() => setShowSettingsPanel((v) => !v)}
@@ -2711,8 +2713,8 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   return (
     <div
       ref={setRefs}
-      {...(!selectMode ? trayDragListeners : {})}
-      {...(!selectMode ? trayDragAttrs : {})}
+      {...(!selectMode && !focusPickMode ? trayDragListeners : {})}
+      {...(!selectMode && !focusPickMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
       onClick={() => { if (focusPickMode && onFocusItem) { onFocusItem(item); return; } if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       data-draggable
@@ -4808,6 +4810,79 @@ function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, t
         </button>
       </div>
     </div>
+  );
+}
+
+function PipButton() {
+  const [active, setActive] = useState(false);
+  const videoRef = useRef(null);
+  const rafRef = useRef(null);
+
+  async function startPip() {
+    if (!document.pictureInPictureEnabled) return;
+    // キャンバスで時計を描画し続けてストリーム化
+    const canvas = document.createElement("canvas");
+    canvas.width = 320;
+    canvas.height = 180;
+    const ctx = canvas.getContext("2d");
+
+    function draw() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2, "0");
+      const mm = String(now.getMinutes()).padStart(2, "0");
+      const ss = String(now.getSeconds()).padStart(2, "0");
+      ctx.fillStyle = "#0a0a0a";
+      ctx.fillRect(0, 0, 320, 180);
+      ctx.fillStyle = "#e5e5e5";
+      ctx.font = "bold 56px monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${hh}:${mm}:${ss}`, 160, 80);
+      ctx.fillStyle = "#525252";
+      ctx.font = "14px sans-serif";
+      ctx.fillText("Task Space", 160, 148);
+      rafRef.current = requestAnimationFrame(draw);
+    }
+    draw();
+
+    const stream = canvas.captureStream(1);
+    const video = document.createElement("video");
+    video.srcObject = stream;
+    video.muted = true;
+    video.playsInline = true;
+    videoRef.current = video;
+
+    await video.play();
+    await video.requestPictureInPicture();
+    setActive(true);
+
+    video.addEventListener("leavepictureinpicture", () => {
+      cancelAnimationFrame(rafRef.current);
+      setActive(false);
+    }, { once: true });
+  }
+
+  async function stopPip() {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+    }
+    cancelAnimationFrame(rafRef.current);
+    setActive(false);
+  }
+
+  if (!document.pictureInPictureEnabled) return null;
+
+  return (
+    <button
+      onClick={active ? stopPip : startPip}
+      title={active ? "PiP停止（スリープ防止解除）" : "PiP起動（スリープ防止）"}
+      className={classNames(
+        "rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1",
+        active ? "border-sky-400/40 bg-sky-400/10 text-sky-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]"
+      )}
+    >
+      <Airplay className="h-3.5 w-3.5" />
+    </button>
   );
 }
 
