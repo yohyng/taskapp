@@ -376,6 +376,7 @@ function App() {
   const [selectedTaskId, setSelectedTaskId] = useState(null);
   const [focusTaskId, setFocusTaskId] = useState(null);
   const [focusPickMode, setFocusPickMode] = useState(false);
+  const [focusTrayItem, setFocusTrayItem] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [quickMemo, setQuickMemo] = useState("");
   const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
@@ -2361,6 +2362,14 @@ function App() {
           />
         )}
 
+        {focusTrayItem && (
+          <FocusOverlay
+            trayItem={focusTrayItem}
+            categoryTone={categoryTone}
+            onClose={() => setFocusTrayItem(null)}
+          />
+        )}
+
         {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
@@ -2650,6 +2659,8 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
                   selectMode={selectMode}
                   isSelected={selectedTrayIds && selectedTrayIds.has(item.id)}
                   onToggleSelect={onToggleTraySelect}
+                  focusPickMode={focusPickMode}
+                  onFocusItem={(item) => { setFocusTrayItem(item); setFocusPickMode(false); }}
                 />
               ))
             )}
@@ -2660,7 +2671,7 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
   );
 }
 
-function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
+function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect, focusPickMode = false, onFocusItem }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
 
@@ -2703,7 +2714,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
       {...(!selectMode ? trayDragListeners : {})}
       {...(!selectMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
-      onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
+      onClick={() => { if (focusPickMode && onFocusItem) { onFocusItem(item); return; } if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       data-draggable
       style={{ userSelect: "none", WebkitUserSelect: "none" }}
       className={classNames(
@@ -2711,7 +2722,8 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
         isTrayDragging && "opacity-40",
         selectMode && isSelected && "border-sky-500/50 bg-sky-500/10",
-        selectMode && "cursor-pointer"
+        selectMode && "cursor-pointer",
+        focusPickMode && "cursor-crosshair hover:border-amber-400/40 hover:bg-amber-400/[0.06]"
       )}
     >
       <div className="flex items-start gap-2">
@@ -4685,12 +4697,27 @@ function DueDatePicker({ value, onChange }) {
   );
 }
 
-function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, toggleDone, onClose }) {
+function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, toggleDone, onClose, trayItem }) {
   useEffect(() => {
     function onKey(e) { if (e.key === "Escape") onClose(); }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
+
+  // TRAYアイテムモード
+  if (trayItem) {
+    return (
+      <div className="fixed inset-0 z-[300] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.95)" }} onClick={onClose}>
+        <div className="w-full max-w-xl px-4" onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-xl border border-white/10 bg-neutral-900 p-4">
+            <p className="text-xs text-neutral-500 mb-2">TRAY</p>
+            <p className="text-base font-medium text-neutral-100 leading-snug">{trayItem.title}</p>
+          </div>
+          <button onClick={onClose} className="mt-4 w-full text-center text-xs text-neutral-600 hover:text-neutral-400 transition">Esc で閉じる</button>
+        </div>
+      </div>
+    );
+  }
 
   if (!taskId || !taskMap) return null;
   const task = taskMap.get(taskId);
