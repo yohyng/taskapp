@@ -2212,6 +2212,8 @@ function App() {
                 selectMode={selectMode}
                 selectedTrayIds={selectedTrayIds}
                 onToggleTraySelect={onToggleTraySelect}
+                focusPickMode={focusPickMode}
+                onFocusItem={(item) => { setFocusTrayItem(item); setFocusPickMode(false); }}
               />
             );
             const todayEl = (
@@ -2614,7 +2616,7 @@ function WeeklyColumn({
   );
 }
 
-function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
+function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect, focusPickMode = false, onFocusItem }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
@@ -2662,7 +2664,7 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
                   isSelected={selectedTrayIds && selectedTrayIds.has(item.id)}
                   onToggleSelect={onToggleTraySelect}
                   focusPickMode={focusPickMode}
-                  onFocusItem={(item) => { setFocusTrayItem(item); setFocusPickMode(false); }}
+                  onFocusItem={onFocusItem}
                 />
               ))
             )}
