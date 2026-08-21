@@ -3083,7 +3083,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
-        onContextMenu={e => e.preventDefault()}
+        onContextMenu={(e) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); }}
         onClick={() => { if (longPressActive.current) return; if (selectMode && onToggleSelect) { onToggleSelect(task.id); } }}
         data-draggable
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
