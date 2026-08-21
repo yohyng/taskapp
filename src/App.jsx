@@ -2784,7 +2784,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
             />
           ) : (
             <div
-              onClick={(e) => { if (selectMode) { e.stopPropagation(); return; } setEditing(true); }}
+              onClick={(e) => { if (selectMode || focusPickMode) { e.stopPropagation(); if (focusPickMode) pickTrayItem?.(item); return; } setEditing(true); }}
               className="block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
@@ -3213,8 +3213,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
             ) : (
               <div className="flex min-w-0 items-start gap-1 group/title">
                 <div
-                  onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] font-medium leading-[1.35]", task.status === "完了" && "line-through")}
+                  onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }}
+                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", focusPickMode ? "cursor-crosshair" : "cursor-text", task.status === "完了" && "line-through")}
                 >
                   {task.title}
                 </div>
@@ -3766,7 +3766,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div onClick={(e) => { e.stopPropagation(); setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] cursor-text text-[12.5px] text-neutral-100", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-text", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -3807,6 +3807,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
 }
 
 function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onAddBelow, autoEdit, onEditDone, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
+  const { focusPickMode, pickTask } = useFocusMode();
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3846,7 +3847,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
         ref={(el) => { setNodeRef(el); cardRef.current = el; }}
         data-daytask="true"
         tabIndex={editing ? -1 : 0}
-        onKeyDown={!editing ? (e) => {
+        onKeyDown={!editing && !focusPickMode ? (e) => {
           if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(task.id); return; }
           if (e.key === "ArrowUp" || e.key === "ArrowDown") {
             e.preventDefault();
@@ -3861,10 +3862,12 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             setEditing(true);
           }
         } : undefined}
-        {...(!editing ? attributes : {})}
-        {...(!editing ? listeners : {})}
+        {...(!editing && !focusPickMode ? attributes : {})}
+        {...(!editing && !focusPickMode ? listeners : {})}
+        onClick={focusPickMode ? () => pickTask?.(task.id) : undefined}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
+          focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
           editing ? "cursor-text" : "cursor-grab",
           selectedTaskId === task.id && "bg-white/[0.09]",
           isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
@@ -3920,9 +3923,9 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             <div className="flex min-w-0 items-start gap-1 group/title">
               <div className="min-w-0 flex-1">
                 <div
-                  onClick={(e) => { e.stopPropagation(); setEditing(true); }}
-                  title="クリックで名前を編集"
-                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100 cursor-text", isDone && "line-through opacity-40")}
+                  onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }}
+                  title={focusPickMode ? "クリックでフォーカス" : "クリックで名前を編集"}
+                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-text", isDone && "line-through opacity-40")}
                 >
                   {task.title}
                 </div>
