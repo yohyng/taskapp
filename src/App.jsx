@@ -2725,7 +2725,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
         isTrayDragging && "opacity-40",
         selectMode && isSelected && "border-sky-500/50 bg-sky-500/10",
         selectMode && "cursor-pointer",
-        focusPickMode && "cursor-crosshair hover:border-amber-400/40 hover:bg-amber-400/[0.06]"
+        focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
       )}
     >
       <div className="flex items-start gap-2">
@@ -3107,7 +3107,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
-          focusPickMode ? "cursor-crosshair hover:border-amber-400/40 hover:bg-amber-400/[0.06]" : isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
           task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45",
           isDragging && "opacity-40"
         )}
