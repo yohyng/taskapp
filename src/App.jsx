@@ -349,6 +349,12 @@ function normalizeTask(task) {
   };
 }
 
+// フォーカスモード: propsのバケツリレーを避けてContextで配る
+const FocusModeContext = React.createContext({ focusPickMode: false, pickTask: null, pickTrayItem: null });
+function useFocusMode() {
+  return React.useContext(FocusModeContext);
+}
+
 function App() {
   const [boot] = useState(() => {
     try {
@@ -1819,7 +1825,14 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const focusModeValue = useMemo(() => ({
+    focusPickMode,
+    pickTask: (id) => { setFocusTaskId(id); setFocusPickMode(false); },
+    pickTrayItem: (item) => { setFocusTrayItem(item); setFocusPickMode(false); },
+  }), [focusPickMode]);
+
   return (
+    <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
@@ -2157,7 +2170,14 @@ function App() {
                     ));
                   })()}
                   {inboxItems.map((item) => (
-                    <div key={item.id} onClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})} className="flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]">
+                    <div
+                      key={item.id}
+                      onClick={() => { if (focusPickMode) { setFocusTrayItem(item); setFocusPickMode(false); return; } acceptInboxItem(item.id, "", "", { plain: true }, {}); }}
+                      className={classNames(
+                        "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]",
+                        focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
+                      )}
+                    >
                       <span className="mt-0.5 shrink-0 text-[9px] text-neutral-600 font-bold">n</span>
                       <div className="min-w-0 flex-1">
                         <div className="break-words text-neutral-300">{item.title}</div>
@@ -2171,7 +2191,7 @@ function App() {
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-0">
-                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onFocusTask={(id) => { setFocusTaskId(id); setFocusPickMode(false); }} focusPickMode={focusPickMode} />
+                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
               </div>
             ))}
           </div>
@@ -2212,8 +2232,6 @@ function App() {
                 selectMode={selectMode}
                 selectedTrayIds={selectedTrayIds}
                 onToggleTraySelect={onToggleTraySelect}
-                focusPickMode={focusPickMode}
-                onFocusItem={(item) => { setFocusTrayItem(item); setFocusPickMode(false); }}
               />
             );
             const todayEl = (
@@ -2274,7 +2292,7 @@ function App() {
               />
             );
             const boardCols = categories.map((cat) => (
-              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onFocusTask={(id) => { setFocusTaskId(id); setFocusPickMode(false); }} focusPickMode={focusPickMode} />
+              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
             ));
 
             function renderBoardSection(key) {
@@ -2427,6 +2445,7 @@ function App() {
       {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
+    </FocusModeContext.Provider>
   );
 }
 
@@ -2521,8 +2540,6 @@ function TodayColumn({
                   selectMode={selectMode}
                   selectedIds={selectedIds}
                   onToggleSelect={onToggleSelect}
-                  onFocusTask={(id) => { setFocusTaskId(id); setFocusPickMode(false); }}
-                  focusPickMode={focusPickMode}
                 />
               ))}
             </AnimatePresence>
@@ -2607,7 +2624,7 @@ function WeeklyColumn({
             <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
           </div>
           <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => isThisWeekUnscheduled(child))} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onFocusTask={(id) => { setFocusTaskId(id); setFocusPickMode(false); }} focusPickMode={focusPickMode} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => isThisWeekUnscheduled(child))} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
             {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
           </div>
         </div>
@@ -2616,7 +2633,7 @@ function WeeklyColumn({
   );
 }
 
-function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect, focusPickMode = false, onFocusItem }) {
+function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
   const [open, setOpen] = useState(true);
   const [draft, setDraft] = useState("");
 
@@ -2663,8 +2680,6 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
                   selectMode={selectMode}
                   isSelected={selectedTrayIds && selectedTrayIds.has(item.id)}
                   onToggleSelect={onToggleTraySelect}
-                  focusPickMode={focusPickMode}
-                  onFocusItem={onFocusItem}
                 />
               ))
             )}
@@ -2675,7 +2690,8 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
   );
 }
 
-function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect, focusPickMode = false, onFocusItem }) {
+function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
+  const { focusPickMode, pickTrayItem } = useFocusMode();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
 
@@ -2718,7 +2734,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
       {...(!selectMode && !focusPickMode ? trayDragListeners : {})}
       {...(!selectMode && !focusPickMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
-      onClick={() => { if (focusPickMode && onFocusItem) { onFocusItem(item); return; } if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
+      onClick={() => { if (focusPickMode) { pickTrayItem?.(item); return; } if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
       data-draggable
       style={{ userSelect: "none", WebkitUserSelect: "none" }}
       className={classNames(
@@ -2786,7 +2802,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   );
 }
 
-function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect, onFocusTask, focusPickMode }) {
+function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect }) {
   const tone = toneClasses(category.tone);
   const [newProject, setNewProject] = useState("");
   const [showProjectInput, setShowProjectInput] = useState(false);
@@ -2844,14 +2860,14 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, t
       )}
       {!isColumnCollapsed && (
         <div className="flex flex-col gap-2">
-          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onFocusTask={onFocusTask} focusPickMode={focusPickMode} />)}
+          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}
         </div>
       )}
     </div>
   );
 }
 
-function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect, onFocusTask, focusPickMode }) {
+function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect }) {
   const [newTitle, setNewTitle] = useState("");
   const key = `${category}:${project}`;
   const isCollapsed = collapsed[key];
@@ -2907,7 +2923,7 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
       </div>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} onFocusTask={onFocusTask} focusPickMode={focusPickMode} />)}</AnimatePresence>
+          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
           <div className="mt-1 flex gap-1">
             <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="このProjectに追加" className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20" />
             <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
@@ -2919,7 +2935,7 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
 }
 
 // Long-press context menu component
-function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories, onClose, onFocusTask }) {
+function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories, onClose }) {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   useEffect(() => {
@@ -3003,7 +3019,8 @@ function focusEnd(el) {
   el.setSelectionRange(len, len);
 }
 
-function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect, onFocusTask, focusPickMode = false }) {
+function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
+  const { focusPickMode, pickTask } = useFocusMode();
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
@@ -3093,7 +3110,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
           projectsByCategory={projectsByCategory}
           categories={categories}
           onClose={() => setContextMenu(null)}
-          onFocusTask={onFocusTask}
         />
       )}
       <div
@@ -3104,7 +3120,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
         onContextMenu={(e) => e.preventDefault()}
-        onClick={() => { if (longPressActive.current) return; if (focusPickMode && onFocusTask) { onFocusTask(task.id); return; } if (selectMode && onToggleSelect) { onToggleSelect(task.id); } }}
+        onClick={() => { if (longPressActive.current) return; if (focusPickMode) { pickTask?.(task.id); return; } if (selectMode && onToggleSelect) { onToggleSelect(task.id); } }}
         data-draggable
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
@@ -3263,8 +3279,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               selectMode={selectMode}
               selectedIds={selectedIds}
               onToggleSelect={onToggleSelect}
-              onFocusTask={onFocusTask}
-              focusPickMode={focusPickMode}
             />
           ))}
         </div>
@@ -3679,6 +3693,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
 }
 
 function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false, selectedIds, onToggleSelect }) {
+  const { focusPickMode, pickTask } = useFocusMode();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
@@ -3702,11 +3717,12 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
         ref={setNodeRef}
-        {...(!editing && !selectMode ? attributes : {})}
-        {...(!editing && !selectMode ? listeners : {})}
-        onClick={() => { if (selectMode && onToggleSelect) onToggleSelect(task.id); }}
+        {...(!editing && !selectMode && !focusPickMode ? attributes : {})}
+        {...(!editing && !selectMode && !focusPickMode ? listeners : {})}
+        onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } if (selectMode && onToggleSelect) onToggleSelect(task.id); }}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
+          focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
           selectMode ? "cursor-pointer" : editing ? "cursor-text" : "cursor-grab",
           isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
           editing && "bg-white/[0.07]",
