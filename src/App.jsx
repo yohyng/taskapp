@@ -1886,7 +1886,7 @@ function App() {
             >
               <Focus className="h-3.5 w-3.5" />
             </button>
-            <PipButton />
+            <KeepAwakeButton />
             <div className="relative">
               <button
                 onClick={() => setShowSettingsPanel((v) => !v)}
@@ -4835,31 +4835,80 @@ function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, t
   );
 }
 
-function PipButton() {
+// 画面スリープ防止。
+// 本命は Screen Wake Lock API（iPadOS 16.4+ / Chrome / Edge）。
+// iOS Safari は標準の PiP API を持たず webkitSetPresentationMode のみなので、
+// Wake Lock が無い環境向けに PiP をフォールバックとして残す。
+const hasWakeLock = typeof navigator !== "undefined" && "wakeLock" in navigator;
+function pipFlavor() {
+  if (typeof document === "undefined") return null;
+  if (document.pictureInPictureEnabled) return "standard";
+  const v = document.createElement("video");
+  if (typeof v.webkitSetPresentationMode === "function") return "webkit";
+  return null;
+}
+
+function KeepAwakeButton() {
   const [active, setActive] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const sentinelRef = useRef(null);
   const videoRef = useRef(null);
   const rafRef = useRef(null);
+  const flavor = useMemo(pipFlavor, []);
+  const supported = hasWakeLock || !!flavor;
 
-  async function startPip() {
-    if (!document.pictureInPictureEnabled) return;
-    // キャンバスで時計を描画し続けてストリーム化
+  const releasePip = useCallback(() => {
+    cancelAnimationFrame(rafRef.current);
+    const v = videoRef.current;
+    if (v) {
+      try {
+        if (flavor === "webkit" && v.webkitPresentationMode === "picture-in-picture") {
+          v.webkitSetPresentationMode("inline");
+        } else if (document.pictureInPictureElement === v) {
+          document.exitPictureInPicture();
+        }
+      } catch { /* すでに閉じている */ }
+      v.pause();
+      v.remove();
+      videoRef.current = null;
+    }
+  }, [flavor]);
+
+  // Wake Lock はタブが背面に回ると自動解放されるので、復帰時に取り直す
+  useEffect(() => {
+    if (!active || !hasWakeLock) return;
+    async function reacquire() {
+      if (document.visibilityState !== "visible" || sentinelRef.current) return;
+      try {
+        sentinelRef.current = await navigator.wakeLock.request("screen");
+        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
+      } catch { /* 取得できなければ諦める */ }
+    }
+    document.addEventListener("visibilitychange", reacquire);
+    return () => document.removeEventListener("visibilitychange", reacquire);
+  }, [active]);
+
+  useEffect(() => () => {
+    sentinelRef.current?.release().catch(() => {});
+    releasePip();
+  }, [releasePip]);
+
+  async function startPipFallback() {
     const canvas = document.createElement("canvas");
     canvas.width = 320;
     canvas.height = 180;
     const ctx = canvas.getContext("2d");
-
     function draw() {
       const now = new Date();
-      const hh = String(now.getHours()).padStart(2, "0");
-      const mm = String(now.getMinutes()).padStart(2, "0");
-      const ss = String(now.getSeconds()).padStart(2, "0");
+      const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
+        .map((n) => String(n).padStart(2, "0")).join(":");
       ctx.fillStyle = "#0a0a0a";
       ctx.fillRect(0, 0, 320, 180);
       ctx.fillStyle = "#e5e5e5";
       ctx.font = "bold 56px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(`${hh}:${mm}:${ss}`, 160, 80);
+      ctx.fillText(t, 160, 80);
       ctx.fillStyle = "#525252";
       ctx.font = "14px sans-serif";
       ctx.fillText("Task Space", 160, 148);
@@ -4867,40 +4916,70 @@ function PipButton() {
     }
     draw();
 
-    const stream = canvas.captureStream(1);
     const video = document.createElement("video");
-    video.srcObject = stream;
+    video.srcObject = canvas.captureStream(1);
     video.muted = true;
     video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    // iOS は DOM に載っていない video を PiP に上げられない
+    video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;";
+    document.body.appendChild(video);
     videoRef.current = video;
 
     await video.play();
-    await video.requestPictureInPicture();
-    setActive(true);
-
-    video.addEventListener("leavepictureinpicture", () => {
-      cancelAnimationFrame(rafRef.current);
-      setActive(false);
-    }, { once: true });
+    if (flavor === "webkit") {
+      video.webkitSetPresentationMode("picture-in-picture");
+      video.addEventListener("webkitpresentationmodechanged", () => {
+        if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setActive(false); }
+      });
+    } else {
+      await video.requestPictureInPicture();
+      video.addEventListener("leavepictureinpicture", () => { releasePip(); setActive(false); }, { once: true });
+    }
   }
 
-  async function stopPip() {
-    if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture();
+  async function start() {
+    setFailed(false);
+    if (hasWakeLock) {
+      try {
+        sentinelRef.current = await navigator.wakeLock.request("screen");
+        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
+        setActive(true);
+        return;
+      } catch { /* Wake Lock が拒否されたら PiP を試す */ }
     }
-    cancelAnimationFrame(rafRef.current);
+    if (!flavor) { setFailed(true); return; }
+    try {
+      await startPipFallback();
+      setActive(true);
+    } catch {
+      releasePip();
+      setFailed(true);
+    }
+  }
+
+  async function stop() {
+    try { await sentinelRef.current?.release(); } catch { /* noop */ }
+    sentinelRef.current = null;
+    releasePip();
     setActive(false);
   }
 
-  if (!document.pictureInPictureEnabled) return null;
+  if (!supported) return null;
 
   return (
     <button
-      onClick={active ? stopPip : startPip}
-      title={active ? "PiP停止（スリープ防止解除）" : "PiP起動（スリープ防止）"}
+      onClick={active ? stop : start}
+      title={
+        failed ? "スリープ防止を開始できませんでした"
+        : active ? "スリープ防止：ON（クリックで解除）"
+        : "スリープ防止：OFF（クリックで開始）"
+      }
       className={classNames(
         "rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1",
-        active ? "border-sky-400/40 bg-sky-400/10 text-sky-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]"
+        failed ? "border-red-400/40 bg-red-400/10 text-red-300"
+        : active ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
+        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]"
       )}
     >
       <Airplay className="h-3.5 w-3.5" />
