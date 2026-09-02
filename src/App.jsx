@@ -362,6 +362,22 @@ function useSelection() {
   return React.useContext(SelectionContext);
 }
 
+// Notion 風のブロック入力。Enter で下に新規ブロック、その直後に編集状態へ入る。
+const BlockEditContext = React.createContext({ addBlockBelow: null, pendingEditId: null, clearPendingEdit: null });
+function useBlockEdit() {
+  return React.useContext(BlockEditContext);
+}
+
+// DOM 順で前後のブロックへフォーカスを移す（全ビュー共通で data-task-id を持つ）
+function focusAdjacentBlock(fromEl, dir) {
+  const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
+  const i = all.indexOf(fromEl);
+  if (i === -1) return null;
+  const next = all[i + dir];
+  next?.focus();
+  return next || null;
+}
+
 function App() {
   const [boot] = useState(() => {
     try {
@@ -391,6 +407,7 @@ function App() {
   const [focusTaskId, setFocusTaskId] = useState(null);
   const [focusPickMode, setFocusPickMode] = useState(false);
   const [focusTrayItem, setFocusTrayItem] = useState(null);
+  const [pendingEditId, setPendingEditId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [quickMemo, setQuickMemo] = useState("");
   const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
@@ -998,7 +1015,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -1030,7 +1047,7 @@ function App() {
       return [newTask, ...prev];
     });
     if (select) setSelectedTaskId(newTask.id);
-    setToast(parent ? "子タスクを追加：親のCategory / Projectを継承しました" : "タスクを追加しました");
+    if (!silent) setToast(parent ? "子タスクを追加：親のCategory / Projectを継承しました" : "タスクを追加しました");
     return newTask;
   }
 
@@ -1838,6 +1855,32 @@ function App() {
     pickTrayItem: (item) => { setFocusTrayItem(item); setFocusPickMode(false); },
   }), [focusPickMode]);
 
+  // Enter で「同じ場所の直下」に空ブロックを作り、そのまま編集に入る
+  const addBlockBelow = useCallback((task) => {
+    // addTask は空タイトルを弾くので、いったん placeholder を入れて
+    // すぐ編集状態にし、ドラフトは空で見せる（未入力のまま確定したら削除される）
+    const created = addTask({
+      title: "新規タスク",
+      category: task.category || "",
+      project: task.project || "",
+      parentId: task.parentId || null,
+      plain: !!task.plain,
+      scheduledDate: task.scheduledDate || "",
+      thisWeek: !!task.thisWeek,
+      today: !!task.today,
+      afterId: task.id,
+      silent: true,
+    });
+    if (created) setPendingEditId(created.id);
+    return created;
+  }, [addTask]);
+
+  const blockEditValue = useMemo(() => ({
+    addBlockBelow,
+    pendingEditId,
+    clearPendingEdit: () => setPendingEditId(null),
+  }), [addBlockBelow, pendingEditId]);
+
   const handleMarqueeSelect = useCallback((taskIds, trayIds) => {
     setSelectedIds(new Set(taskIds));
     setSelectedTrayIds(new Set(trayIds));
@@ -1862,6 +1905,7 @@ function App() {
 
   return (
     <SelectionContext.Provider value={selectionValue}>
+    <BlockEditContext.Provider value={blockEditValue}>
     <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontFamily: appFontCss }}>
@@ -2480,6 +2524,7 @@ function App() {
     </DragOverlay>
     </DndContext>
     </FocusModeContext.Provider>
+    </BlockEditContext.Provider>
     </SelectionContext.Provider>
   );
 }
@@ -3057,9 +3102,11 @@ function focusEnd(el) {
 
 function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
   const { focusPickMode, pickTask } = useFocusMode();
+  const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
+  const cardRef = useRef(null);
   const [editing, setEditing] = useState(false);
   const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
   const [titleDraft, setTitleDraft] = useState(task.title);
@@ -3070,6 +3117,14 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   useEffect(() => {
     setTitleDraft(task.title);
   }, [task.id, task.title]);
+
+  // Enter で作られた直後の空ブロックは、そのまま編集状態で開く
+  useEffect(() => {
+    if (pendingEditId !== task.id) return;
+    setEditing(true);
+    setTitleDraft("");
+    clearPendingEdit?.();
+  }, [pendingEditId, task.id]);
 
   function commitTitle() {
     const clean = normalizeTitle(titleDraft);
@@ -3133,6 +3188,27 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   function setRefs(el) {
     taskDragRef(el);
     taskDropRef(el);
+    cardRef.current = el;
+  }
+
+  // カードにフォーカスがある状態でのキー操作（Notion のブロック選択に相当）
+  function handleCardKeyDown(e) {
+    if (editing) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addBlockBelow?.(task);
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
+    // 印字可能文字でそのまま編集開始
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      setTitleDraft(e.key);
+      setEditing(true);
+    }
   }
 
   return (
@@ -3157,6 +3233,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerMove={handlePointerMove}
         onContextMenu={(e) => e.preventDefault()}
         onClick={() => { if (longPressActive.current) return; if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
+        tabIndex={editing ? -1 : 0}
+        onKeyDown={handleCardKeyDown}
         data-draggable
         data-task-id={task.id}
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
@@ -3194,13 +3272,25 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && !event.shiftKey) {
                     event.preventDefault();
+                    // 空のまま確定したブロックは残さない
+                    if (!normalizeTitle(titleDraft)) {
+                      const prev = cardRef.current;
+                      setEditing(false);
+                      removeTask(task.id);
+                      setTimeout(() => focusAdjacentBlock(prev, -1), 0);
+                      return;
+                    }
                     commitTitle();
                     setEditing(false);
-                    event.currentTarget.blur();
+                    // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
+                    setTimeout(() => cardRef.current?.focus(), 0);
+                    return;
                   }
                   if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
                     event.preventDefault();
+                    const cur = cardRef.current;
                     removeTask(task.id);
+                    setTimeout(() => focusAdjacentBlock(cur, -1), 0);
                     return;
                   }
                   if (event.key === "Escape") {
@@ -3731,6 +3821,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
 
 function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false, selectedIds, onToggleSelect }) {
   const { focusPickMode, pickTask } = useFocusMode();
+  const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
+  const cardRef = useRef(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
@@ -3744,9 +3836,27 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
     id: `traytask-drop-${task.id}`,
     data: { type: "task", id: task.id },
   });
-  const setNodeRef = (el) => { dragRef(el); dropRef(el); };
+  const setNodeRef = (el) => { dragRef(el); dropRef(el); cardRef.current = el; };
 
   useEffect(() => { setDraft(task.title); }, [task.title]);
+
+  useEffect(() => {
+    if (pendingEditId !== task.id) return;
+    setEditing(true);
+    setDraft("");
+    clearPendingEdit?.();
+  }, [pendingEditId, task.id]);
+
+  function handleCardKeyDown(e) {
+    if (editing) return;
+    if (e.key === "Enter") { e.preventDefault(); addBlockBelow?.(task); return; }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) { setDraft(e.key); setEditing(true); }
+  }
 
   const children = childrenOf?.(task.id) || [];
 
@@ -3757,6 +3867,8 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
         {...(!editing && !selectMode && !focusPickMode ? attributes : {})}
         {...(!editing && !selectMode && !focusPickMode ? listeners : {})}
         onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
+        tabIndex={editing ? -1 : 0}
+        onKeyDown={handleCardKeyDown}
         data-task-id={task.id}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
@@ -3786,9 +3898,29 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
               onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
               onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); if (!draft.trim()) { removeTask(task.id); } else { if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); } }
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  const cur = cardRef.current;
+                  if (!draft.trim()) {
+                    setEditing(false);
+                    removeTask(task.id);
+                    setTimeout(() => focusAdjacentBlock(cur, -1), 0);
+                    return;
+                  }
+                  if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() });
+                  setEditing(false);
+                  // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
+                  setTimeout(() => cur?.focus(), 0);
+                  return;
+                }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
-                if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); removeTask(task.id); }
+                if ((e.key === "Backspace" || e.key === "Delete") && !draft) {
+                  e.preventDefault();
+                  const cur = cardRef.current;
+                  removeTask(task.id);
+                  setTimeout(() => focusAdjacentBlock(cur, -1), 0);
+                  return;
+                }
                 if (e.key === "Tab") {
                   e.preventDefault();
                   const isShift = e.shiftKey;
