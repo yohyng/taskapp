@@ -355,6 +355,13 @@ function useFocusMode() {
   return React.useContext(FocusModeContext);
 }
 
+// 選択状態。7days は SevenDayView→DayColumn→DayProjectGroup→DayTask と深いので
+// props ではなく Context で配る。
+const SelectionContext = React.createContext({ selectedIds: null, toggleTask: null });
+function useSelection() {
+  return React.useContext(SelectionContext);
+}
+
 function App() {
   const [boot] = useState(() => {
     try {
@@ -1831,7 +1838,30 @@ function App() {
     pickTrayItem: (item) => { setFocusTrayItem(item); setFocusPickMode(false); },
   }), [focusPickMode]);
 
+  const handleMarqueeSelect = useCallback((taskIds, trayIds) => {
+    setSelectedIds(new Set(taskIds));
+    setSelectedTrayIds(new Set(trayIds));
+  }, []);
+
+  // Esc で選択解除
+  useEffect(() => {
+    if (selectedIds.size === 0 && selectedTrayIds.size === 0) return;
+    function onKey(e) {
+      const tag = document.activeElement?.tagName?.toLowerCase();
+      if (["input", "textarea", "select"].includes(tag)) return;
+      if (e.key === "Escape") { setSelectedIds(new Set()); setSelectedTrayIds(new Set()); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [selectedIds, selectedTrayIds]);
+
+  const selectionValue = useMemo(() => ({
+    selectedIds,
+    toggleTask: onToggleSelect,
+  }), [selectedIds]);
+
   return (
+    <SelectionContext.Provider value={selectionValue}>
     <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontFamily: appFontCss }}>
@@ -2172,7 +2202,9 @@ function App() {
                   {inboxItems.map((item) => (
                     <div
                       key={item.id}
-                      onClick={() => { if (focusPickMode) { setFocusTrayItem(item); setFocusPickMode(false); return; } acceptInboxItem(item.id, "", "", { plain: true }, {}); }}
+                      data-tray-id={item.id}
+                      onClick={() => { if (focusPickMode) { setFocusTrayItem(item); setFocusPickMode(false); return; } onToggleTraySelect(item.id); }}
+                      onDoubleClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})}
                       className={classNames(
                         "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]",
                         focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
@@ -2392,7 +2424,9 @@ function App() {
           />
         )}
 
-        {selectMode && (selectedIds.size > 0 || selectedTrayIds.size > 0) && (
+        <MarqueeSelect onSelect={handleMarqueeSelect} />
+
+        {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
             <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
@@ -2446,6 +2480,7 @@ function App() {
     </DragOverlay>
     </DndContext>
     </FocusModeContext.Provider>
+    </SelectionContext.Provider>
   );
 }
 
@@ -2734,14 +2769,15 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
       {...(!selectMode && !focusPickMode ? trayDragListeners : {})}
       {...(!selectMode && !focusPickMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
-      onClick={() => { if (focusPickMode) { pickTrayItem?.(item); return; } if (selectMode && onToggleSelect) onToggleSelect(item.id); }}
+      onClick={() => { if (focusPickMode) { pickTrayItem?.(item); return; } onToggleSelect?.(item.id); }}
       data-draggable
+      data-tray-id={item.id}
       style={{ userSelect: "none", WebkitUserSelect: "none" }}
       className={classNames(
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
         isTrayDragging && "opacity-40",
-        selectMode && isSelected && "border-sky-500/50 bg-sky-500/10",
+        isSelected && "border-sky-500/50 bg-sky-500/10",
         selectMode && "cursor-pointer",
         focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
       )}
@@ -2784,7 +2820,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
             />
           ) : (
             <div
-              onClick={(e) => { if (selectMode || focusPickMode) { e.stopPropagation(); if (focusPickMode) pickTrayItem?.(item); return; } setEditing(true); }}
+              onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
               className="block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
@@ -3075,7 +3111,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
     window.__taskspaceLongPressCancel = null;
   }
 
-  const isSelected = selectMode && selectedIds && selectedIds.has(task.id);
+  const isSelected = !!(selectedIds && selectedIds.has(task.id));
 
   // dnd-kit hooks
   const { attributes: taskDragAttrs, listeners: taskDragListeners, setNodeRef: taskDragRef, isDragging } = useDraggable({
@@ -3120,8 +3156,9 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         onPointerUp={handlePointerUp}
         onPointerMove={handlePointerMove}
         onContextMenu={(e) => e.preventDefault()}
-        onClick={() => { if (longPressActive.current) return; if (focusPickMode) { pickTask?.(task.id); return; } if (selectMode && onToggleSelect) { onToggleSelect(task.id); } }}
+        onClick={() => { if (longPressActive.current) return; if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
         data-draggable
+        data-task-id={task.id}
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
@@ -3213,8 +3250,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
             ) : (
               <div className="flex min-w-0 items-start gap-1 group/title">
                 <div
-                  onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }}
-                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", focusPickMode ? "cursor-crosshair" : "cursor-text", task.status === "完了" && "line-through")}
+                  onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
+                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", focusPickMode ? "cursor-crosshair" : "cursor-pointer", task.status === "完了" && "line-through")}
                 >
                   {task.title}
                 </div>
@@ -3697,7 +3734,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
-  const isSelected = selectMode && selectedIds && selectedIds.has(task.id);
+  const isSelected = !!(selectedIds && selectedIds.has(task.id));
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `traytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3719,7 +3756,8 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
         ref={setNodeRef}
         {...(!editing && !selectMode && !focusPickMode ? attributes : {})}
         {...(!editing && !selectMode && !focusPickMode ? listeners : {})}
-        onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } if (selectMode && onToggleSelect) onToggleSelect(task.id); }}
+        onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
+        data-task-id={task.id}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
           focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
@@ -3766,7 +3804,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-text", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -3808,6 +3846,8 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
 
 function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, onAddBelow, autoEdit, onEditDone, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
   const { focusPickMode, pickTask } = useFocusMode();
+  const { selectedIds, toggleTask } = useSelection();
+  const isSelected = !!selectedIds?.has(task.id);
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: `daytask-${task.id}`,
     data: { type: "task", id: task.id },
@@ -3846,6 +3886,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
       <div
         ref={(el) => { setNodeRef(el); cardRef.current = el; }}
         data-daytask="true"
+        data-task-id={task.id}
         tabIndex={editing ? -1 : 0}
         onKeyDown={!editing && !focusPickMode ? (e) => {
           if (e.key === "Enter") { e.preventDefault(); onAddBelow?.(task.id); return; }
@@ -3864,11 +3905,12 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
         } : undefined}
         {...(!editing && !focusPickMode ? attributes : {})}
         {...(!editing && !focusPickMode ? listeners : {})}
-        onClick={focusPickMode ? () => pickTask?.(task.id) : undefined}
+        onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } if (!editing) toggleTask?.(task.id); }}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
           focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
           editing ? "cursor-text" : "cursor-grab",
+          isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
           selectedTaskId === task.id && "bg-white/[0.09]",
           isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
           isDragging && "opacity-30",
@@ -3923,9 +3965,9 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             <div className="flex min-w-0 items-start gap-1 group/title">
               <div className="min-w-0 flex-1">
                 <div
-                  onClick={(e) => { e.stopPropagation(); if (focusPickMode) { pickTask?.(task.id); return; } setEditing(true); }}
-                  title={focusPickMode ? "クリックでフォーカス" : "クリックで名前を編集"}
-                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-text", isDone && "line-through opacity-40")}
+                  onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
+                  title={focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集"}
+                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
                 >
                   {task.title}
                 </div>
@@ -4832,6 +4874,88 @@ function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, t
         </button>
       </div>
     </div>
+  );
+}
+
+// Notion 風のドラッグ範囲選択（マーキー）。
+// 余白から左ドラッグを始めたときだけ矩形を出し、重なったタスク／TRAY行を選択する。
+// タスクカード上から始まったドラッグは dnd-kit の移動なので手を出さない。
+function MarqueeSelect({ onSelect }) {
+  const [rect, setRect] = useState(null);
+  const startRef = useRef(null);
+
+  useEffect(() => {
+    function isInteractive(el) {
+      return !!el.closest(
+        "[data-draggable],[data-daytask],[data-task-id],[data-tray-id]," +
+        "button,input,textarea,select,a,[contenteditable='true']"
+      );
+    }
+
+    function onPointerDown(e) {
+      // 左ボタンのマウス操作のみ。タッチはスクロールを潰すので対象外。
+      if (e.pointerType !== "mouse" || e.button !== 0) return;
+      if (isInteractive(e.target)) return;
+      startRef.current = { x: e.clientX, y: e.clientY };
+    }
+
+    function onPointerMove(e) {
+      const s = startRef.current;
+      if (!s) return;
+      const dx = Math.abs(e.clientX - s.x);
+      const dy = Math.abs(e.clientY - s.y);
+      // 誤爆防止：一定距離動いてから矩形を出す
+      if (!rect && dx < 5 && dy < 5) return;
+      // ブラウザ標準の文字選択が走らないようにする
+      document.body.style.userSelect = "none";
+      document.body.style.webkitUserSelect = "none";
+      window.getSelection()?.removeAllRanges();
+      const r = {
+        left: Math.min(s.x, e.clientX),
+        top: Math.min(s.y, e.clientY),
+        width: Math.abs(e.clientX - s.x),
+        height: Math.abs(e.clientY - s.y),
+      };
+      setRect(r);
+
+      const taskIds = [];
+      const trayIds = [];
+      document.querySelectorAll("[data-task-id],[data-tray-id]").forEach((el) => {
+        const b = el.getBoundingClientRect();
+        const hit = b.left < r.left + r.width && b.right > r.left &&
+                    b.top < r.top + r.height && b.bottom > r.top;
+        if (!hit) return;
+        const tid = el.getAttribute("data-task-id");
+        if (tid) taskIds.push(tid); else trayIds.push(el.getAttribute("data-tray-id"));
+      });
+      onSelect(taskIds, trayIds);
+    }
+
+    function onPointerUp() {
+      startRef.current = null;
+      setRect(null);
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
+    }
+
+    window.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      window.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+      document.body.style.userSelect = "";
+      document.body.style.webkitUserSelect = "";
+    };
+  }, [rect, onSelect]);
+
+  if (!rect) return null;
+  return (
+    <div
+      className="pointer-events-none fixed z-[250] rounded-sm border border-sky-400/70 bg-sky-400/10"
+      style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
+    />
   );
 }
 
