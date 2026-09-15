@@ -499,12 +499,62 @@ function App() {
     document.body.classList.toggle('ts-drag-mode', selectMode);
   }, [selectMode]);
 
+  // 複数選択したまま、その中の1件を掴んだときは選択分をまとめて移動する。
+  // 行き先が一意に決まるドロップ先だけを対象にし、決められない場合は false を返して
+  // 従来の単体処理（並べ替え・親子化など）にそのまま任せる。
+  function applyBulkDrop(ids, dst) {
+    const tKey = toDateKey(new Date());
+    let patch = null;
+    let label = "";
+
+    if (dst.type === "day-column") {
+      patch = { scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "" };
+      label = dst.date === tKey ? "今日" : dst.label;
+    } else if (dst.type === "today") {
+      patch = { scheduledDate: tKey, today: false, thisWeek: false };
+      label = "Today";
+    } else if (dst.type === "weekly") {
+      patch = { thisWeek: true, today: false, scheduledDate: "" };
+      label = "Weekly";
+    } else if (dst.type === "project") {
+      patch = { category: dst.category, project: dst.project, parentId: null };
+      label = `${dst.category} / ${dst.project}`;
+    } else if (dst.type === "task" || dst.type === "task-in-day" || dst.type === "task-in-today" || dst.type === "task-in-weekly") {
+      // タスクの上に落とした場合は「そのタスクと同じ場所」へ揃える（親子化はしない）
+      const target = taskMap.get(dst.id);
+      if (!target || ids.includes(dst.id)) return false;
+      if (dst.type === "task-in-day") {
+        patch = { scheduledDate: target.scheduledDate || "", today: false, thisWeek: false, parentId: null, category: "", project: "" };
+        label = "同じ日";
+      } else if (dst.type === "task-in-today") {
+        patch = { scheduledDate: tKey, today: false, thisWeek: false };
+        label = "Today";
+      } else if (dst.type === "task-in-weekly") {
+        patch = { thisWeek: true, today: false, scheduledDate: "" };
+        label = "Weekly";
+      } else {
+        patch = { category: target.category, project: target.project, parentId: null };
+        label = `${target.category} / ${target.project}`;
+      }
+    }
+
+    if (!patch) return false;
+    const idSet = new Set(ids);
+    commitTasks((prev) => prev.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)));
+    setToast(`${ids.length}件を${label}に移動しました`);
+    return true;
+  }
+
   function handleDragEnd({ active, over }) {
     setActiveDrag(null);
     if (!over) return;
     const src = active.data.current;
     const dst = over.data.current;
     if (!src || !dst) return;
+
+    if (src.type === "task" && selectedIds.size > 1 && selectedIds.has(src.id)) {
+      if (applyBulkDrop([...selectedIds], dst)) return;
+    }
 
     // ドラッグアイテムの中心Y とドロップ先要素の中央Y を比較して上/下半分を判定
     function isBottomHalf() {
@@ -2517,7 +2567,17 @@ function App() {
       </div>
     </div>
     <DragOverlay dropAnimation={null}>
-      {activeDrag?.type === "task" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{taskMap.get(activeDrag.id)?.title || "…"}</div>}
+      {activeDrag?.type === "task" && (
+        selectedIds.size > 1 && selectedIds.has(activeDrag.id) ? (
+          <div className="flex items-center gap-2 rounded-md border border-sky-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">
+            <span className="rounded-full border border-sky-400/40 bg-sky-500/20 px-1.5 text-[10px] text-sky-100">{selectedIds.size}</span>
+            <span className="max-w-xs truncate">{taskMap.get(activeDrag.id)?.title || "…"}</span>
+            <span className="text-[10px] text-neutral-400">ほか{selectedIds.size - 1}件</span>
+          </div>
+        ) : (
+          <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{taskMap.get(activeDrag.id)?.title || "…"}</div>
+        )
+      )}
       {activeDrag?.type === "tray" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{activeDrag.title || "…"}</div>}
       {activeDrag?.type === "column" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.label || activeDrag.key}</div>}
       {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.project}</div>}
