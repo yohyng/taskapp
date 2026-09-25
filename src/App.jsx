@@ -345,6 +345,7 @@ function normalizeTask(task) {
     parentId: null,
     archived: false,
     scheduledDate: "",
+    stock: false,
     ...task,
   };
 }
@@ -516,8 +517,11 @@ function App() {
     } else if (dst.type === "weekly") {
       patch = { thisWeek: true, today: false, scheduledDate: "" };
       label = "Weekly";
+    } else if (dst.type === "stock-zone") {
+      patch = { stock: true, scheduledDate: "", today: false, thisWeek: false };
+      label = "STOCK";
     } else if (dst.type === "project") {
-      patch = { category: dst.category, project: dst.project, parentId: null };
+      patch = { category: dst.category, project: dst.project, parentId: null, stock: false };
       label = `${dst.category} / ${dst.project}`;
     } else if (dst.type === "task" || dst.type === "task-in-day" || dst.type === "task-in-today" || dst.type === "task-in-weekly") {
       // タスクの上に落とした場合は「そのタスクと同じ場所」へ揃える（親子化はしない）
@@ -692,7 +696,7 @@ function App() {
     if (src.type === "task" && dst.type === "project") {
       const task = taskMap.get(src.id);
       if (!task) return;
-      upsertTask({ id: src.id, category: dst.category, project: dst.project, parentId: null });
+      upsertTask({ id: src.id, category: dst.category, project: dst.project, parentId: null, stock: false });
       setToast(task.parentId ? `親子解除：${dst.category} / ${dst.project} の並列タスクにしました` : `移動：${dst.category} / ${dst.project} に変更しました`);
       return;
     }
@@ -750,6 +754,20 @@ function App() {
     }
 
     // Tray item dropped into tray drop zone
+    // Task → STOCK (日付を外して寝かせる。category/project は維持)
+    if (src.type === "task" && dst.type === "stock-zone") {
+      upsertTask({ id: src.id, stock: true, scheduledDate: "", today: false, thisWeek: false });
+      setToast("STOCKに入れました");
+      return;
+    }
+
+    // Tray item → STOCK (タスク化してストックへ)
+    if (src.type === "tray" && dst.type === "stock-zone") {
+      acceptInboxItem(src.id, "", "", { plain: true, stock: true });
+      setToast("TRAYからSTOCKに移しました");
+      return;
+    }
+
     if (src.type === "tray" && dst.type === "tray-zone") {
       return; // nothing to do
     }
@@ -926,6 +944,12 @@ function App() {
     return toneClasses(categoryMap.get(categoryKey)?.tone || "neutral");
   }
 
+  // ストック: 明示的に置かれた、日付を持たないタスク（プロジェクト所属は維持）
+  const stockTasks = useMemo(
+    () => tasks.filter((t) => t.stock && !t.archived && !t.parentId),
+    [tasks]
+  );
+
   const projectsByCategory = useMemo(() => {
     const result = {};
     categories.forEach((cat) => {
@@ -1061,7 +1085,12 @@ function App() {
 
   function upsertTask(patch) {
     // categoryとprojectが設定されたらplainを自動でfalseに
-    const resolved = (patch.category || patch.project) ? { plain: false, ...patch } : patch;
+    let resolved = (patch.category || patch.project) ? { plain: false, ...patch } : patch;
+    // 不変条件: 予定が入ったタスクはストックに残さない
+    if (resolved.stock === undefined) {
+      const scheduled = !!resolved.scheduledDate || resolved.today === true || resolved.thisWeek === true;
+      if (scheduled) resolved = { ...resolved, stock: false };
+    }
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
@@ -2262,11 +2291,11 @@ function App() {
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
                 <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
                   <span className="text-sm font-bold text-neutral-200">TRAY</span>
-                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived).length + inboxItems.length}</span>
+                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock).length + inboxItems.length}</span>
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
                   {(() => {
-                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.parentId);
+                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.parentId);
                     return rootTrayTasks.map((task, idx) => (
                       <TrayTask
                         key={task.id}
@@ -2313,6 +2342,23 @@ function App() {
                   ))}
                 </div>
               </div>
+            </div>
+            {/* STOCK column */}
+            <div className="min-w-0">
+              <StockColumn
+                tasks={stockTasks}
+                childrenOf={childrenOf}
+                categoryTone={categoryTone}
+                toggleDone={toggleDone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
+                onUnstock={(id) => upsertTask({ id, stock: false })}
+              />
             </div>
             {/* Board category columns */}
             {categories.map((cat) => (
@@ -2770,6 +2816,77 @@ function WeeklyColumn({
         </div>
       )}
     </aside>
+  );
+}
+
+// STOCK: 日付を決めずに寝かせておくタスク置き場。
+// プロジェクト所属は保ったままなので PJ ボードには出続ける。
+function StockColumn({ tasks, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, selectedTaskId, setSelectedTaskId, selectMode, selectedIds, onToggleSelect, onUnstock }) {
+  const { setNodeRef, isOver } = useDroppable({ id: "stock-zone", data: { type: "stock-zone" } });
+  return (
+    <div
+      ref={setNodeRef}
+      className={classNames(
+        "rounded-lg border bg-white/[0.02] transition",
+        isOver ? "border-violet-400/50 bg-violet-400/[0.06]" : "border-white/10"
+      )}
+    >
+      <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
+        <span className="text-sm font-bold text-violet-200">STOCK</span>
+        <span className="text-[10px] text-neutral-500">{tasks.length}</span>
+      </div>
+      <div className="flex min-h-[80px] flex-col gap-0.5 px-2 py-2">
+        {tasks.length === 0 ? (
+          <div className="rounded-md border border-dashed border-white/10 p-3 text-center text-[11px] leading-relaxed text-neutral-600">
+            日付を決めずに
+            <br />
+            寝かせるタスクをここへ
+          </div>
+        ) : (
+          tasks.map((task, idx) => (
+            <div key={task.id} className="group/stock relative">
+              <TrayTask
+                task={task}
+                depth={0}
+                toggleDone={toggleDone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                setSelectedTaskId={setSelectedTaskId}
+                selectedTaskId={selectedTaskId}
+                childrenOf={childrenOf}
+                selectMode={selectMode}
+                selectedIds={selectedIds}
+                onToggleSelect={onToggleSelect}
+                onIndent={() => {
+                  if (idx === 0) return;
+                  upsertTask({ id: task.id, parentId: tasks[idx - 1].id });
+                }}
+                onOutdent={() => {
+                  if (!task.parentId) return;
+                  upsertTask({ id: task.id, parentId: null });
+                }}
+              />
+              {task.project && (
+                <span className={classNames(
+                  "pointer-events-none absolute right-6 top-1 rounded border px-1 py-px text-[9px] leading-none",
+                  categoryTone(task.category).panel,
+                  categoryTone(task.category).accent
+                )}>
+                  {task.project}
+                </span>
+              )}
+              <button
+                onClick={(e) => { e.stopPropagation(); onUnstock(task.id); }}
+                title="ストックから戻す"
+                className="absolute right-1 top-1 rounded p-0.5 text-neutral-600 opacity-0 transition hover:bg-white/10 hover:text-neutral-200 group-hover/stock:opacity-100"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
   );
 }
 

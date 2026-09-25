@@ -2,10 +2,29 @@ import { supabase, isSupabaseEnabled } from './supabase'
 
 const STORAGE_KEY = 'notion-like-taskdb-prototype-v4'
 
+// tasks.stock 列はあとから追加したもの。まだ列を作っていない環境でも
+// 同期全体が落ちないよう、列が無いと分かった時点で送るのをやめる。
+let stockColumnSupported = true
+
+export function isMissingStockColumn(error) {
+  if (!error) return false
+  const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''}`
+  return /stock/i.test(text) && (error.code === 'PGRST204' || /column/i.test(text))
+}
+
+function disableStockColumn() {
+  if (!stockColumnSupported) return false
+  stockColumnSupported = false
+  console.warn('[db] tasks.stock 列が見つからないため、STOCK はこの端末内のみで保持されます')
+  return true
+}
+
 // --- camelCase <-> snake_case mappers ---
 
 function taskToRow(t) {
+  const row = stockColumnSupported ? { stock: t.stock ?? false } : {}
   return {
+    ...row,
     id: t.id,
     title: t.title ?? '',
     category: t.category ?? '',
@@ -49,6 +68,7 @@ export function rowToTask(r) {
     sortOrder: r.sort_order ?? null,
     archived: r.archived ?? false,
     scheduledDate: r.scheduled_date ?? '',
+    stock: r.stock ?? false,
   }
 }
 
@@ -187,8 +207,13 @@ export async function saveToSupabase({ tasks, categories, projectRules, projectO
       projects,
     }))
 
+    let tasksResult = await supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' })
+    if (isMissingStockColumn(tasksResult.error) && disableStockColumn()) {
+      tasksResult = await supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' })
+    }
+
     const results = await Promise.all([
-      supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' }),
+      Promise.resolve(tasksResult),
       supabase.from('categories').upsert(categories.map(categoryToRow), { onConflict: 'id' }),
       supabase.from('project_rules').upsert(projectRulesToRows(projectRules), { onConflict: 'id' }),
       supabase.from('project_order').upsert(orderRows, { onConflict: 'category' }),
@@ -249,7 +274,10 @@ export async function saveSetting(key, value) {
 
 export async function upsertTaskRow(task) {
   if (!isSupabaseEnabled) return null
-  const { error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
+  let { error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
+  if (isMissingStockColumn(error) && disableStockColumn()) {
+    ;({ error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' }))
+  }
   if (error) console.error('[db] upsertTaskRow error', error, taskToRow(task))
   return error
 }

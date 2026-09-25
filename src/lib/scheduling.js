@@ -115,7 +115,7 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
       const [cat, ...rest] = ruleKey.split("::");
       const proj = rest.join("::");
       tasks
-        .filter((t) => !t.archived && !t.scheduledDate && t.category === cat && t.project === proj && !t.parentId)
+        .filter((t) => !t.archived && !t.stock && !t.scheduledDate && t.category === cat && t.project === proj && !t.parentId)
         .forEach((t) => {
           const ghostTask = { ...t, __ghost: true };
           addRoot(ghostTask);
