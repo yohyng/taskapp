@@ -1867,6 +1867,35 @@ function App() {
     exitSelectMode();
   }
 
+  // 選択分をまとめて STOCK へ。プロジェクト所属はそのまま、日付だけ外す。
+  // TRAY 行はタスク化してから入れる（カテゴリなしのまま）。
+  function bulkMoveToStock() {
+    const trayIds = [...selectedTrayIds];
+    const taskCount = selectedIds.size;
+    const trayCount = trayIds.length;
+    if (taskCount > 0) {
+      commitTasks((prev) => prev.map((t) => selectedIds.has(t.id)
+        ? { ...t, stock: true, scheduledDate: "", today: false, thisWeek: false }
+        : t));
+    }
+    trayIds.forEach((id) => {
+      const item = inboxItems.find((i) => i.id === id);
+      if (!item) return;
+      const newTask = normalizeTask({ id: uid(), title: item.title, status: "未着手", parentId: null, memo: "", dueDate: "", plain: true, stock: true });
+      commitState((current) => ({
+        ...current,
+        tasks: [newTask, ...current.tasks],
+        inboxItems: (current.inboxItems || []).filter((i) => i.id !== id),
+      }));
+      addTombstone(TOMBSTONE_TRAY_KEY, id);
+      dbDeleteTrayItem(id);
+      dbUpsertTaskRow(newTask);
+    });
+    setToast(`${taskCount + trayCount}件をSTOCKに入れました`);
+    setShowMovePanel(false);
+    exitSelectMode();
+  }
+
   function bulkMoveTo(category, project) {
     const trayIds = [...selectedTrayIds];
     const taskCount = selectedIds.size;
@@ -2596,6 +2625,14 @@ function App() {
           {showMovePanel && (
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
               <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
+              <div className="my-1 border-t border-white/10" />
+              <button
+                onClick={bulkMoveToStock}
+                className="flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-xs font-medium text-violet-200 transition hover:bg-violet-400/10"
+              >
+                <span>STOCK</span>
+                <span className="text-[9px] text-neutral-500">日付を外して寝かせる</span>
+              </button>
               <div className="my-1 border-t border-white/10" />
               {categories.map((cat) => (
                 <div key={cat.key}>
