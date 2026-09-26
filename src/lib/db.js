@@ -2,27 +2,44 @@ import { supabase, isSupabaseEnabled } from './supabase'
 
 const STORAGE_KEY = 'notion-like-taskdb-prototype-v4'
 
-// tasks.stock 列はあとから追加したもの。まだ列を作っていない環境でも
-// 同期全体が落ちないよう、列が無いと分かった時点で送るのをやめる。
-let stockColumnSupported = true
+// あとから足した tasks の列。まだ ALTER TABLE していない環境でも同期全体が
+// 落ちないよう、列が無いと分かった時点でその列を送るのをやめる。
+const OPTIONAL_TASK_COLUMNS = {
+  stock: { note: 'STOCK の在／不在' },
+  stock_view_id: { note: 'どの STOCK ビューに入れたか' },
+  style: { note: 'タスクごとの色・太さ' },
+}
+const optionalColumnSupported = Object.fromEntries(
+  Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
+)
 
-export function isMissingStockColumn(error) {
-  if (!error) return false
+// 未作成の列名を error から拾う。PostgREST は PGRST204 で列名を message に含める。
+export function missingOptionalColumn(error) {
+  if (!error) return null
   const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''}`
-  return /stock/i.test(text) && (error.code === 'PGRST204' || /column/i.test(text))
+  if (error.code !== 'PGRST204' && !/column/i.test(text)) return null
+  // 長い名前から先に判定する（stock より stock_view_id を優先）
+  const names = Object.keys(OPTIONAL_TASK_COLUMNS).sort((a, b) => b.length - a.length)
+  return names.find((c) => optionalColumnSupported[c] && text.includes(c)) ?? null
 }
 
-function disableStockColumn() {
-  if (!stockColumnSupported) return false
-  stockColumnSupported = false
-  console.warn('[db] tasks.stock 列が見つからないため、STOCK はこの端末内のみで保持されます')
+// 列が足りないと分かったら落とす。落とせたら true（＝再試行する価値がある）。
+function disableOptionalColumn(name) {
+  if (!name || !optionalColumnSupported[name]) return false
+  optionalColumnSupported[name] = false
+  console.warn(`[db] tasks.${name} 列が無いため「${OPTIONAL_TASK_COLUMNS[name].note}」はこの端末内のみで保持されます`)
   return true
 }
 
 // --- camelCase <-> snake_case mappers ---
 
 function taskToRow(t) {
-  const row = stockColumnSupported ? { stock: t.stock ?? false } : {}
+  const row = {}
+  if (optionalColumnSupported.stock) row.stock = t.stock ?? false
+  if (optionalColumnSupported.stock_view_id) row.stock_view_id = t.stockViewId ?? null
+  if (optionalColumnSupported.style) {
+    row.style = t.style && Object.keys(t.style).length ? JSON.stringify(t.style) : null
+  }
   return {
     ...row,
     id: t.id,
@@ -69,7 +86,15 @@ export function rowToTask(r) {
     archived: r.archived ?? false,
     scheduledDate: r.scheduled_date ?? '',
     stock: r.stock ?? false,
+    stockViewId: r.stock_view_id ?? null,
+    style: parseStyle(r.style),
   }
+}
+
+function parseStyle(raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  try { return JSON.parse(raw) } catch { return null }
 }
 
 function categoryToRow(c, index) {
@@ -207,10 +232,7 @@ export async function saveToSupabase({ tasks, categories, projectRules, projectO
       projects,
     }))
 
-    let tasksResult = await supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' })
-    if (isMissingStockColumn(tasksResult.error) && disableStockColumn()) {
-      tasksResult = await supabase.from('tasks').upsert(tasks.map(taskToRow), { onConflict: 'id' })
-    }
+    const tasksResult = await upsertTasksTolerantly(() => tasks.map(taskToRow))
 
     const results = await Promise.all([
       Promise.resolve(tasksResult),
@@ -272,12 +294,19 @@ export async function saveSetting(key, value) {
   return error
 }
 
+// 未作成の任意列を1つずつ落としながら upsert を通す
+async function upsertTasksTolerantly(rowsOf) {
+  let result = await supabase.from('tasks').upsert(rowsOf(), { onConflict: 'id' })
+  // 足りない列が複数あることもあるので、落とせなくなるまで繰り返す
+  while (disableOptionalColumn(missingOptionalColumn(result.error))) {
+    result = await supabase.from('tasks').upsert(rowsOf(), { onConflict: 'id' })
+  }
+  return result
+}
+
 export async function upsertTaskRow(task) {
   if (!isSupabaseEnabled) return null
-  let { error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' })
-  if (isMissingStockColumn(error) && disableStockColumn()) {
-    ;({ error } = await supabase.from('tasks').upsert(taskToRow(task), { onConflict: 'id' }))
-  }
+  const { error } = await upsertTasksTolerantly(() => taskToRow(task))
   if (error) console.error('[db] upsertTaskRow error', error, taskToRow(task))
   return error
 }

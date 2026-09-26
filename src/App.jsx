@@ -115,6 +115,32 @@ const DEFAULT_PROJECT_RULES = {
 };
 
 const DEFAULT_PROJECT_ORDER = {};
+
+// STOCK ビュー: 日付を決めずに寝かせるタスクの置き場。任意に増やせて色を変えられる。
+const STOCK_VIEW_COLORS = [
+  "#a78bfa", // violet
+  "#60a5fa", // blue
+  "#34d399", // emerald
+  "#fbbf24", // amber
+  "#f472b6", // pink
+  "#f87171", // red
+  "#22d3ee", // cyan
+  "#a3a3a3", // neutral
+];
+const DEFAULT_STOCK_VIEWS = [{ id: "stock", name: "STOCK", color: STOCK_VIEW_COLORS[0] }];
+const STOCK_VIEWS_SETTING_KEY = "stock_views";
+
+// タスク個別の見た目
+const TASK_TEXT_COLORS = [
+  { key: "", label: "既定" },
+  { key: "#f87171", label: "赤" },
+  { key: "#fb923c", label: "橙" },
+  { key: "#fbbf24", label: "黄" },
+  { key: "#34d399", label: "緑" },
+  { key: "#60a5fa", label: "青" },
+  { key: "#a78bfa", label: "紫" },
+  { key: "#f472b6", label: "桃" },
+];
 const NO_CATEGORY_LABEL = "---";
 
 const TONES = ["rose", "purple", "blue", "amber", "green", "cyan", "orange", "neutral"];
@@ -346,6 +372,8 @@ function normalizeTask(task) {
     archived: false,
     scheduledDate: "",
     stock: false,
+    stockViewId: null,
+    style: null,
     ...task,
   };
 }
@@ -400,6 +428,21 @@ function App() {
   const [categories, setCategories] = useState(boot.categories);
   const [projectRules, setProjectRules] = useState(boot.projectRules || DEFAULT_PROJECT_RULES);
   const [projectOrder, setProjectOrder] = useState(boot.projectOrder || DEFAULT_PROJECT_ORDER);
+  const [stockViews, setStockViews] = useState(() => {
+    try {
+      const raw = localStorage.getItem("taskspace-stock-views");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch { /* 壊れていたら既定に戻す */ }
+    return DEFAULT_STOCK_VIEWS;
+  });
+
+  // ビュー定義は app_settings に載せて全端末で共有する
+  const persistStockViews = useCallback((next) => {
+    setStockViews(next);
+    try { localStorage.setItem("taskspace-stock-views", JSON.stringify(next)); } catch { /* quota */ }
+    dbSaveSetting(STOCK_VIEWS_SETTING_KEY, JSON.stringify(next));
+  }, []);
   const [inboxItems, setInboxItems] = useState(boot.inboxItems || SAMPLE_INBOX);
   const [search, setSearch] = useState("");
   const [showDone, setShowDone] = useState(true);
@@ -518,8 +561,8 @@ function App() {
       patch = { thisWeek: true, today: false, scheduledDate: "" };
       label = "Weekly";
     } else if (dst.type === "stock-zone") {
-      patch = { stock: true, scheduledDate: "", today: false, thisWeek: false };
-      label = "STOCK";
+      patch = { stock: true, stockViewId: dst.viewId, scheduledDate: "", today: false, thisWeek: false };
+      label = stockViews.find((v) => v.id === dst.viewId)?.name || "STOCK";
     } else if (dst.type === "project") {
       patch = { category: dst.category, project: dst.project, parentId: null, stock: false };
       label = `${dst.category} / ${dst.project}`;
@@ -756,15 +799,17 @@ function App() {
     // Tray item dropped into tray drop zone
     // Task → STOCK (日付を外して寝かせる。category/project は維持)
     if (src.type === "task" && dst.type === "stock-zone") {
-      upsertTask({ id: src.id, stock: true, scheduledDate: "", today: false, thisWeek: false });
-      setToast("STOCKに入れました");
+      const name = stockViews.find((v) => v.id === dst.viewId)?.name || "STOCK";
+      upsertTask({ id: src.id, stock: true, stockViewId: dst.viewId, scheduledDate: "", today: false, thisWeek: false });
+      setToast(`${name}に入れました`);
       return;
     }
 
     // Tray item → STOCK (タスク化してストックへ)
     if (src.type === "tray" && dst.type === "stock-zone") {
-      acceptInboxItem(src.id, "", "", { plain: true, stock: true });
-      setToast("TRAYからSTOCKに移しました");
+      const name = stockViews.find((v) => v.id === dst.viewId)?.name || "STOCK";
+      acceptInboxItem(src.id, "", "", { plain: true, stock: true, stockViewId: dst.viewId });
+      setToast(`TRAYから${name}に移しました`);
       return;
     }
 
@@ -850,6 +895,16 @@ function App() {
         setNotionDbId(remoteDbId);
         localStorage.setItem("taskspace-notion-dbid", remoteDbId);
         addSyncLog("🔗 Notion DB ID を同期しました");
+      }
+      const remoteViews = settings?.[STOCK_VIEWS_SETTING_KEY];
+      if (remoteViews) {
+        try {
+          const parsed = typeof remoteViews === "string" ? JSON.parse(remoteViews) : remoteViews;
+          if (Array.isArray(parsed) && parsed.length) {
+            setStockViews(parsed);
+            localStorage.setItem("taskspace-stock-views", JSON.stringify(parsed));
+          }
+        } catch { /* 壊れていたらローカルのまま */ }
       }
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -944,11 +999,30 @@ function App() {
     return toneClasses(categoryMap.get(categoryKey)?.tone || "neutral");
   }
 
-  // ストック: 明示的に置かれた、日付を持たないタスク（プロジェクト所属は維持）
-  const stockTasks = useMemo(
-    () => tasks.filter((t) => t.stock && !t.archived && !t.parentId),
-    [tasks]
-  );
+  // STOCK: 明示的に置かれた、日付を持たないタスク（プロジェクト所属は維持）。
+  // ビューごとに分け、そのビュー内に親がいないものをルートとして出すことで
+  // 親子階層をそのまま持ち込む。既定ビューは stockViewId 未設定のものも拾う。
+  const stockRootsByView = useMemo(() => {
+    const defaultViewId = stockViews[0]?.id;
+    const viewOf = (t) => t.stockViewId || defaultViewId;
+    const parked = tasks.filter((t) => t.stock && !t.archived);
+    const byView = new Map(stockViews.map((v) => [v.id, []]));
+    const inView = new Map();
+    parked.forEach((t) => {
+      const v = viewOf(t);
+      if (!byView.has(v)) return; // 削除済みビューに残った参照は無視
+      if (!inView.has(v)) inView.set(v, new Set());
+      inView.get(v).add(t.id);
+    });
+    parked.forEach((t) => {
+      const v = viewOf(t);
+      if (!byView.has(v)) return;
+      // 同じビューに親がいるなら、その親の下にぶら下げて描くのでルートにしない
+      if (t.parentId && inView.get(v)?.has(t.parentId)) return;
+      byView.get(v).push(t);
+    });
+    return byView;
+  }, [tasks, stockViews]);
 
   const projectsByCategory = useMemo(() => {
     const result = {};
@@ -1867,21 +1941,47 @@ function App() {
     exitSelectMode();
   }
 
+  function addStockView() {
+    const used = new Set(stockViews.map((v) => v.color));
+    const color = STOCK_VIEW_COLORS.find((c) => !used.has(c)) || STOCK_VIEW_COLORS[stockViews.length % STOCK_VIEW_COLORS.length];
+    const view = { id: `sv-${uid()}`, name: `STOCK ${stockViews.length + 1}`, color };
+    persistStockViews([...stockViews, view]);
+    setToast(`${view.name} を追加しました`);
+  }
+
+  function updateStockView(id, patch) {
+    persistStockViews(stockViews.map((v) => (v.id === id ? { ...v, ...patch } : v)));
+  }
+
+  // ビューを消しても中のタスクは消さない。行き場を失うので STOCK から出す。
+  function removeStockView(id) {
+    if (stockViews.length <= 1) { setToast("最後のSTOCKビューは削除できません"); return; }
+    const view = stockViews.find((v) => v.id === id);
+    const isDefault = stockViews[0]?.id === id;
+    commitTasks((prev) => prev.map((t) => {
+      const belongs = t.stock && (t.stockViewId === id || (isDefault && !t.stockViewId));
+      return belongs ? { ...t, stock: false, stockViewId: null } : t;
+    }));
+    persistStockViews(stockViews.filter((v) => v.id !== id));
+    setToast(`${view?.name || "ビュー"} を削除し、中のタスクはSTOCKから出しました`);
+  }
+
   // 選択分をまとめて STOCK へ。プロジェクト所属はそのまま、日付だけ外す。
   // TRAY 行はタスク化してから入れる（カテゴリなしのまま）。
-  function bulkMoveToStock() {
+  function bulkMoveToStock(viewId) {
     const trayIds = [...selectedTrayIds];
     const taskCount = selectedIds.size;
     const trayCount = trayIds.length;
+    const target = viewId || stockViews[0]?.id;
     if (taskCount > 0) {
       commitTasks((prev) => prev.map((t) => selectedIds.has(t.id)
-        ? { ...t, stock: true, scheduledDate: "", today: false, thisWeek: false }
+        ? { ...t, stock: true, stockViewId: target, scheduledDate: "", today: false, thisWeek: false }
         : t));
     }
     trayIds.forEach((id) => {
       const item = inboxItems.find((i) => i.id === id);
       if (!item) return;
-      const newTask = normalizeTask({ id: uid(), title: item.title, status: "未着手", parentId: null, memo: "", dueDate: "", plain: true, stock: true });
+      const newTask = normalizeTask({ id: uid(), title: item.title, status: "未着手", parentId: null, memo: "", dueDate: "", plain: true, stock: true, stockViewId: target });
       commitState((current) => ({
         ...current,
         tasks: [newTask, ...current.tasks],
@@ -1891,9 +1991,34 @@ function App() {
       dbDeleteTrayItem(id);
       dbUpsertTaskRow(newTask);
     });
-    setToast(`${taskCount + trayCount}件をSTOCKに入れました`);
+    const name = stockViews.find((v) => v.id === target)?.name || "STOCK";
+    setToast(`${taskCount + trayCount}件を${name}に入れました`);
     setShowMovePanel(false);
     exitSelectMode();
+  }
+
+  // ツールバーの現在値表示用。選択分で揃っているときだけその値を返す。
+  const selectedTasksList = useMemo(
+    () => tasks.filter((t) => selectedIds.has(t.id)),
+    [tasks, selectedIds]
+  );
+  const selectionAllBold = selectedTasksList.length > 0 && selectedTasksList.every((t) => t.style?.bold);
+  const selectionColor = useMemo(() => {
+    if (selectedTasksList.length === 0) return null;
+    const first = selectedTasksList[0].style?.color || "";
+    return selectedTasksList.every((t) => (t.style?.color || "") === first) ? first : null;
+  }, [selectedTasksList]);
+
+  // 選択分の見た目（色・太さ）を変更する
+  function bulkSetStyle(patch) {
+    if (selectedIds.size === 0) return;
+    commitTasks((prev) => prev.map((t) => {
+      if (!selectedIds.has(t.id)) return t;
+      const next = { ...(t.style || {}), ...patch };
+      // 既定値だけになったら style ごと落として行を軽くする
+      Object.keys(next).forEach((k) => { if (!next[k]) delete next[k]; });
+      return { ...t, style: Object.keys(next).length ? next : null };
+    }));
   }
 
   function bulkMoveTo(category, project) {
@@ -2372,22 +2497,37 @@ function App() {
                 </div>
               </div>
             </div>
-            {/* STOCK column */}
+            {/* STOCK views */}
+            {stockViews.map((view) => (
+              <div key={view.id} className="min-w-0">
+                <StockColumn
+                  view={view}
+                  tasks={stockRootsByView.get(view.id) || []}
+                  childrenOf={childrenOf}
+                  categoryTone={categoryTone}
+                  toggleDone={toggleDone}
+                  upsertTask={upsertTask}
+                  removeTask={removeTask}
+                  selectedTaskId={selectedTaskId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  selectMode={selectMode}
+                  selectedIds={selectedIds}
+                  onToggleSelect={onToggleSelect}
+                  onUnstock={(id) => upsertTask({ id, stock: false, stockViewId: null })}
+                  onUpdateView={(patch) => updateStockView(view.id, patch)}
+                  onRemoveView={() => removeStockView(view.id)}
+                  canRemove={stockViews.length > 1}
+                />
+              </div>
+            ))}
             <div className="min-w-0">
-              <StockColumn
-                tasks={stockTasks}
-                childrenOf={childrenOf}
-                categoryTone={categoryTone}
-                toggleDone={toggleDone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
-                onUnstock={(id) => upsertTask({ id, stock: false })}
-              />
+              <button
+                onClick={addStockView}
+                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-3 text-xs text-neutral-500 transition hover:border-white/30 hover:bg-white/[0.04] hover:text-neutral-300"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                STOCKビューを追加
+              </button>
             </div>
             {/* Board category columns */}
             {categories.map((cat) => (
@@ -2616,6 +2756,33 @@ function App() {
             <div className="relative flex-shrink-0">
               <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
             </div>
+            {selectedIds.size > 0 && (
+              <div className="flex flex-shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-1">
+                <button
+                  onClick={() => bulkSetStyle({ bold: !selectionAllBold })}
+                  title="太字"
+                  className={classNames(
+                    "rounded px-1.5 py-0.5 text-xs font-bold transition",
+                    selectionAllBold ? "bg-white/20 text-neutral-50" : "text-neutral-300 hover:bg-white/10"
+                  )}
+                >B</button>
+                <span className="h-3.5 w-px bg-white/15" />
+                {TASK_TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.key || "default"}
+                    onClick={() => bulkSetStyle({ color: c.key })}
+                    title={c.label}
+                    className={classNames(
+                      "h-4 w-4 rounded-full border transition",
+                      selectionColor === c.key ? "border-white ring-1 ring-white/60" : "border-white/20 hover:border-white/50"
+                    )}
+                    style={c.key ? { backgroundColor: c.key } : undefined}
+                  >
+                    {!c.key && <span className="text-[8px] leading-none text-neutral-400">×</span>}
+                  </button>
+                ))}
+              </div>
+            )}
             <button onClick={() => {
               if (selectedIds.size > 0) bulkDelete();
               if (selectedTrayIds.size > 0) bulkTrayDelete();
@@ -2626,13 +2793,18 @@ function App() {
             <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
               <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
               <div className="my-1 border-t border-white/10" />
-              <button
-                onClick={bulkMoveToStock}
-                className="flex w-full items-center justify-between rounded-lg px-3 py-1.5 text-left text-xs font-medium text-violet-200 transition hover:bg-violet-400/10"
-              >
-                <span>STOCK</span>
-                <span className="text-[9px] text-neutral-500">日付を外して寝かせる</span>
-              </button>
+              <div className="px-2 pt-0.5 pb-1 text-[10px] font-semibold text-neutral-500">STOCK</div>
+              {stockViews.map((view) => (
+                <button
+                  key={view.id}
+                  onClick={() => bulkMoveToStock(view.id)}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-xs font-medium transition hover:bg-white/[0.07]"
+                  style={{ color: view.color }}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: view.color }} />
+                  <span className="min-w-0 flex-1 truncate">{view.name}</span>
+                </button>
+              ))}
               <div className="my-1 border-t border-white/10" />
               {categories.map((cat) => (
                 <div key={cat.key}>
@@ -2856,22 +3028,91 @@ function WeeklyColumn({
   );
 }
 
-// STOCK: 日付を決めずに寝かせておくタスク置き場。
-// プロジェクト所属は保ったままなので PJ ボードには出続ける。
-function StockColumn({ tasks, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, selectedTaskId, setSelectedTaskId, selectMode, selectedIds, onToggleSelect, onUnstock }) {
-  const { setNodeRef, isOver } = useDroppable({ id: "stock-zone", data: { type: "stock-zone" } });
+// STOCK ビュー: 日付を決めずに寝かせておくタスクの置き場。
+// プロジェクト所属は保ったままなので PJ ボードにも出続ける（Notion の同期ブロック的な見え方）。
+// ビュー内に親がいる場合はその下にぶら下がるので、親子階層もそのまま持ち込める。
+function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, selectedTaskId, setSelectedTaskId, selectMode, selectedIds, onToggleSelect, onUnstock, onUpdateView, onRemoveView, canRemove }) {
+  const { setNodeRef, isOver } = useDroppable({
+    id: `stock-zone-${view.id}`,
+    data: { type: "stock-zone", viewId: view.id },
+  });
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState(view.name);
+  const [showColors, setShowColors] = useState(false);
+
+  useEffect(() => { setNameDraft(view.name); }, [view.name]);
+
+  function commitName() {
+    const clean = nameDraft.trim();
+    if (clean && clean !== view.name) onUpdateView({ name: clean });
+    else setNameDraft(view.name);
+    setEditingName(false);
+  }
+
   return (
     <div
       ref={setNodeRef}
-      className={classNames(
-        "rounded-lg border bg-white/[0.02] transition",
-        isOver ? "border-violet-400/50 bg-violet-400/[0.06]" : "border-white/10"
-      )}
+      className={classNames("rounded-lg border bg-white/[0.02] transition", isOver && "brightness-125")}
+      style={{ borderColor: isOver ? view.color : "rgba(255,255,255,0.1)", backgroundColor: isOver ? `${view.color}14` : undefined }}
     >
-      <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
-        <span className="text-sm font-bold text-violet-200">STOCK</span>
-        <span className="text-[10px] text-neutral-500">{tasks.length}</span>
+      <div className="sticky top-0 flex items-center gap-1.5 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
+        <button
+          onClick={() => setShowColors((v) => !v)}
+          title="色を変える"
+          className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-white/20 transition hover:ring-white/60"
+          style={{ backgroundColor: view.color }}
+        />
+        {editingName ? (
+          <input
+            autoFocus
+            value={nameDraft}
+            onChange={(e) => setNameDraft(e.target.value)}
+            onBlur={commitName}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); commitName(); }
+              if (e.key === "Escape") { setNameDraft(view.name); setEditingName(false); }
+            }}
+            className="min-w-0 flex-1 rounded border-b border-white/25 bg-transparent text-sm font-bold outline-none"
+            style={{ color: view.color }}
+          />
+        ) : (
+          <button
+            onDoubleClick={() => setEditingName(true)}
+            title="ダブルクリックで名前を変更"
+            className="min-w-0 flex-1 truncate text-left text-sm font-bold"
+            style={{ color: view.color }}
+          >
+            {view.name}
+          </button>
+        )}
+        <span className="shrink-0 text-[10px] text-neutral-500">{tasks.length}</span>
+        {canRemove && (
+          <button
+            onClick={onRemoveView}
+            title="このビューを削除（中のタスクは消えません）"
+            className="shrink-0 rounded p-0.5 text-neutral-600 transition hover:bg-white/10 hover:text-red-300"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        )}
       </div>
+
+      {showColors && (
+        <div className="flex flex-wrap gap-1.5 border-b border-white/10 px-2 py-1.5">
+          {STOCK_VIEW_COLORS.map((c) => (
+            <button
+              key={c}
+              onClick={() => { onUpdateView({ color: c }); setShowColors(false); }}
+              className={classNames(
+                "h-4 w-4 rounded-full transition",
+                view.color === c ? "ring-2 ring-white/70" : "ring-1 ring-white/20 hover:ring-white/50"
+              )}
+              style={{ backgroundColor: c }}
+            />
+          ))}
+        </div>
+      )}
+
       <div className="flex min-h-[80px] flex-col gap-0.5 px-2 py-2">
         {tasks.length === 0 ? (
           <div className="rounded-md border border-dashed border-white/10 p-3 text-center text-[11px] leading-relaxed text-neutral-600">
@@ -2926,6 +3167,7 @@ function StockColumn({ tasks, childrenOf, categoryTone, toggleDone, upsertTask, 
     </div>
   );
 }
+
 
 function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, moveInboxItem, addInboxItem, acceptInboxItem, selectMode, selectedTrayIds, onToggleTraySelect }) {
   const [open, setOpen] = useState(true);
@@ -3303,6 +3545,16 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
   );
 }
 
+// タスク個別の見た目（色・太さ）を style 属性に落とす
+function taskTextStyle(task) {
+  const st = task?.style;
+  if (!st) return undefined;
+  const out = {};
+  if (st.color) out.color = st.color;
+  if (st.bold) out.fontWeight = 700;
+  return Object.keys(out).length ? out : undefined;
+}
+
 function autoResize(el) {
   if (!el) return;
   el.style.height = "auto";
@@ -3556,6 +3808,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 <div
                   onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
                   className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", focusPickMode ? "cursor-crosshair" : "cursor-pointer", task.status === "完了" && "line-through")}
+                  style={taskTextStyle(task)}
                 >
                   {task.title}
                 </div>
@@ -4150,7 +4403,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} style={taskTextStyle(task)} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -4314,6 +4567,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                   onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
                   title={focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集"}
                   className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
+                  style={taskTextStyle(task)}
                 >
                   {task.title}
                 </div>
