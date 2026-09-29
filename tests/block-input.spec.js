@@ -99,4 +99,16 @@ test.describe("ブロック入力", () => {
       await page.evaluate(() => document.activeElement?.hasAttribute("data-task-id"))
     ).toBe(true);
   });
+
+  // 日付つきのプレーンタスクは 7days と TRAY の両方に描画される。
+  // 両方が新規ブロックの編集を開くと、片方の blur が「空なので削除」を走らせて
+  // ブロックごと消えてしまう。開くのは1つだけであること。
+  test("複数ビューに出るタスクでも、新規ブロックのエディタは1つだけ開く", async ({ page }) => {
+    const before = (await storedTasks(page)).length;
+    await page.evaluate(() => document.querySelector("[data-daytask]").focus());
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await storedTasks(page)).length).toBe(before + 1);
+    await expect(page.locator("textarea")).toHaveCount(1);
+  });
 });
