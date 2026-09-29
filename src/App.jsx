@@ -3677,6 +3677,9 @@ function useTaskBlock({
   onDeleteEmpty,
   clickGuard,
   initialEditing = false,
+  // 前の行から送られてきたとき、編集状態にして末尾にカーソルを置く
+  autoFocusEnd = false,
+  onFocusEndDone,
 }) {
   const { focusPickMode, pickTask } = useFocusMode();
   const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
@@ -3721,6 +3724,18 @@ function useTaskBlock({
     setEditing(true);
     setDraft("");
   }, [pendingEditId, task.id]);
+
+  useEffect(() => {
+    if (!autoFocusEnd) return;
+    setEditing(true);
+    setDraft(task.title);
+    onFocusEndDone?.();
+    setTimeout(() => {
+      const el = textareaRef.current;
+      if (el) { el.focus(); focusEnd(el); }
+    }, 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoFocusEnd]);
 
   function commit() {
     const clean = normalizeTitle(draft);
@@ -3837,6 +3852,69 @@ function useTaskBlock({
   };
 }
 
+// タスク1行。ビューごとに違うのは飾り（左のボタン類・チップ・下の補助行）だけなので、
+// それだけをスロットで受け取り、行そのもの（枠・タイトル・インライン編集）はここが持つ。
+// スロットは useTaskBlock の戻り値 b を受け取る関数で、選択状態などに応じて描き分けられる。
+function TaskBlock({
+  rowClassName,
+  titleClassName,
+  textareaClassName,
+  titleWrapperClassName,
+  leading,
+  meta,
+  trailing,
+  titleExtra,
+  extraProps,
+  titleAttrs,
+  setSelectedTaskId,
+  onEmptyBlur,
+  ...blockOptions
+}) {
+  const b = useTaskBlock(blockOptions);
+  const task = blockOptions.task;
+
+  return (
+    <div {...b.blockProps} {...extraProps} className={rowClassName?.(b)}>
+      <div className="flex items-start gap-1.5">
+        {leading?.(b)}
+        <div className="min-w-0 flex-1">
+          {b.editing ? (
+            <textarea
+              {...b.textareaProps}
+              onBlur={() => {
+                // 空のまま離れたブロックは残さない（ビューによっては据え置き）
+                if (!b.commit() && onEmptyBlur) onEmptyBlur();
+                b.setEditing(false);
+              }}
+              className={textareaClassName?.(b)}
+            />
+          ) : (
+            <div className="flex min-w-0 items-start gap-1 group/title">
+              <div className={titleWrapperClassName || "min-w-0 flex-1"}>
+                <div {...b.titleProps} {...titleAttrs?.(b)} className={titleClassName?.(b)}>
+                  {task.title}
+                </div>
+                {titleExtra?.(b)}
+              </div>
+              {setSelectedTaskId && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
+                  title="詳細を開く"
+                  className="shrink-0 mt-0.5 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+          )}
+          {meta?.(b)}
+        </div>
+        {trailing?.(b)}
+      </div>
+    </div>
+  );
+}
+
 function useRefocusAfterEdit(editing, cardRef) {
   const pending = useRef(false);
   React.useLayoutEffect(() => {
@@ -3895,42 +3973,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
     ? (schedIsToday(task, toDateKey(new Date())) ? "task-in-today" : "task-in-weekly")
     : "task";
 
-  const b = useTaskBlock({
-    task,
-    dragId: `task-${task.id}`,
-    dragData: { type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId },
-    dropId: `task-drop-${task.id}`,
-    dropData: { type: dropType, id: task.id, category: task.category, project: task.project },
-    dragDisabled: selectMode,
-    upsertTask,
-    removeTask,
-    // 長押しメニューを出したときはクリック扱いにしない
-    clickGuard: () => longPressActive.current,
-    // このビューだけ、兄弟を並び順から引いて親子を決める
-    onTab: (e, { draft, setEditing }) => {
-      const titleClean = normalizeTitle(draft);
-      const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
-      const patchOnly = () => { if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch }); };
-      if (e.shiftKey) {
-        if (task.parentId) upsertTask({ id: task.id, ...titlePatch, parentId: taskMap.get(task.parentId)?.parentId ?? null });
-        else patchOnly();
-      } else if (depth < 3) {
-        const siblings = [...taskMap.values()]
-          .filter((t) => !t.archived && t.parentId === (task.parentId ?? null) && t.category === task.category && t.project === task.project)
-          .sort((x, y) => {
-            const xo = typeof x.sortOrder === "number" ? x.sortOrder : 999999;
-            const yo = typeof y.sortOrder === "number" ? y.sortOrder : 999999;
-            return xo !== yo ? xo - yo : x.title.localeCompare(y.title, "ja");
-          });
-        const prevSibling = siblings[siblings.findIndex((t) => t.id === task.id) - 1];
-        if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
-        else patchOnly();
-      } else {
-        patchOnly();
-      }
-      setEditing(false);
-    },
-  });
 
   function handlePointerDown(e) {
     if (e.pointerType !== "touch") return;
@@ -3966,60 +4008,88 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
           onClose={() => setContextMenu(null)}
         />
       )}
-      <div
-        {...b.blockProps}
-        onPointerDown={handlePointerDown}
-        onPointerUp={cancelLongPress}
-        onPointerMove={cancelLongPress}
-        onContextMenu={(e) => e.preventDefault()}
-        data-draggable
-        style={{ userSelect: "none", WebkitUserSelect: "none" }}
-        className={classNames(
+      <TaskBlock
+        task={task}
+        dragId={`task-${task.id}`}
+        dragData={{ type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId }}
+        dropId={`task-drop-${task.id}`}
+        dropData={{ type: dropType, id: task.id, category: task.category, project: task.project }}
+        dragDisabled={selectMode}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        setSelectedTaskId={setSelectedTaskId}
+        // 長押しメニューを出したときはクリック扱いにしない
+        clickGuard={() => longPressActive.current}
+        // このビューだけ、兄弟を並び順から引いて親子を決める
+        onTab={(e, { draft, setEditing }) => {
+          const titleClean = normalizeTitle(draft);
+          const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
+          const patchOnly = () => { if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch }); };
+          if (e.shiftKey) {
+            if (task.parentId) upsertTask({ id: task.id, ...titlePatch, parentId: taskMap.get(task.parentId)?.parentId ?? null });
+            else patchOnly();
+          } else if (depth < 3) {
+            const siblings = [...taskMap.values()]
+              .filter((t) => !t.archived && t.parentId === (task.parentId ?? null) && t.category === task.category && t.project === task.project)
+              .sort((x, y) => {
+                const xo = typeof x.sortOrder === "number" ? x.sortOrder : 999999;
+                const yo = typeof y.sortOrder === "number" ? y.sortOrder : 999999;
+                return xo !== yo ? xo - yo : x.title.localeCompare(y.title, "ja");
+              });
+            const prevSibling = siblings[siblings.findIndex((t) => t.id === task.id) - 1];
+            if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
+            else patchOnly();
+          } else {
+            patchOnly();
+          }
+          setEditing(false);
+        }}
+        extraProps={{
+          onPointerDown: handlePointerDown,
+          onPointerUp: cancelLongPress,
+          onPointerMove: cancelLongPress,
+          onContextMenu: (e) => e.preventDefault(),
+          "data-draggable": true,
+          style: { userSelect: "none", WebkitUserSelect: "none" },
+        }}
+        rowClassName={(b) => classNames(
           "group rounded-md border px-1.5 py-1 transition",
           b.isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : b.isOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
           b.focusRingClass,
           task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45",
-          b.isDragging && "opacity-40"
+          b.isDragging && "opacity-40",
         )}
-      >
-        <div className="flex items-start gap-1.5">
-          {selectMode && (
-            <button
-              onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }}
-              className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300"
-            >
-              {b.isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
-            </button>
-          )}
-          <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
-          {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
-          <div className="min-w-0 flex-1">
-            {b.editing ? (
-              <textarea
-                {...b.textareaProps}
-                onBlur={() => { b.commit(); b.setEditing(false); }}
-                className={classNames(
-                  "w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
-                  task.status === "完了" && "line-through"
-                )}
-              />
-            ) : (
-              <div className="flex min-w-0 items-start gap-1 group/title">
-                <div
-                  {...b.titleProps}
-                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", b.focusPickMode ? "cursor-crosshair" : "cursor-pointer", task.status === "完了" && "line-through")}
-                >
-                  {task.title}
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
-                  title="詳細を開く"
-                  className="shrink-0 mt-0.5 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"
-                >
-                  <Info className="h-3 w-3" />
-                </button>
-              </div>
+        textareaClassName={() => classNames(
+          "w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
+          task.status === "完了" && "line-through",
+        )}
+        titleClassName={(b) => classNames(
+          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]",
+          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          task.status === "完了" && "line-through",
+        )}
+        leading={(b) => (
+          <>
+            {selectMode && (
+              <button
+                onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }}
+                className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300"
+              >
+                <CheckSquare className={classNames("h-3.5 w-3.5", b.isSelected ? "text-sky-400" : "opacity-30")} />
+              </button>
             )}
+            <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">
+              {task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+            </button>
+            {hasChildren ? (
+              <button onClick={(e) => { e.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">
+                {isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+              </button>
+            ) : <span className="w-3.5 shrink-0" />}
+          </>
+        )}
+        meta={() => (
+          <>
             {task.pinnedDate && (
               <div className="mt-0.5 flex items-center gap-0.5 text-[9px] text-amber-300/80">
                 <Pin className="h-2.5 w-2.5" />
@@ -4039,12 +4109,10 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                 {task.dueDate && <span>・〆{task.dueDate.slice(5).replace("-", "/")}</span>}
               </div>
             )}
-          </div>
-          <div className="flex shrink-0 items-center gap-1">
-            {task.memo?.trim() && <FileText className="h-3 w-3 text-neutral-500" title="メモあり" />}
-          </div>
-        </div>
-      </div>
+          </>
+        )}
+        trailing={() => task.memo?.trim() && <FileText className="h-3 w-3 text-neutral-500" title="メモあり" />}
+      />
       {hasChildren && !isCollapsed && (
         <div className={classNames("flex flex-col gap-0.5", compact && "ml-2 border-l border-amber-200/10 pl-2")}>
           {children.map((child) => (
@@ -4486,31 +4554,28 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
 
-  const b = useTaskBlock({
-    task,
-    dragId: `traytask-${task.id}`,
-    dragData: { type: "task", id: task.id },
-    dropId: `traytask-drop-${task.id}`,
-    dropData: { type: "task", id: task.id },
-    dragDisabled: selectMode,
-    upsertTask,
-    removeTask,
-    // タイトルを確定してから親子を変える。同じ tick で2回 commit すると
-    // 後の書き込みが前の書き込みを消すので、間に1フレーム挟む。
-    onTab: (e, { draft, setEditing }) => {
-      const isShift = e.shiftKey;
-      const clean = draft.trim();
-      if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
-      setEditing(false);
-      setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
-    },
-  });
-
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
-      <div
-        {...b.blockProps}
-        className={classNames(
+      <TaskBlock
+        task={task}
+        dragId={`traytask-${task.id}`}
+        dragData={{ type: "task", id: task.id }}
+        dropId={`traytask-drop-${task.id}`}
+        dropData={{ type: "task", id: task.id }}
+        dragDisabled={selectMode}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        setSelectedTaskId={setSelectedTaskId}
+        // タイトルを確定してから親子を変える。同じ tick で2回書くと
+        // 後の書き込みが前を消すので、間に1フレーム挟む。
+        onTab={(e, { draft, setEditing }) => {
+          const isShift = e.shiftKey;
+          const clean = draft.trim();
+          if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
+          setEditing(false);
+          setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
+        }}
+        rowClassName={(b) => classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
           b.focusRingClass,
           selectMode ? "cursor-pointer" : b.editing ? "cursor-text" : "cursor-grab",
@@ -4519,40 +4584,28 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
           b.isDragging && "opacity-30",
           b.isOver && !b.isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
         )}
-      >
-        {selectMode ? (
+        textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
+        titleClassName={(b) => classNames(
+          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
+          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          isDone && "line-through opacity-40",
+        )}
+        leading={(b) => selectMode ? (
           <button onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300">
             <CheckSquare className={classNames("h-3 w-3", b.isSelected && "text-sky-400")} />
           </button>
         ) : (
-          <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
+          <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>
+            {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+          </button>
         )}
-        <div className="min-w-0 flex-1">
-          {b.editing ? (
-            <textarea
-              {...b.textareaProps}
-              onBlur={() => { b.commit(); b.setEditing(false); }}
-              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"
-            />
-          ) : (
-            <div className="flex min-w-0 items-start gap-1 group/title">
-              <div
-                {...b.titleProps}
-                className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text", b.focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
-              >
-                {task.title}
-              </div>
-              <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
-            </div>
-          )}
-          {task.pinnedDate && (
-            <div className="flex items-center gap-0.5 text-[9px] text-amber-300/80">
-              <Pin className="h-2.5 w-2.5" />
-              <span>{task.pinnedDate.slice(5).replace("-", "/")}</span>
-            </div>
-          )}
-        </div>
-      </div>
+        meta={() => task.pinnedDate && (
+          <div className="flex items-center gap-0.5 text-[9px] text-amber-300/80">
+            <Pin className="h-2.5 w-2.5" />
+            <span>{task.pinnedDate.slice(5).replace("-", "/")}</span>
+          </div>
+        )}
+      />
       {children.map((child, idx) => (
         <TrayTask
           key={child.id}
@@ -4583,45 +4636,33 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
 
-  const b = useTaskBlock({
-    task,
-    dragId: `daytask-${task.id}`,
-    dragData: { type: "task", id: task.id },
-    dropId: `daytask-drop-${task.id}`,
-    // 別タスクをこのタスクに重ねると親子化する（プロジェクトにも反映）
-    dropData: { type: "task-in-day", id: task.id },
-    upsertTask,
-    removeTask,
-    // 7days だけは、空ブロックを消したら前の行を「編集状態で末尾にカーソル」で開く
-    onDeleteEmpty: (id) => onDeleteFocusPrev?.(id),
-    onTab: (e, { draft, setEditing }) => {
-      const isShift = e.shiftKey;
-      const clean = (draft || "").trim();
-      if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
-      setEditing(false);
-      // 同じ tick で2回書くと後の書き込みが前を消すので1フレーム空ける
-      setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
-    },
-  });
-
-  // 前の行から送られてきたら、編集状態にして末尾にカーソルを置く
-  useEffect(() => {
-    if (!autoFocusEnd) return;
-    b.setEditing(true);
-    b.setDraft(task.title);
-    onFocusEndDone?.();
-    setTimeout(() => {
-      const el = b.textareaRef.current;
-      if (el) { el.focus(); focusEnd(el); }
-    }, 0);
-  }, [autoFocusEnd]);
-
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
-      <div
-        {...b.blockProps}
-        data-daytask="true"
-        className={classNames(
+      <TaskBlock
+        task={task}
+        dragId={`daytask-${task.id}`}
+        dragData={{ type: "task", id: task.id }}
+        dropId={`daytask-drop-${task.id}`}
+        // 別タスクをこのタスクに重ねると親子化する（プロジェクトにも反映）
+        dropData={{ type: "task-in-day", id: task.id }}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        autoFocusEnd={autoFocusEnd}
+        onFocusEndDone={onFocusEndDone}
+        // 7days だけは、空ブロックを消したら前の行を編集状態で末尾にカーソルを置いて開く
+        onDeleteEmpty={(id) => onDeleteFocusPrev?.(id)}
+        onEmptyBlur={() => removeTask?.(task.id)}
+        onTab={(e, { draft, setEditing }) => {
+          const isShift = e.shiftKey;
+          const clean = (draft || "").trim();
+          if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
+          setEditing(false);
+          // 同じ tick で2回書くと後の書き込みが前を消すので1フレーム空ける
+          setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
+        }}
+        setSelectedTaskId={setSelectedTaskId}
+        extraProps={{ "data-daytask": "true" }}
+        rowClassName={(b) => classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
           b.focusRingClass,
           b.editing ? "cursor-text" : "cursor-grab",
@@ -4630,50 +4671,30 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           b.isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
           b.isDragging && "opacity-30",
         )}
-      >
-        <button
-          onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
-          className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
-        >
-          {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
-        </button>
-        <div className="min-w-0 flex-1">
-          {b.editing ? (
-            <textarea
-              {...b.textareaProps}
-              onBlur={() => { if (!b.commit()) removeTask?.(task.id); b.setEditing(false); }}
-              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"
-            />
-          ) : (
-            <div className="flex min-w-0 items-start gap-1 group/title">
-              <div className="min-w-0 flex-1">
-                <div
-                  {...b.titleProps}
-                  title={b.focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集"}
-                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text", b.focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
-                >
-                  {task.title}
-                </div>
-                {showProjectChip && task.project && (
-                  <span className={classNames("mt-0.5 inline-block rounded border px-1 py-px text-[9px] leading-none", tone.panel, tone.accent)}>
-                    {task.project}
-                  </span>
-                )}
-              </div>
-              <button
-                onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }}
-                title="詳細を開く"
-                className="shrink-0 mt-0.5 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"
-              >
-                <Info className="h-3 w-3" />
-              </button>
-            </div>
-          )}
-          {!showProjectChip && task.project && depth === 0 && !hideProject && (
-            <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
-          )}
-        </div>
-      </div>
+        textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"}
+        titleClassName={(b) => classNames(
+          "break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text",
+          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          isDone && "line-through opacity-40",
+        )}
+        titleAttrs={(b) => ({ title: b.focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集" })}
+        leading={() => (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+          >
+            {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+          </button>
+        )}
+        titleExtra={() => showProjectChip && task.project && (
+          <span className={classNames("mt-0.5 inline-block rounded border px-1 py-px text-[9px] leading-none", tone.panel, tone.accent)}>
+            {task.project}
+          </span>
+        )}
+        meta={() => !showProjectChip && task.project && depth === 0 && !hideProject && (
+          <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
+        )}
+      />
       {children.map((child) => (
         <DayTask
           key={child.id}
