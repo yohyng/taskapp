@@ -130,6 +130,20 @@ const TASK_TEXT_COLORS = [
   { key: "#f472b6", label: "桃" },
 ];
 
+// ブロック種別。task 以外は「やること」ではなく、リストを構造化するための行。
+const BLOCK_TYPES = {
+  task: { label: "タスク", checkbox: true, text: true },
+  heading: { label: "見出し", checkbox: false, text: true },
+  callout: { label: "コールアウト", checkbox: false, text: true },
+  divider: { label: "区切り線", checkbox: false, text: false },
+};
+function blockTypeOf(task) {
+  return BLOCK_TYPES[task?.blockType] ? task.blockType : "task";
+}
+function isTaskBlockType(task) {
+  return blockTypeOf(task) === "task";
+}
+
 // スラッシュコマンド。編集中に "/" で開き、キーワードで絞って Enter で実行する。
 // run は { task, ctx } を受け取り、ctx からアプリ側の操作を呼ぶ。
 const SLASH_COMMANDS = [
@@ -169,6 +183,22 @@ const SLASH_COMMANDS = [
   {
     key: "color-reset", label: "色: 既定", hint: "文字色を戻す", keywords: "color reset iro 色 既定",
     run: ({ task, ctx }) => ctx.setStyle(task, { color: "" }),
+  },
+  {
+    key: "heading", label: "見出し", hint: "セクションの見出しに", keywords: "heading midashi 見出し h1 section",
+    run: ({ task, ctx }) => ctx.setBlockType(task, "heading"),
+  },
+  {
+    key: "callout", label: "コールアウト", hint: "メモとして目立たせる", keywords: "callout memo note メモ 補足",
+    run: ({ task, ctx }) => ctx.setBlockType(task, "callout"),
+  },
+  {
+    key: "divider", label: "区切り線", hint: "リストを区切る", keywords: "divider line kugiri 区切り 線 hr",
+    run: ({ task, ctx }) => ctx.setBlockType(task, "divider"),
+  },
+  {
+    key: "to-task", label: "タスクに戻す", hint: "ふつうのタスクに", keywords: "task todo タスク 戻す",
+    run: ({ task, ctx }) => ctx.setBlockType(task, "task"),
   },
   {
     key: "delete", label: "削除", hint: "このブロックを消す", keywords: "delete remove sakujo 削除",
@@ -447,6 +477,7 @@ function normalizeTask(task) {
     stock: false,
     stockViewId: null,
     style: null,
+    blockType: "task",
     ...task,
   };
 }
@@ -468,6 +499,57 @@ function useSelection() {
 const BlockEditContext = React.createContext({ addBlockBelow: null, pendingEditId: null, claimPendingEdit: null });
 function useBlockEdit() {
   return React.useContext(BlockEditContext);
+}
+
+// "/" コマンドの検出とメニュー操作。ブロックのエディタでも、列の「追加…」欄でも使う。
+// onPick には選ばれたコマンドと、"/query" を取り除いた残りの文字列を渡す。
+function useSlashQuery({ enabled = true, onPick }) {
+  const [slash, setSlash] = useState(null); // { from, query, index }
+  const matches = slash ? matchSlashCommands(slash.query) : [];
+
+  // 入力のたびに "/" の開始位置と絞り込み語を追う
+  function detect(value, caret) {
+    if (!enabled) return;
+    const at = caret ?? value.length;
+    if (slash) {
+      // "/" が消えた、または空白が入ったら閉じる
+      if (value[slash.from] !== "/" || at <= slash.from) { setSlash(null); return; }
+      const q = value.slice(slash.from + 1, at);
+      if (/\s/.test(q)) { setSlash(null); return; }
+      setSlash({ ...slash, query: q, index: 0 });
+      return;
+    }
+    if (value[at - 1] !== "/") return;
+    // 行頭か空白の直後の "/" だけをコマンド開始とみなす
+    const prev = value[at - 2];
+    if (prev === undefined || /\s/.test(prev)) setSlash({ from: at - 1, query: "", index: 0 });
+  }
+
+  function pick(cmd, value) {
+    const rest = (value.slice(0, slash.from) + value.slice(slash.from + 1 + slash.query.length)).trim();
+    setSlash(null);
+    onPick(cmd, rest);
+  }
+
+  // メニューが開いている間のキー操作。処理したら true を返す。
+  function handleKeyDown(e, value) {
+    if (!slash) return false;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (matches.length) setSlash({ ...slash, index: (slash.index + (e.key === "ArrowDown" ? 1 : matches.length - 1)) % matches.length });
+      return true;
+    }
+    if (e.key === "Enter") {
+      e.preventDefault();
+      const cmd = matches[slash.index];
+      if (cmd) pick(cmd, value); else setSlash(null);
+      return true;
+    }
+    if (e.key === "Escape") { e.preventDefault(); setSlash(null); return true; }
+    return false;
+  }
+
+  return { slash, setSlash, matches, detect, pick, handleKeyDown };
 }
 
 // スラッシュコマンドの実行に必要なアプリ側の操作をブロックへ配る
@@ -1804,13 +1886,16 @@ function App() {
   const MAX_DEPTH = 3;
 
   function rootTasksForProject(category, project) {
+    // sortOrder を持たないものは配列順（＝入れた順）に並べる。
+    // タイトル順にすると見出しや区切り線が勝手に動いて、区切りとして機能しない。
+    const order = new Map(tasks.map((t, i) => [t.id, i]));
     return tasksForCategory(category)
       .filter((task) => task.project === project && !task.parentId && !task.plain)
       .sort((a, b) => {
         const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
         const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
         if (ao !== bo) return ao - bo;
-        return a.title.localeCompare(b.title, "ja");
+        return (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0);
       });
   }
 
@@ -2257,19 +2342,36 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIds, selectedTrayIds]);
 
-  const slashValue = useMemo(() => ({
+  // コマンドは非同期に走ることがある（追加欄では作成の次フレーム）。
+  // useMemo で固めると古い tasks を掴んだ upsertTask が残り、
+  // 直前に作ったタスクが「見つからない」扱いになって patch が捨てられる。
+  // 参照は毎レンダー差し替え、外向きの関数だけ同一にしておく。
+  const slashHandlers = useRef(null);
+  slashHandlers.current = {
     upsertTask,
     removeTask,
     toggleDone,
     defaultStockViewId: stockViews[0]?.id,
+    setBlockType: (task, blockType) => {
+      // 区切り線は本文を持たないので、タイトルは種別名で置いておく
+      const patch = { id: task.id, blockType };
+      if (blockType === "divider") patch.title = "———";
+      upsertTask(patch);
+    },
     setStyle: (task, patch) => {
       const next = { ...(task.style || {}), ...patch };
       Object.keys(next).forEach((k) => { if (!next[k]) delete next[k]; });
       upsertTask({ id: task.id, style: Object.keys(next).length ? next : null });
     },
-  // upsertTask / removeTask / toggleDone は毎レンダー同一の関数宣言なので依存に入れない
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [stockViews]);
+  };
+  const slashValue = useMemo(() => ({
+    upsertTask: (...a) => slashHandlers.current.upsertTask(...a),
+    removeTask: (...a) => slashHandlers.current.removeTask(...a),
+    toggleDone: (...a) => slashHandlers.current.toggleDone(...a),
+    setBlockType: (...a) => slashHandlers.current.setBlockType(...a),
+    setStyle: (...a) => slashHandlers.current.setStyle(...a),
+    get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
+  }), []);
 
   const selectionValue = useMemo(() => ({
     selectedIds,
@@ -3599,9 +3701,10 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
   const { setNodeRef: projDropRef, isOver } = useDroppable({ id: `proj-drop-${category}-${project}`, data: { type: "project", category, project } });
   const { attributes: projDragAttrs, listeners: projDragListeners, setNodeRef: projDragRef, isDragging: isProjDragging } = useDraggable({ id: `proj-drag-${category}-${project}`, data: { type: "project", category, project } });
 
-  function create() {
-    const task = addTask({ title: newTitle || "新規タスク", category, project });
+  function create(titleArg) {
+    const task = addTask({ title: (titleArg ?? newTitle) || "新規タスク", category, project });
     if (task) setNewTitle("");
+    return task;
   }
 
   return (
@@ -3647,7 +3750,13 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
         <div className="flex flex-col gap-0.5">
           <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} />)}</AnimatePresence>
           <div className="mt-1 flex gap-1">
-            <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="このProjectに追加" className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20" />
+            <AddBlockInput
+              value={newTitle}
+              onChange={setNewTitle}
+              onSubmit={(title) => create(title)}
+              placeholder="このProjectに追加"
+              className="w-full rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20"
+            />
             <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
           </div>
         </div>
@@ -3765,9 +3874,17 @@ function useTaskBlock({
   const { selectedIds, toggleTask } = useSelection();
   const slashCtx = useSlash();
 
-  // "/" で開くコマンドメニュー。開始位置を覚えておき、以降の入力で絞り込む。
-  const [slash, setSlash] = useState(null); // { from, query, index }
-  const slashMatches = slash ? matchSlashCommands(slash.query) : [];
+  // "/" で開くコマンドメニュー
+  const sq = useSlashQuery({
+    enabled: !!slashCtx,
+    onPick: (cmd, rest) => {
+      setEditing(false);
+      // タイトルが残っていれば先に確定してからコマンドを走らせる
+      if (rest && rest !== task.title) upsertTask?.({ id: task.id, title: rest });
+      else if (!rest && !task.title) { removeTask?.(task.id); return; }
+      cmd.run({ task, ctx: slashCtx });
+    },
+  });
 
   const cardRef = useRef(null);
   const textareaRef = useRef(null);
@@ -3863,37 +3980,9 @@ function useTaskBlock({
     }
   }
 
-  // コマンド確定: "/xxx" の部分を消してから実行する
-  function runSlash(cmd) {
-    const before = draft.slice(0, slash.from);
-    const after = draft.slice(slash.from + 1 + slash.query.length);
-    const rest = (before + after).trim();
-    setSlash(null);
-    setEditing(false);
-    // タイトルが残っていれば先に確定してからコマンドを走らせる
-    if (rest && rest !== task.title) upsertTask?.({ id: task.id, title: rest });
-    else if (!rest && !task.title) { removeTask?.(task.id); return; }
-    cmd.run({ task, ctx: slashCtx });
-  }
-
   function onTextareaKeyDown(e) {
     // メニューが開いている間はそちらの操作を優先する
-    if (slash) {
-      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-        e.preventDefault();
-        const n = slashMatches.length;
-        if (n) setSlash({ ...slash, index: (slash.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n });
-        return;
-      }
-      if (e.key === "Enter") {
-        e.preventDefault();
-        const cmd = slashMatches[slash.index];
-        if (cmd) runSlash(cmd);
-        else setSlash(null);
-        return;
-      }
-      if (e.key === "Escape") { e.preventDefault(); setSlash(null); return; }
-    }
+    if (sq.handleKeyDown(e, draft)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       // 空のまま確定したブロックは残さない
@@ -3943,22 +4032,9 @@ function useTaskBlock({
     ref: (el) => { textareaRef.current = el; autoResize(el); },
     onFocus: (e) => focusEnd(e.target),
     onChange: (e) => {
-      const v = e.target.value;
-      setDraft(v);
+      setDraft(e.target.value);
       autoResize(e.target);
-      if (!slashCtx) return;
-      const caret = e.target.selectionStart ?? v.length;
-      if (slash) {
-        // "/" が消えた、または空白が入ったら閉じる
-        if (v[slash.from] !== "/" || caret <= slash.from) { setSlash(null); return; }
-        const q = v.slice(slash.from + 1, caret);
-        if (/\s/.test(q)) { setSlash(null); return; }
-        setSlash({ ...slash, query: q, index: 0 });
-      } else if (v[caret - 1] === "/") {
-        // 行頭か空白の直後の "/" だけをコマンド開始とみなす
-        const prev = v[caret - 2];
-        if (prev === undefined || /\s/.test(prev)) setSlash({ from: caret - 1, query: "", index: 0 });
-      }
+      sq.detect(e.target.value, e.target.selectionStart);
     },
     onKeyDown: onTextareaKeyDown,
     onClick: (e) => e.stopPropagation(),
@@ -3967,7 +4043,7 @@ function useTaskBlock({
   };
 
   // メニューを開いたまま外れたら閉じる
-  useEffect(() => { if (!editing && slash) setSlash(null); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!editing && sq.slash) sq.setSlash(null); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const titleProps = {
     onDoubleClick: (e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); },
@@ -3983,13 +4059,15 @@ function useTaskBlock({
     cardRef, textareaRef,
     blockProps, textareaProps, titleProps, focusRingClass,
     commit, removeAndLeave,
-    slash, slashMatches, runSlash, setSlash,
+    slash: sq.slash, slashMatches: sq.matches,
+    runSlash: (cmd) => sq.pick(cmd, draft),
   };
 }
 
 // "/" で開くコマンドメニュー。編集中の textarea の直下に出す。
-function SlashMenu({ block }) {
-  const { slash, slashMatches, runSlash } = block;
+function SlashMenu({ slash, matches, onPick }) {
+  const slashMatches = matches;
+  const runSlash = onPick;
   if (!slashMatches.length) {
     return (
       <div className="absolute left-0 top-full z-[120] mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 text-[11px] text-neutral-500 shadow-2xl">
@@ -4021,6 +4099,44 @@ function SlashMenu({ block }) {
   );
 }
 
+// 列末尾の「追加…」欄。ここでも "/" でコマンドを出せるようにして、
+// 「書きながら仕分ける」流れをブロックの中と揃える。
+function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inputRef }) {
+  const slashCtx = useSlash();
+  const sq = useSlashQuery({
+    enabled: !!slashCtx,
+    onPick: (cmd, rest) => {
+      // 残りの文字列でタスクを作ってから、そのタスクにコマンドを当てる。
+      // 作成とコマンドを同じ tick で書くと、後の書き込みが作成前の状態を
+      // 元にしてしまい無視されるので、1フレーム空ける。
+      const created = onSubmit(rest || "新規タスク");
+      onChange("");
+      if (created) setTimeout(() => cmd.run({ task: created, ctx: slashCtx }), 0);
+    },
+  });
+
+  return (
+    <div className="relative min-w-0 flex-1">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => { onChange(e.target.value); sq.detect(e.target.value, e.target.selectionStart); }}
+        onKeyDown={(e) => {
+          if (sq.handleKeyDown(e, value)) return;
+          if (e.key === "Enter") {
+            e.preventDefault();
+            if (value.trim()) { onSubmit(value.trim()); onChange(""); }
+          }
+        }}
+        onBlur={() => { if (!sq.slash) sq.setSlash(null); }}
+        placeholder={placeholder}
+        className={className}
+      />
+      {sq.slash && <SlashMenu slash={sq.slash} matches={sq.matches} onPick={(cmd) => sq.pick(cmd, value)} />}
+    </div>
+  );
+}
+
 // タスク1行。ビューごとに違うのは飾り（左のボタン類・チップ・下の補助行）だけなので、
 // それだけをスロットで受け取り、行そのもの（枠・タイトル・インライン編集）はここが持つ。
 // スロットは useTaskBlock の戻り値 b を受け取る関数で、選択状態などに応じて描き分けられる。
@@ -4041,11 +4157,38 @@ function TaskBlock({
 }) {
   const b = useTaskBlock(blockOptions);
   const task = blockOptions.task;
+  const kind = blockTypeOf(task);
+
+  // 区切り線は本文を持たない。選択とドラッグはできるので行そのものは残す。
+  if (kind === "divider") {
+    return (
+      <div
+        {...b.blockProps}
+        {...extraProps}
+        className={classNames(
+          "group flex items-center px-1.5 py-1.5 outline-none",
+          b.focusRingClass,
+          b.isSelected && "rounded bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isDragging && "opacity-30",
+        )}
+      >
+        <span className="h-px w-full shrink-0 bg-current opacity-40" />
+      </div>
+    );
+  }
 
   return (
-    <div {...b.blockProps} {...extraProps} className={rowClassName?.(b)}>
+    <div
+      {...b.blockProps}
+      {...extraProps}
+      className={classNames(
+        rowClassName?.(b),
+        kind === "callout" && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
+      )}
+    >
       <div className="flex items-start gap-1.5">
-        {leading?.(b)}
+        {kind === "callout" && <span className="mt-0.5 shrink-0 text-[11px] leading-none">💡</span>}
+        {BLOCK_TYPES[kind].checkbox && leading?.(b)}
         <div className="min-w-0 flex-1">
           {b.editing ? (
             <div className="relative">
@@ -4059,13 +4202,19 @@ function TaskBlock({
                   b.setEditing(false);
                 }}
                 className={textareaClassName?.(b)}
+                style={kind === "heading" ? { fontSize: 14, fontWeight: 700 } : undefined}
               />
-              {b.slash && <SlashMenu block={b} />}
+              {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} />}
             </div>
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
               <div className={titleWrapperClassName || "min-w-0 flex-1"}>
-                <div {...b.titleProps} {...titleAttrs?.(b)} className={titleClassName?.(b)}>
+                <div
+                  {...b.titleProps}
+                  {...titleAttrs?.(b)}
+                  className={titleClassName?.(b)}
+                  style={{ ...b.titleProps.style, ...(kind === "heading" ? { fontSize: 14, fontWeight: 700, letterSpacing: "0.01em" } : null) }}
+                >
                   {task.title}
                 </div>
                 {titleExtra?.(b)}
@@ -4393,12 +4542,13 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     return rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey });
   }
 
-  function handleAdd(dateKey) {
-    const title = (newTitles[dateKey] || "").trim();
-    if (!title) return;
+  function handleAdd(dateKey, titleArg) {
+    const title = (titleArg ?? newTitles[dateKey] ?? "").trim();
+    if (!title) return null;
     // addTask は App 側の commitTasks を内包しているので、scheduledDate を含むタスクを渡す
-    addTask({ title, category: "", project: "", scheduledDate: dateKey, plain: true, today: false, thisWeek: false });
+    const created = addTask({ title, category: "", project: "", scheduledDate: dateKey, plain: true, today: false, thisWeek: false });
     setNewTitles((prev) => ({ ...prev, [dateKey]: "" }));
+    return created;
   }
 
   const [forceHorizontal, setForceHorizontal] = useState(false);
@@ -4522,7 +4672,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       childrenOf,
       newTitle: newTitles[dateKey] || "",
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
-      onAdd: () => handleAdd(dateKey),
+      onAdd: (title) => handleAdd(dateKey, title),
       toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject,
     };
   };
@@ -5056,21 +5206,13 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
 
       {/* 追加入力（最後のタスクのすぐ下） */}
       <div className="mt-0.5 flex gap-1">
-        <input
-          ref={addInputRef}
+        <AddBlockInput
+          inputRef={addInputRef}
           value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              if (newTitle.trim()) {
-                onAdd();
-                setTimeout(() => addInputRef.current?.focus(), 0);
-              }
-            }
-          }}
+          onChange={setNewTitle}
+          onSubmit={(title) => { const t = onAdd(title); setTimeout(() => addInputRef.current?.focus(), 0); return t; }}
           placeholder="追加…"
-          className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20 focus:bg-white/[0.025]"
+          className="w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-[10px] outline-none placeholder:text-neutral-700 focus:border-white/20 focus:bg-white/[0.025]"
         />
         <button onClick={onAdd} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 hover:bg-white/10 hover:text-neutral-200">
           <Plus className="h-3 w-3" />
