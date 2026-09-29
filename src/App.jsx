@@ -118,6 +118,74 @@ const DEFAULT_PROJECT_RULES = {
 const DEFAULT_PROJECT_ORDER = {};
 
 // STOCK ビュー: 日付を決めずに寝かせるタスクの置き場。任意に増やせて色を変えられる。
+// タスク個別の見た目
+const TASK_TEXT_COLORS = [
+  { key: "", label: "既定" },
+  { key: "#f87171", label: "赤" },
+  { key: "#fb923c", label: "橙" },
+  { key: "#fbbf24", label: "黄" },
+  { key: "#34d399", label: "緑" },
+  { key: "#60a5fa", label: "青" },
+  { key: "#a78bfa", label: "紫" },
+  { key: "#f472b6", label: "桃" },
+];
+
+// スラッシュコマンド。編集中に "/" で開き、キーワードで絞って Enter で実行する。
+// run は { task, ctx } を受け取り、ctx からアプリ側の操作を呼ぶ。
+const SLASH_COMMANDS = [
+  {
+    key: "today", label: "今日", hint: "今日に置く", keywords: "today kyou きょう 今日",
+    run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: toDateKey(new Date()), today: false, thisWeek: false }),
+  },
+  {
+    key: "tomorrow", label: "明日", hint: "明日に置く", keywords: "tomorrow ashita あした 明日",
+    run: ({ task, ctx }) => {
+      const d = new Date();
+      d.setDate(d.getDate() + 1);
+      ctx.upsertTask({ id: task.id, scheduledDate: toDateKey(d), today: false, thisWeek: false });
+    },
+  },
+  {
+    key: "stock", label: "STOCK", hint: "日付を外して寝かせる", keywords: "stock すとっく あとで later",
+    run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, stock: true, stockViewId: ctx.defaultStockViewId, scheduledDate: "", today: false, thisWeek: false }),
+  },
+  {
+    key: "unschedule", label: "日付を外す", hint: "予定なしに戻す", keywords: "clear unschedule hizuke 日付",
+    run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
+  },
+  {
+    key: "done", label: "完了", hint: "完了にする", keywords: "done complete kanryou 完了",
+    run: ({ task, ctx }) => ctx.toggleDone(task),
+  },
+  {
+    key: "bold", label: "太字", hint: "太字にする", keywords: "bold futoji 太字",
+    run: ({ task, ctx }) => ctx.setStyle(task, { bold: !task.style?.bold }),
+  },
+  ...TASK_TEXT_COLORS.filter((c) => c.key).map((c) => ({
+    key: `color-${c.key}`, label: `色: ${c.label}`, hint: "文字色を変える", keywords: `color iro 色 ${c.label}`,
+    swatch: c.key,
+    run: ({ task, ctx }) => ctx.setStyle(task, { color: c.key }),
+  })),
+  {
+    key: "color-reset", label: "色: 既定", hint: "文字色を戻す", keywords: "color reset iro 色 既定",
+    run: ({ task, ctx }) => ctx.setStyle(task, { color: "" }),
+  },
+  {
+    key: "delete", label: "削除", hint: "このブロックを消す", keywords: "delete remove sakujo 削除",
+    danger: true,
+    run: ({ task, ctx }) => ctx.removeTask(task.id),
+  },
+];
+
+// "/" 以降の文字でコマンドを絞る
+function matchSlashCommands(query) {
+  const q = (query || "").trim().toLowerCase();
+  if (!q) return SLASH_COMMANDS;
+  return SLASH_COMMANDS.filter(
+    (c) => c.label.toLowerCase().includes(q) || c.keywords.toLowerCase().includes(q)
+  );
+}
+
 const STOCK_VIEW_COLORS = [
   "#a78bfa", // violet
   "#60a5fa", // blue
@@ -146,17 +214,6 @@ const APP_THEME_PRESETS = [
   { name: "薄灰", bg: "#e8e8ea", text: "#18181b" },
 ];
 
-// タスク個別の見た目
-const TASK_TEXT_COLORS = [
-  { key: "", label: "既定" },
-  { key: "#f87171", label: "赤" },
-  { key: "#fb923c", label: "橙" },
-  { key: "#fbbf24", label: "黄" },
-  { key: "#34d399", label: "緑" },
-  { key: "#60a5fa", label: "青" },
-  { key: "#a78bfa", label: "紫" },
-  { key: "#f472b6", label: "桃" },
-];
 const NO_CATEGORY_LABEL = "---";
 
 const TONES = ["rose", "purple", "blue", "amber", "green", "cyan", "orange", "neutral"];
@@ -411,6 +468,12 @@ function useSelection() {
 const BlockEditContext = React.createContext({ addBlockBelow: null, pendingEditId: null, claimPendingEdit: null });
 function useBlockEdit() {
   return React.useContext(BlockEditContext);
+}
+
+// スラッシュコマンドの実行に必要なアプリ側の操作をブロックへ配る
+const SlashContext = React.createContext(null);
+function useSlash() {
+  return React.useContext(SlashContext);
 }
 
 // DOM 順で前後のブロックへフォーカスを移す（全ビュー共通で data-task-id を持つ）
@@ -2194,6 +2257,20 @@ function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [selectedIds, selectedTrayIds]);
 
+  const slashValue = useMemo(() => ({
+    upsertTask,
+    removeTask,
+    toggleDone,
+    defaultStockViewId: stockViews[0]?.id,
+    setStyle: (task, patch) => {
+      const next = { ...(task.style || {}), ...patch };
+      Object.keys(next).forEach((k) => { if (!next[k]) delete next[k]; });
+      upsertTask({ id: task.id, style: Object.keys(next).length ? next : null });
+    },
+  // upsertTask / removeTask / toggleDone は毎レンダー同一の関数宣言なので依存に入れない
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), [stockViews]);
+
   const selectionValue = useMemo(() => ({
     selectedIds,
     toggleTask: onToggleSelect,
@@ -2201,6 +2278,7 @@ function App() {
 
   return (
     <SelectionContext.Provider value={selectionValue}>
+    <SlashContext.Provider value={slashValue}>
     <BlockEditContext.Provider value={blockEditValue}>
     <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
@@ -2949,6 +3027,7 @@ function App() {
     </DndContext>
     </FocusModeContext.Provider>
     </BlockEditContext.Provider>
+    </SlashContext.Provider>
     </SelectionContext.Provider>
   );
 }
@@ -3684,6 +3763,11 @@ function useTaskBlock({
   const { focusPickMode, pickTask } = useFocusMode();
   const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
   const { selectedIds, toggleTask } = useSelection();
+  const slashCtx = useSlash();
+
+  // "/" で開くコマンドメニュー。開始位置を覚えておき、以降の入力で絞り込む。
+  const [slash, setSlash] = useState(null); // { from, query, index }
+  const slashMatches = slash ? matchSlashCommands(slash.query) : [];
 
   const cardRef = useRef(null);
   const textareaRef = useRef(null);
@@ -3779,7 +3863,37 @@ function useTaskBlock({
     }
   }
 
+  // コマンド確定: "/xxx" の部分を消してから実行する
+  function runSlash(cmd) {
+    const before = draft.slice(0, slash.from);
+    const after = draft.slice(slash.from + 1 + slash.query.length);
+    const rest = (before + after).trim();
+    setSlash(null);
+    setEditing(false);
+    // タイトルが残っていれば先に確定してからコマンドを走らせる
+    if (rest && rest !== task.title) upsertTask?.({ id: task.id, title: rest });
+    else if (!rest && !task.title) { removeTask?.(task.id); return; }
+    cmd.run({ task, ctx: slashCtx });
+  }
+
   function onTextareaKeyDown(e) {
+    // メニューが開いている間はそちらの操作を優先する
+    if (slash) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const n = slashMatches.length;
+        if (n) setSlash({ ...slash, index: (slash.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n });
+        return;
+      }
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const cmd = slashMatches[slash.index];
+        if (cmd) runSlash(cmd);
+        else setSlash(null);
+        return;
+      }
+      if (e.key === "Escape") { e.preventDefault(); setSlash(null); return; }
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       // 空のまま確定したブロックは残さない
@@ -3828,12 +3942,32 @@ function useTaskBlock({
     value: draft,
     ref: (el) => { textareaRef.current = el; autoResize(el); },
     onFocus: (e) => focusEnd(e.target),
-    onChange: (e) => { setDraft(e.target.value); autoResize(e.target); },
+    onChange: (e) => {
+      const v = e.target.value;
+      setDraft(v);
+      autoResize(e.target);
+      if (!slashCtx) return;
+      const caret = e.target.selectionStart ?? v.length;
+      if (slash) {
+        // "/" が消えた、または空白が入ったら閉じる
+        if (v[slash.from] !== "/" || caret <= slash.from) { setSlash(null); return; }
+        const q = v.slice(slash.from + 1, caret);
+        if (/\s/.test(q)) { setSlash(null); return; }
+        setSlash({ ...slash, query: q, index: 0 });
+      } else if (v[caret - 1] === "/") {
+        // 行頭か空白の直後の "/" だけをコマンド開始とみなす
+        const prev = v[caret - 2];
+        if (prev === undefined || /\s/.test(prev)) setSlash({ from: caret - 1, query: "", index: 0 });
+      }
+    },
     onKeyDown: onTextareaKeyDown,
     onClick: (e) => e.stopPropagation(),
     onPointerDown: (e) => e.stopPropagation(),
     onMouseDown: (e) => e.stopPropagation(),
   };
+
+  // メニューを開いたまま外れたら閉じる
+  useEffect(() => { if (!editing && slash) setSlash(null); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const titleProps = {
     onDoubleClick: (e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); },
@@ -3849,7 +3983,42 @@ function useTaskBlock({
     cardRef, textareaRef,
     blockProps, textareaProps, titleProps, focusRingClass,
     commit, removeAndLeave,
+    slash, slashMatches, runSlash, setSlash,
   };
+}
+
+// "/" で開くコマンドメニュー。編集中の textarea の直下に出す。
+function SlashMenu({ block }) {
+  const { slash, slashMatches, runSlash } = block;
+  if (!slashMatches.length) {
+    return (
+      <div className="absolute left-0 top-full z-[120] mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 text-[11px] text-neutral-500 shadow-2xl">
+        該当なし
+      </div>
+    );
+  }
+  return (
+    <div className="absolute left-0 top-full z-[120] mt-1 max-h-56 w-56 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl">
+      {slashMatches.map((cmd, i) => (
+        <button
+          key={cmd.key}
+          // blur より先に拾わないとメニューが閉じてしまう
+          onMouseDown={(e) => { e.preventDefault(); runSlash(cmd); }}
+          className={classNames(
+            "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] transition",
+            i === slash.index ? "bg-white/15 ts-text" : "text-neutral-300 hover:bg-white/[0.07]",
+            cmd.danger && "text-red-300",
+          )}
+        >
+          {cmd.swatch
+            ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: cmd.swatch }} />
+            : <span className="h-2.5 w-2.5 shrink-0" />}
+          <span className="min-w-0 flex-1 truncate font-medium">{cmd.label}</span>
+          <span className="shrink-0 text-[9px] text-neutral-600">{cmd.hint}</span>
+        </button>
+      ))}
+    </div>
+  );
 }
 
 // タスク1行。ビューごとに違うのは飾り（左のボタン類・チップ・下の補助行）だけなので、
@@ -3879,15 +4048,20 @@ function TaskBlock({
         {leading?.(b)}
         <div className="min-w-0 flex-1">
           {b.editing ? (
-            <textarea
-              {...b.textareaProps}
-              onBlur={() => {
-                // 空のまま離れたブロックは残さない（ビューによっては据え置き）
-                if (!b.commit() && onEmptyBlur) onEmptyBlur();
-                b.setEditing(false);
-              }}
-              className={textareaClassName?.(b)}
-            />
+            <div className="relative">
+              <textarea
+                {...b.textareaProps}
+                onBlur={() => {
+                  // メニュー操作でフォーカスが外れただけのときは閉じない
+                  if (b.slash) return;
+                  // 空のまま離れたブロックは残さない（ビューによっては据え置き）
+                  if (!b.commit() && onEmptyBlur) onEmptyBlur();
+                  b.setEditing(false);
+                }}
+                className={textareaClassName?.(b)}
+              />
+              {b.slash && <SlashMenu block={b} />}
+            </div>
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
               <div className={titleWrapperClassName || "min-w-0 flex-1"}>
