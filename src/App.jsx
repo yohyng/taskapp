@@ -41,6 +41,7 @@ import {
   FileText,
   Info,
   Pin,
+  Pencil,
   Focus,
   Airplay,
 } from "lucide-react";
@@ -129,6 +130,21 @@ const STOCK_VIEW_COLORS = [
 ];
 const DEFAULT_STOCK_VIEWS = [{ id: "stock", name: "STOCK", color: STOCK_VIEW_COLORS[0] }];
 const STOCK_VIEWS_SETTING_KEY = "stock_views";
+
+// アプリ全体の配色。--ts-bg / --ts-text に流し込むと、面や枠は
+// alpha 指定なので自動で追従する。
+const APP_THEME_SETTING_KEY = "app_theme";
+const DEFAULT_APP_THEME = { bg: "#0a0a0a", text: "#f5f5f5" };
+const APP_THEME_PRESETS = [
+  { name: "既定", bg: "#0a0a0a", text: "#f5f5f5" },
+  { name: "炭", bg: "#18181b", text: "#e4e4e7" },
+  { name: "紺", bg: "#0b1220", text: "#dbeafe" },
+  { name: "深緑", bg: "#0a1410", text: "#d1fae5" },
+  { name: "葡萄", bg: "#140f1c", text: "#ede9fe" },
+  { name: "セピア", bg: "#1c1710", text: "#f5e9d7" },
+  { name: "紙", bg: "#faf9f7", text: "#1c1917" },
+  { name: "薄灰", bg: "#e8e8ea", text: "#18181b" },
+];
 
 // タスク個別の見た目
 const TASK_TEXT_COLORS = [
@@ -428,6 +444,34 @@ function App() {
   const [categories, setCategories] = useState(boot.categories);
   const [projectRules, setProjectRules] = useState(boot.projectRules || DEFAULT_PROJECT_RULES);
   const [projectOrder, setProjectOrder] = useState(boot.projectOrder || DEFAULT_PROJECT_ORDER);
+  const [appTheme, setAppTheme] = useState(() => {
+    try {
+      const raw = localStorage.getItem("taskspace-app-theme");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (parsed?.bg && parsed?.text) return parsed;
+    } catch { /* 壊れていたら既定 */ }
+    return DEFAULT_APP_THEME;
+  });
+
+  // DragOverlay などルート div の外に出る要素にも効かせるため html 要素に置く
+  useEffect(() => {
+    const el = document.documentElement;
+    el.style.setProperty("--ts-bg", appTheme.bg);
+    el.style.setProperty("--ts-text", appTheme.text);
+    // 明るい背景では補助文字が沈むので濃度を上げる
+    const lightBg = relativeLuminance(appTheme.bg) > 0.4;
+    const ink = lightBg
+      ? { 200: "92%", 300: "84%", 400: "72%", 500: "60%", 600: "48%", 700: "36%" }
+      : { 200: "88%", 300: "76%", 400: "62%", 500: "48%", 600: "36%", 700: "26%" };
+    Object.entries(ink).forEach(([k, v]) => el.style.setProperty(`--ts-ink-${k}`, v));
+  }, [appTheme]);
+
+  const persistAppTheme = useCallback((next) => {
+    setAppTheme(next);
+    try { localStorage.setItem("taskspace-app-theme", JSON.stringify(next)); } catch { /* quota */ }
+    dbSaveSetting(APP_THEME_SETTING_KEY, JSON.stringify(next));
+  }, []);
+
   const [stockViews, setStockViews] = useState(() => {
     try {
       const raw = localStorage.getItem("taskspace-stock-views");
@@ -895,6 +939,16 @@ function App() {
         setNotionDbId(remoteDbId);
         localStorage.setItem("taskspace-notion-dbid", remoteDbId);
         addSyncLog("🔗 Notion DB ID を同期しました");
+      }
+      const remoteTheme = settings?.[APP_THEME_SETTING_KEY];
+      if (remoteTheme) {
+        try {
+          const parsed = typeof remoteTheme === "string" ? JSON.parse(remoteTheme) : remoteTheme;
+          if (parsed?.bg && parsed?.text) {
+            setAppTheme(parsed);
+            localStorage.setItem("taskspace-app-theme", JSON.stringify(parsed));
+          }
+        } catch { /* 壊れていたらローカルのまま */ }
       }
       const remoteViews = settings?.[STOCK_VIEWS_SETTING_KEY];
       if (remoteViews) {
@@ -2141,9 +2195,9 @@ function App() {
     <BlockEditContext.Provider value={blockEditValue}>
     <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen bg-neutral-950 text-neutral-100" style={{ fontFamily: appFontCss }}>
+    <div className="min-h-screen ts-bg ts-text" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
-        <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 bg-neutral-950/90 px-2 py-2 backdrop-blur">
+        <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
             <h1 className="text-xl font-semibold tracking-tight">⚡ Task Space</h1>
             <span className="text-[11px] text-neutral-500">v{__APP_VERSION__}</span>
@@ -2168,7 +2222,7 @@ function App() {
                   onChange={(e) => setQuickAddTitle(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); } }}
                   placeholder="タスク名を入力…"
-                  className="w-44 rounded-md border border-white/20 bg-white/[0.07] px-2 py-1.5 text-xs text-neutral-100 placeholder-neutral-500 outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 sm:w-56"
+                  className="w-44 rounded-md border border-white/20 bg-white/[0.07] px-2 py-1.5 text-xs ts-text placeholder-neutral-500 outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 sm:w-56"
                 />
                 <button type="submit" className="rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 py-1.5 text-xs text-emerald-200 transition hover:bg-emerald-500/25">追加</button>
                 <button type="button" onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }} className="rounded-md border border-white/10 bg-white/[0.03] p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"><X className="h-3.5 w-3.5" /></button>
@@ -2182,7 +2236,7 @@ function App() {
             <button
               onClick={() => { if (selectMode) exitSelectMode(); else setSelectMode(true); }}
               title="Select mode"
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", selectMode ? "border-white/30 bg-white/20 text-neutral-100" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", selectMode ? "border-white/30 bg-white/20 ts-text" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
             >
               <CheckSquare className="h-3.5 w-3.5" />
             </button>
@@ -2197,16 +2251,68 @@ function App() {
             <div className="relative">
               <button
                 onClick={() => setShowSettingsPanel((v) => !v)}
-                className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showSettingsPanel ? "border-white/25 bg-white/10 text-neutral-100" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+                className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showSettingsPanel ? "border-white/25 bg-white/10 ts-text" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
                 title="Settings"
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
               {showSettingsPanel && (
-                <div className="fixed right-2 top-14 z-50 w-72 rounded-lg border border-white/15 bg-neutral-900 p-3 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto md:absolute md:right-0 md:top-full md:mt-1 md:w-64 md:max-h-[80vh]">
+                <div className="fixed right-2 top-14 z-50 w-72 rounded-lg border border-white/15 ts-surface p-3 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto md:absolute md:right-0 md:top-full md:mt-1 md:w-64 md:max-h-[80vh]">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="text-xs font-semibold text-neutral-200">Settings</span>
                     <button onClick={() => setShowSettingsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-3.5 w-3.5" /></button>
+                  </div>
+
+                  {/* 配色 */}
+                  <div className="mb-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">配色</div>
+                    <div className="mb-2 grid grid-cols-4 gap-1.5">
+                      {APP_THEME_PRESETS.map((preset) => {
+                        const active = appTheme.bg === preset.bg && appTheme.text === preset.text;
+                        return (
+                          <button
+                            key={preset.name}
+                            onClick={() => persistAppTheme({ bg: preset.bg, text: preset.text })}
+                            title={preset.name}
+                            className={classNames(
+                              "flex h-9 flex-col items-center justify-center rounded border text-[9px] transition",
+                              active ? "border-white ring-1 ring-white/50" : "border-white/15 hover:border-white/40"
+                            )}
+                            style={{ backgroundColor: preset.bg, color: preset.text }}
+                          >
+                            {preset.name}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="flex flex-1 items-center gap-1.5 text-[10px] text-neutral-500">
+                        背景
+                        <input
+                          type="color"
+                          value={appTheme.bg}
+                          onChange={(e) => persistAppTheme({ ...appTheme, bg: e.target.value })}
+                          className="h-6 w-full cursor-pointer rounded border border-white/10 bg-transparent"
+                        />
+                      </label>
+                      <label className="flex flex-1 items-center gap-1.5 text-[10px] text-neutral-500">
+                        文字
+                        <input
+                          type="color"
+                          value={appTheme.text}
+                          onChange={(e) => persistAppTheme({ ...appTheme, text: e.target.value })}
+                          className="h-6 w-full cursor-pointer rounded border border-white/10 bg-transparent"
+                        />
+                      </label>
+                    </div>
+                    {(appTheme.bg !== DEFAULT_APP_THEME.bg || appTheme.text !== DEFAULT_APP_THEME.text) && (
+                      <button
+                        onClick={() => persistAppTheme(DEFAULT_APP_THEME)}
+                        className="mt-1.5 w-full rounded border border-white/10 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-300"
+                      >
+                        既定に戻す
+                      </button>
+                    )}
                   </div>
 
                   {/* Zoom */}
@@ -2443,7 +2549,7 @@ function App() {
             {/* TRAY column */}
             <div className="min-w-0">
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
-                <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
+                <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
                   <span className="text-sm font-bold text-neutral-200">TRAY</span>
                   <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock).length + inboxItems.length}</span>
                 </div>
@@ -2737,7 +2843,7 @@ function App() {
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
-          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 bg-neutral-900 px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
+          <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 ts-surface px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
             <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
@@ -2787,10 +2893,10 @@ function App() {
               if (selectedIds.size > 0) bulkDelete();
               if (selectedTrayIds.size > 0) bulkTrayDelete();
             }} className="flex-shrink-0 rounded-md border border-red-400/25 bg-red-500/10 px-2.5 py-1.5 text-xs text-red-200 transition hover:bg-red-500/20">Delete</button>
-            <button onClick={exitSelectMode} className="flex-shrink-0 ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
+            <button onClick={exitSelectMode} className="flex-shrink-0 ml-1 rounded-full border border-white/10 p-1 text-neutral-400 transition hover:bg-white/[0.07] hover:ts-text"><X className="h-3.5 w-3.5" /></button>
           </div>
           {showMovePanel && (
-            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 bg-neutral-900 p-1.5 shadow-2xl">
+            <div className="fixed bottom-20 left-1/2 -translate-x-1/2 z-[60] w-64 max-h-[60vh] overflow-y-auto rounded-xl border border-white/15 ts-surface p-1.5 shadow-2xl">
               <div className="mb-1 px-2 text-[10px] text-neutral-600">移動先を選択</div>
               <div className="my-1 border-t border-white/10" />
               <div className="px-2 pt-0.5 pb-1 text-[10px] font-semibold text-neutral-500">STOCK</div>
@@ -2818,24 +2924,24 @@ function App() {
           )}
           </>
         )}
-        {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 bg-neutral-900/90 px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
+        {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 ts-surface px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
     </div>
     <DragOverlay dropAnimation={null}>
       {activeDrag?.type === "task" && (
         selectedIds.size > 1 && selectedIds.has(activeDrag.id) ? (
-          <div className="flex items-center gap-2 rounded-md border border-sky-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">
+          <div className="flex items-center gap-2 rounded-md border border-sky-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">
             <span className="rounded-full border border-sky-400/40 bg-sky-500/20 px-1.5 text-[10px] text-sky-100">{selectedIds.size}</span>
             <span className="max-w-xs truncate">{taskMap.get(activeDrag.id)?.title || "…"}</span>
             <span className="text-[10px] text-neutral-400">ほか{selectedIds.size - 1}件</span>
           </div>
         ) : (
-          <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{taskMap.get(activeDrag.id)?.title || "…"}</div>
+          <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">{taskMap.get(activeDrag.id)?.title || "…"}</div>
         )
       )}
-      {activeDrag?.type === "tray" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium text-neutral-100 shadow-2xl opacity-95">{activeDrag.title || "…"}</div>}
-      {activeDrag?.type === "column" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.label || activeDrag.key}</div>}
-      {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold text-neutral-100 shadow-2xl opacity-95">{activeDrag.project}</div>}
+      {activeDrag?.type === "tray" && <div className="max-w-xs whitespace-pre-wrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">{activeDrag.title || "…"}</div>}
+      {activeDrag?.type === "column" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold ts-text shadow-2xl opacity-95">{activeDrag.label || activeDrag.key}</div>}
+      {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold ts-text shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
     </FocusModeContext.Provider>
@@ -3055,7 +3161,7 @@ function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsert
       className={classNames("rounded-lg border bg-white/[0.02] transition", isOver && "brightness-125")}
       style={{ borderColor: isOver ? view.color : "rgba(255,255,255,0.1)", backgroundColor: isOver ? `${view.color}14` : undefined }}
     >
-      <div className="sticky top-0 flex items-center gap-1.5 border-b border-white/10 bg-neutral-950/80 px-2 py-1.5 backdrop-blur">
+      <div className="sticky top-0 flex items-center gap-1.5 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
         <button
           onClick={() => setShowColors((v) => !v)}
           title="色を変える"
@@ -3077,12 +3183,13 @@ function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsert
           />
         ) : (
           <button
-            onDoubleClick={() => setEditingName(true)}
-            title="ダブルクリックで名前を変更"
-            className="min-w-0 flex-1 truncate text-left text-sm font-bold"
+            onClick={() => setEditingName(true)}
+            title="クリックで名前を変更"
+            className="group/name flex min-w-0 flex-1 items-center gap-1 text-left text-sm font-bold"
             style={{ color: view.color }}
           >
-            {view.name}
+            <span className="min-w-0 truncate">{view.name}</span>
+            <Pencil className="h-2.5 w-2.5 shrink-0 opacity-0 transition group-hover/name:opacity-60" />
           </button>
         )}
         <span className="shrink-0 text-[10px] text-neutral-500">{tasks.length}</span>
@@ -3483,7 +3590,7 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
 
   return (
     <div
-      className="fixed z-[200] min-w-[180px] rounded-xl border border-white/15 bg-neutral-900/97 p-1.5 shadow-2xl backdrop-blur"
+      className="fixed z-[200] min-w-[180px] rounded-xl border border-white/15 ts-surface p-1.5 shadow-2xl backdrop-blur"
       style={{ left: Math.min(x, window.innerWidth - 196), top: Math.min(y, window.innerHeight - 300) }}
       onPointerDown={(e) => e.stopPropagation()}
     >
@@ -3543,6 +3650,18 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
       )}
     </div>
   );
+}
+
+// #rrggbb の相対輝度（0=黒, 1=白）
+function relativeLuminance(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
+  if (!m) return 0;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
 }
 
 // タスク個別の見た目（色・太さ）を style 属性に落とす
@@ -4399,11 +4518,11 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
               }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium text-neutral-100 outline-none"
+              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} style={taskTextStyle(task)} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} style={taskTextStyle(task)} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -4558,7 +4677,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
               }}
               onClick={(e) => e.stopPropagation()}
               onPointerDown={(e) => e.stopPropagation()}
-              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] text-neutral-100 outline-none"
+              className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
@@ -4566,7 +4685,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 <div
                   onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
                   title={focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集"}
-                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] text-neutral-100", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
+                  className={classNames("break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
                   style={taskTextStyle(task)}
                 >
                   {task.title}
@@ -4882,7 +5001,7 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
       </div>
       {open && (
       <div className="grid grid-cols-7 gap-px overflow-hidden rounded-md border border-white/10 bg-white/10 text-[10px] md:text-xs">
-        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="bg-neutral-950 px-2 py-1 text-[10px] font-medium text-neutral-500">{day}</div>)}
+        {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((day) => <div key={day} className="ts-bg px-2 py-1 text-[10px] font-medium text-neutral-500">{day}</div>)}
         {days.map((d) => {
           const key = toDateKey(d);
           const list = tasksByDate[key] || [];
@@ -4892,7 +5011,7 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
             <div
               key={key}
               className={classNames(
-                "min-h-[96px] bg-neutral-950 p-1 align-top md:min-h-[140px] md:p-1.5",
+                "min-h-[96px] ts-bg p-1 align-top md:min-h-[140px] md:p-1.5",
                 !inMonth && "opacity-35",
                 isToday && "relative ring-2 ring-emerald-300/60 ring-inset bg-emerald-300/[0.055]"
               )}
@@ -4970,7 +5089,7 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
   }
 
   return (
-    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
+    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 ts-bg-veil p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
       <div className="mb-5 flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="text-xs text-neutral-500">Project</div>
@@ -4986,7 +5105,7 @@ function ProjectInspector({ selectedProject, projectRules, updateProjectRule, de
           </div>
           <p className="mt-1 text-xs text-neutral-500">{category}</p>
         </div>
-        <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-4 w-4" /></button>
+        <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:ts-text"><X className="h-4 w-4" /></button>
       </div>
 
       <div className="space-y-3">
@@ -5191,7 +5310,7 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
     if (created) setSubTitle("");
   }
   return (
-    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 bg-neutral-950/95 p-3 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[360px] md:max-w-[360px] md:rounded-none md:border-l md:border-t-0">
+    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 ts-bg-veil p-3 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[360px] md:max-w-[360px] md:rounded-none md:border-l md:border-t-0">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <textarea
@@ -5203,7 +5322,7 @@ function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTa
             className="w-full resize-none overflow-hidden bg-transparent text-base font-semibold tracking-tight outline-none leading-snug"
           />
         </div>
-        <button onClick={onClose} className="rounded-full border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"><X className="h-3.5 w-3.5" /></button>
+        <button onClick={onClose} className="rounded-full border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/10 hover:ts-text"><X className="h-3.5 w-3.5" /></button>
       </div>
       <div className="space-y-2">
         <PropertyRow label="Category"><select value={task.category || ""} onChange={(event) => { const category = event.target.value; upsertTask({ id: task.id, category, project: category ? (projectsByCategory[category]?.[0] || task.project) : "", plain: !category }); }} className="min-w-0 w-full rounded-lg border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none"><option value="">{NO_CATEGORY_LABEL}</option>{categories.map((cat) => <option key={cat.key} value={cat.key}>{cat.key}</option>)}</select></PropertyRow>
@@ -5315,7 +5434,7 @@ function DueDatePicker({ value, onChange }) {
       </button>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-white/15 bg-neutral-900 p-3 shadow-2xl">
+        <div className="absolute left-0 top-full z-50 mt-1 w-64 rounded-xl border border-white/15 ts-surface p-3 shadow-2xl">
           {/* 月ナビ */}
           <div className="mb-2 flex items-center justify-between">
             <button onClick={() => setMonth(new Date(year, mon - 1, 1))} className="rounded p-1 text-neutral-400 hover:bg-white/10"><ChevronLeft className="h-3.5 w-3.5" /></button>
@@ -5375,9 +5494,9 @@ function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, t
     return (
       <div className="fixed inset-0 z-[300] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.95)" }} onClick={onClose}>
         <div className="w-full max-w-xl px-4" onClick={(e) => e.stopPropagation()}>
-          <div className="rounded-xl border border-white/10 bg-neutral-900 p-4">
+          <div className="rounded-xl border border-white/10 ts-surface p-4">
             <p className="text-xs text-neutral-500 mb-2">TRAY</p>
-            <p className="text-base font-medium text-neutral-100 leading-snug">{trayItem.title}</p>
+            <p className="text-base font-medium ts-text leading-snug">{trayItem.title}</p>
           </div>
           <button onClick={onClose} className="mt-4 w-full text-center text-xs text-neutral-600 hover:text-neutral-400 transition">Esc で閉じる</button>
         </div>
@@ -5434,7 +5553,7 @@ function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, t
               {task.archived && <span className="flex h-full w-full items-center justify-center text-[10px] text-neutral-400">✓</span>}
             </button>
             <div className="min-w-0 flex-1">
-              <p className={classNames("text-base font-medium leading-snug", task.archived ? "line-through text-neutral-500" : "text-neutral-100")}>
+              <p className={classNames("text-base font-medium leading-snug", task.archived ? "line-through text-neutral-500" : "ts-text")}>
                 {task.title}
               </p>
               {task.project && (

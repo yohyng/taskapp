@@ -12,3 +12,56 @@
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* --- アプリ配色（設定パネルから変更） ---
+   --ts-bg / --ts-text を起点にする。Tailwind v4 は色を CSS 変数経由で
+   出力する（例: bg-white/10 → color-mix(..., var(--color-white) 10%, ...)）ので、
+   white と neutral 系を --ts-text 由来に差し替えると、枠線・hover・ring まで
+   まとめて追従する。レイヤー外の :root なので Tailwind の既定より優先される。
+   black はそのまま残す。凹んだ面（入力欄など）は明暗どちらの背景でも
+   「少し暗く」で正しく見えるため。 */
+:root {
+  --ts-bg: #0a0a0a;
+  --ts-text: #f5f5f5;
+
+  /* 補助文字の濃度。暗い文字を明るい面に置くほうがコントラストが出にくいので、
+     明るい背景のときは JS 側（--ts-ink-*）で濃いめに差し替える。 */
+  --ts-ink-200: 88%;
+  --ts-ink-300: 76%;
+  --ts-ink-400: 62%;
+  --ts-ink-500: 48%;
+  --ts-ink-600: 36%;
+  --ts-ink-700: 26%;
+
+  --color-white: var(--ts-text);
+  --color-neutral-50: color-mix(in srgb, var(--ts-text) 97%, transparent);
+  --color-neutral-100: var(--ts-text);
+  --color-neutral-200: color-mix(in srgb, var(--ts-text) var(--ts-ink-200), transparent);
+  --color-neutral-300: color-mix(in srgb, var(--ts-text) var(--ts-ink-300), transparent);
+  --color-neutral-400: color-mix(in srgb, var(--ts-text) var(--ts-ink-400), transparent);
+  --color-neutral-500: color-mix(in srgb, var(--ts-text) var(--ts-ink-500), transparent);
+  --color-neutral-600: color-mix(in srgb, var(--ts-text) var(--ts-ink-600), transparent);
+  --color-neutral-700: color-mix(in srgb, var(--ts-text) var(--ts-ink-700), transparent);
+  --color-neutral-800: color-mix(in srgb, var(--ts-text) 18%, transparent);
+  /* 反転ボタン（bg-white + text-neutral-950）が両テーマで成立するように */
+  --color-neutral-950: var(--ts-bg);
+}
+
+body {
+  background-color: var(--ts-bg);
+}
+
+.ts-bg {
+  background-color: var(--ts-bg);
+}
+/* 半透明のスティッキー面（ヘッダーなど） */
+.ts-bg-veil {
+  background-color: color-mix(in srgb, var(--ts-bg) 88%, transparent);
+}
+/* モーダル・ポップオーバーの面 */
+.ts-surface {
+  background-color: color-mix(in srgb, var(--ts-bg) 92%, var(--ts-text) 8%);
+}
+.ts-text {
+  color: var(--ts-text);
+}
