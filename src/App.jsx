@@ -2617,8 +2617,6 @@ function App() {
                   selectedTaskId={selectedTaskId}
                   setSelectedTaskId={setSelectedTaskId}
                   selectMode={selectMode}
-                  selectedIds={selectedIds}
-                  onToggleSelect={onToggleSelect}
                   onUnstock={(id) => upsertTask({ id, stock: false, stockViewId: null })}
                   onUpdateView={(patch) => updateStockView(view.id, patch)}
                   onRemoveView={() => removeStockView(view.id)}
@@ -2638,7 +2636,7 @@ function App() {
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-0">
-                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
+                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />
               </div>
             ))}
           </div>
@@ -2705,8 +2703,6 @@ function App() {
                 defaultProject={quickProject}
                 addTask={addTask}
                 selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
               />
             );
             const weeklyEl = (extraClass = "") => (
@@ -2734,12 +2730,10 @@ function App() {
                 addInboxItem={addInboxItem}
                 returnTaskToTray={returnTaskToTray}
                 selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
               />
             );
             const boardCols = categories.map((cat) => (
-              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />
+              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />
             ));
 
             function renderBoardSection(key) {
@@ -3039,8 +3033,6 @@ function TodayColumn({
                   handleDropOnTask={handleDropOnTask}
                   compact
                   selectMode={selectMode}
-                  selectedIds={selectedIds}
-                  onToggleSelect={onToggleSelect}
                 />
               ))}
             </AnimatePresence>
@@ -3125,7 +3117,7 @@ function WeeklyColumn({
             <button onClick={submitDraft} className="rounded border border-amber-300/25 bg-amber-500/10 px-2 py-1.5 text-xs text-amber-200">Add</button>
           </div>
           <div className="flex flex-col gap-0.5">
-            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => isThisWeekUnscheduled(child))} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+            <AnimatePresence initial={false}>{weeklyRoots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} categoryTone={categoryTone} depth={0} children={weeklyFlat ? [] : childrenOf(task.id).filter((child) => isThisWeekUnscheduled(child))} childrenOf={childrenOf} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeWeeklyTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} moveWeeklyTask={moveWeeklyTask} compact selectMode={selectMode} />)}</AnimatePresence>
             {weeklyRoots.length === 0 && <div className="rounded-md border border-dashed border-amber-200/20 p-4 text-center text-xs text-amber-100/50">今週タスクはまだありません。</div>}
           </div>
         </div>
@@ -3240,8 +3232,6 @@ function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsert
                 selectedTaskId={selectedTaskId}
                 childrenOf={childrenOf}
                 selectMode={selectMode}
-                selectedIds={selectedIds}
-                onToggleSelect={onToggleSelect}
                 onIndent={() => {
                   if (idx === 0) return;
                   upsertTask({ id: task.id, parentId: tasks[idx - 1].id });
@@ -3446,7 +3436,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   );
 }
 
-function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect }) {
+function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode }) {
   const tone = toneClasses(category.tone);
   const [newProject, setNewProject] = useState("");
   const [showProjectInput, setShowProjectInput] = useState(false);
@@ -3504,14 +3494,14 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, t
       )}
       {!isColumnCollapsed && (
         <div className="flex flex-col gap-2">
-          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}
+          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />)}
         </div>
       )}
     </div>
   );
 }
 
-function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode, selectedIds, onToggleSelect }) {
+function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode }) {
   const [newTitle, setNewTitle] = useState("");
   const key = `${category}:${project}`;
   const isCollapsed = collapsed[key];
@@ -3567,7 +3557,7 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
       </div>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} selectedIds={selectedIds} onToggleSelect={onToggleSelect} />)}</AnimatePresence>
+          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} />)}</AnimatePresence>
           <div className="mt-1 flex gap-1">
             <input value={newTitle} onChange={(event) => setNewTitle(event.target.value)} onKeyDown={(event) => event.key === "Enter" && create()} placeholder="このProjectに追加" className="min-w-0 flex-1 rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20" />
             <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
@@ -3655,6 +3645,184 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
 // 編集終了と同じフレームでカードへフォーカスを戻すためのフック。
 // setTimeout(0) では Enter を素早く 2 回押したとき、2 回目がフォーカス移動前に
 // 届いて取りこぼされる。
+// タスク1行ぶんの振る舞いをまとめたフック。
+//
+// PJボード・TRAY/STOCK・7days で「1行」の見た目は違うが、中身の振る舞い
+// （選択・フォーカスモード・ドラッグ・インライン編集・キーボード操作）は同じ。
+// ここに1つだけ持たせて、各ビューは返ってきた props を撒いて自分の装飾を足す。
+//
+// ビューごとに事情が違う3点だけ差し込めるようにしてある:
+//   onTab           インデント/アウトデントの解決方法（兄弟の求め方が違う）
+//   onDeleteEmpty   空ブロックを消したあとの行き先（7days だけ前の行を編集状態で開く）
+//   dragDisabled    ドラッグを止める条件
+function useTaskBlock({
+  task,
+  dragId,
+  dragData,
+  dropId,
+  dropData,
+  dragDisabled = false,
+  upsertTask,
+  removeTask,
+  onTab,
+  onDeleteEmpty,
+  clickGuard,
+  initialEditing = false,
+}) {
+  const { focusPickMode, pickTask } = useFocusMode();
+  const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
+  const { selectedIds, toggleTask } = useSelection();
+
+  const cardRef = useRef(null);
+  const textareaRef = useRef(null);
+  const [editing, setEditing] = useState(initialEditing);
+  const [draft, setDraft] = useState(initialEditing ? "" : task.title);
+  const refocusCard = useRefocusAfterEdit(editing, cardRef);
+
+  const isSelected = !!selectedIds?.has(task.id);
+  const dragOff = dragDisabled || focusPickMode;
+
+  const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
+    id: dragId,
+    data: dragData,
+    disabled: dragOff,
+  });
+  const { setNodeRef: dropRef, isOver } = useDroppable({ id: dropId, data: dropData });
+
+  const setRefs = (el) => {
+    dragRef(el);
+    dropRef(el);
+    cardRef.current = el;
+  };
+
+  // 編集していない間だけ外からの変更（他端末の同期など）を取り込む。
+  // これから編集に入るブロック（pendingEditId）も対象外。さもないと
+  // マウント直後のこの effect が、空にしたドラフトを placeholder で上書きしてしまう。
+  useEffect(() => {
+    if (editing || pendingEditId === task.id) return;
+    setDraft(task.title);
+  }, [task.id, task.title, editing, pendingEditId]);
+
+  // Enter で作られた直後の空ブロックは、そのまま編集状態で開く。
+  // useEffect（描画後）だと textarea が載るまでに1フレーム空き、
+  // 続けて打った文字を取りこぼすので layout 相で入る。
+  React.useLayoutEffect(() => {
+    if (pendingEditId !== task.id) return;
+    setEditing(true);
+    setDraft("");
+    clearPendingEdit?.();
+  }, [pendingEditId, task.id]);
+
+  function commit() {
+    const clean = normalizeTitle(draft);
+    if (!clean) return false; // 空 → 呼び出し側が削除を決める
+    if (clean !== task.title) upsertTask?.({ id: task.id, title: clean });
+    return true;
+  }
+
+  function removeAndLeave() {
+    const cur = cardRef.current;
+    setEditing(false);
+    removeTask?.(task.id);
+    if (onDeleteEmpty) onDeleteEmpty(task.id, cur);
+    else setTimeout(() => focusAdjacentBlock(cur, -1), 0);
+  }
+
+  // カードにフォーカスがある状態でのキー操作（Notion のブロック選択に相当）
+  function onCardKeyDown(e) {
+    if (editing || focusPickMode) return;
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addBlockBelow?.(task);
+      return;
+    }
+    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
+      return;
+    }
+    // 印字可能文字でそのまま編集開始。
+    // preventDefault しないと、直後に開く textarea にも同じ文字が入って重複する。
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      setDraft(e.key);
+      setEditing(true);
+    }
+  }
+
+  function onTextareaKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      // 空のまま確定したブロックは残さない
+      if (!normalizeTitle(draft)) { removeAndLeave(); return; }
+      commit();
+      // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
+      refocusCard.current = true;
+      setEditing(false);
+      return;
+    }
+    if (e.key === "Escape") {
+      e.preventDefault();
+      setDraft(task.title);
+      setEditing(false);
+      return;
+    }
+    if ((e.key === "Backspace" || e.key === "Delete") && !e.currentTarget.value) {
+      e.preventDefault();
+      removeAndLeave();
+      return;
+    }
+    if (e.key === "Tab" && onTab) {
+      e.preventDefault();
+      e.stopPropagation();
+      onTab(e, { draft, setEditing });
+    }
+  }
+
+  const blockProps = {
+    ref: setRefs,
+    "data-task-id": task.id,
+    tabIndex: editing ? -1 : 0,
+    onKeyDown: onCardKeyDown,
+    onClick: () => {
+      if (clickGuard?.()) return;
+      if (focusPickMode) { pickTask?.(task.id); return; }
+      if (!editing) toggleTask?.(task.id);
+    },
+    ...(dragOff ? {} : attributes),
+    ...(dragOff ? {} : listeners),
+  };
+
+  const textareaProps = {
+    autoFocus: true,
+    rows: 1,
+    value: draft,
+    ref: (el) => { textareaRef.current = el; autoResize(el); },
+    onFocus: (e) => focusEnd(e.target),
+    onChange: (e) => { setDraft(e.target.value); autoResize(e.target); },
+    onKeyDown: onTextareaKeyDown,
+    onClick: (e) => e.stopPropagation(),
+    onPointerDown: (e) => e.stopPropagation(),
+    onMouseDown: (e) => e.stopPropagation(),
+  };
+
+  const titleProps = {
+    onDoubleClick: (e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); },
+    style: taskTextStyle(task),
+  };
+
+  // フォーカスモード中に付ける目印（全ビュー共通）
+  const focusRingClass = focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70";
+
+  return {
+    editing, setEditing, draft, setDraft,
+    isSelected, isDragging, isOver, focusPickMode,
+    cardRef, textareaRef,
+    blockProps, textareaProps, titleProps, focusRingClass,
+    commit, removeAndLeave,
+  };
+}
+
 function useRefocusAfterEdit(editing, cardRef) {
   const pending = useRef(false);
   React.useLayoutEffect(() => {
@@ -3699,51 +3867,56 @@ function focusEnd(el) {
   el.setSelectionRange(len, len);
 }
 
-function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false, selectedIds, onToggleSelect }) {
-  const { focusPickMode, pickTask } = useFocusMode();
-  const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
+function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false }) {
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
-  const cardRef = useRef(null);
-  const [editing, setEditing] = useState(false);
-  const refocusCard = useRefocusAfterEdit(editing, cardRef);
   const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
-  const [titleDraft, setTitleDraft] = useState(task.title);
   const [contextMenu, setContextMenu] = useState(null); // { x, y }
   const longPressTimer = useRef(null);
   const longPressActive = useRef(false);
 
-  // 編集していない間だけ外からの変更（他端末の同期など）を取り込む。
-  // これから編集に入るブロック（pendingEditId）も対象外。さもないと
-  // マウント直後のこの effect が、空にしたドラフトを placeholder で上書きしてしまう。
-  useEffect(() => {
-    if (editing || pendingEditId === task.id) return;
-    setTitleDraft(task.title);
-  }, [task.id, task.title, editing, pendingEditId]);
+  // Today/Weekly の縮小カードは並べ替え先を区別する必要があるので drop type を変える
+  const dropType = compact
+    ? (schedIsToday(task, toDateKey(new Date())) ? "task-in-today" : "task-in-weekly")
+    : "task";
 
-  // Enter で作られた直後の空ブロックは、そのまま編集状態で開く。
-  // useEffect（描画後）だと textarea が載るまでに1フレーム空き、
-  // 続けて打った文字を取りこぼすので layout 相で入る。
-  React.useLayoutEffect(() => {
-    if (pendingEditId !== task.id) return;
-    setEditing(true);
-    setTitleDraft("");
-    clearPendingEdit?.();
-  }, [pendingEditId, task.id]);
-
-  function commitTitle() {
-    const clean = normalizeTitle(titleDraft);
-    if (!clean) {
-      setTitleDraft(task.title);
-      return;
-    }
-    if (clean !== task.title) upsertTask({ id: task.id, title: clean });
-  }
-
-  function cancelTitle() {
-    setTitleDraft(task.title);
-  }
+  const b = useTaskBlock({
+    task,
+    dragId: `task-${task.id}`,
+    dragData: { type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId },
+    dropId: `task-drop-${task.id}`,
+    dropData: { type: dropType, id: task.id, category: task.category, project: task.project },
+    dragDisabled: selectMode,
+    upsertTask,
+    removeTask,
+    // 長押しメニューを出したときはクリック扱いにしない
+    clickGuard: () => longPressActive.current,
+    // このビューだけ、兄弟を並び順から引いて親子を決める
+    onTab: (e, { draft, setEditing }) => {
+      const titleClean = normalizeTitle(draft);
+      const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
+      const patchOnly = () => { if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch }); };
+      if (e.shiftKey) {
+        if (task.parentId) upsertTask({ id: task.id, ...titlePatch, parentId: taskMap.get(task.parentId)?.parentId ?? null });
+        else patchOnly();
+      } else if (depth < 3) {
+        const siblings = [...taskMap.values()]
+          .filter((t) => !t.archived && t.parentId === (task.parentId ?? null) && t.category === task.category && t.project === task.project)
+          .sort((x, y) => {
+            const xo = typeof x.sortOrder === "number" ? x.sortOrder : 999999;
+            const yo = typeof y.sortOrder === "number" ? y.sortOrder : 999999;
+            return xo !== yo ? xo - yo : x.title.localeCompare(y.title, "ja");
+          });
+        const prevSibling = siblings[siblings.findIndex((t) => t.id === task.id) - 1];
+        if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
+        else patchOnly();
+      } else {
+        patchOnly();
+      }
+      setEditing(false);
+    },
+  });
 
   function handlePointerDown(e) {
     if (e.pointerType !== "touch") return;
@@ -3761,62 +3934,9 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
     };
   }
 
-  function handlePointerUp() {
+  function cancelLongPress() {
     clearTimeout(longPressTimer.current);
     window.__taskspaceLongPressCancel = null;
-  }
-
-  function handlePointerMove(e) {
-    // 指が少し動いたらlong-pressキャンセル（ドラッグ優先）
-    clearTimeout(longPressTimer.current);
-    window.__taskspaceLongPressCancel = null;
-  }
-
-  const isSelected = !!(selectedIds && selectedIds.has(task.id));
-
-  // dnd-kit hooks
-  const { attributes: taskDragAttrs, listeners: taskDragListeners, setNodeRef: taskDragRef, isDragging } = useDraggable({
-    id: `task-${task.id}`,
-    data: { type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId },
-    disabled: selectMode,
-  });
-
-  // Drop target type: compact cards in Today/Weekly get special types for routing.
-  // scheduledDate ベースで判定（今日に配置=task-in-today、それ以外のWeekly=task-in-weekly）
-  const dropType = compact
-    ? (schedIsToday(task, toDateKey(new Date())) ? "task-in-today" : "task-in-weekly")
-    : "task";
-  const { setNodeRef: taskDropRef, isOver: isTaskOver } = useDroppable({
-    id: `task-drop-${task.id}`,
-    data: { type: dropType, id: task.id, category: task.category, project: task.project },
-  });
-
-  function setRefs(el) {
-    taskDragRef(el);
-    taskDropRef(el);
-    cardRef.current = el;
-  }
-
-  // カードにフォーカスがある状態でのキー操作（Notion のブロック選択に相当）
-  function handleCardKeyDown(e) {
-    if (editing) return;
-    if (e.key === "Enter") {
-      e.preventDefault();
-      addBlockBelow?.(task);
-      return;
-    }
-    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      e.preventDefault();
-      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
-      return;
-    }
-    // 印字可能文字でそのまま編集開始
-    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
-      // preventDefault しないと、直後に開く textarea にも同じ文字が入って重複する
-      e.preventDefault();
-      setTitleDraft(e.key);
-      setEditing(true);
-    }
   }
 
   return (
@@ -3833,113 +3953,37 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
         />
       )}
       <div
-        ref={setRefs}
-        {...(!selectMode ? taskDragListeners : {})}
-        {...(!selectMode ? taskDragAttrs : {})}
+        {...b.blockProps}
         onPointerDown={handlePointerDown}
-        onPointerUp={handlePointerUp}
-        onPointerMove={handlePointerMove}
+        onPointerUp={cancelLongPress}
+        onPointerMove={cancelLongPress}
         onContextMenu={(e) => e.preventDefault()}
-        onClick={() => { if (longPressActive.current) return; if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
-        tabIndex={editing ? -1 : 0}
-        onKeyDown={handleCardKeyDown}
         data-draggable
-        data-task-id={task.id}
         style={{ userSelect: "none", WebkitUserSelect: "none" }}
         className={classNames(
           "group rounded-md border px-1.5 py-1 transition",
-          isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : isTaskOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
-          focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
+          b.isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : b.isOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          b.focusRingClass,
           task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45",
-          isDragging && "opacity-40"
+          b.isDragging && "opacity-40"
         )}
       >
         <div className="flex items-start gap-1.5">
           {selectMode && (
             <button
-              onClick={(e) => { e.stopPropagation(); if (onToggleSelect) onToggleSelect(task.id); }}
+              onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }}
               className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300"
             >
-              {isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
+              {b.isSelected ? <CheckSquare className="h-3.5 w-3.5 text-sky-400" /> : <CheckSquare className="h-3.5 w-3.5 opacity-30" />}
             </button>
           )}
           <button onClick={(event) => { event.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">{task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}</button>
           {hasChildren ? <button onClick={(event) => { event.stopPropagation(); setCollapsed((prev) => ({ ...prev, [task.id]: !prev[task.id] })); }} className="mt-0.5 shrink-0 text-neutral-500">{isCollapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}</button> : <span className="w-3.5 shrink-0" />}
           <div className="min-w-0 flex-1">
-            {editing ? (
+            {b.editing ? (
               <textarea
-                value={titleDraft}
-                autoFocus
-                rows={1}
-                ref={autoResize}
-                onFocus={(e) => focusEnd(e.target)}
-                onClick={(event) => event.stopPropagation()}
-                onMouseDown={(event) => event.stopPropagation()}
-                onChange={(event) => { setTitleDraft(event.target.value); autoResize(event.target); }}
-                onBlur={() => { commitTitle(); setEditing(false); }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" && !event.shiftKey) {
-                    event.preventDefault();
-                    // 空のまま確定したブロックは残さない
-                    if (!normalizeTitle(titleDraft)) {
-                      const prev = cardRef.current;
-                      setEditing(false);
-                      removeTask(task.id);
-                      setTimeout(() => focusAdjacentBlock(prev, -1), 0);
-                      return;
-                    }
-                    commitTitle();
-                    // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
-                    refocusCard.current = true;
-                    setEditing(false);
-                    return;
-                  }
-                  if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
-                    event.preventDefault();
-                    const cur = cardRef.current;
-                    removeTask(task.id);
-                    setTimeout(() => focusAdjacentBlock(cur, -1), 0);
-                    return;
-                  }
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    cancelTitle();
-                    setEditing(false);
-                    event.currentTarget.blur();
-                  }
-                  if (event.key === "Tab") {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    const titleClean = normalizeTitle(titleDraft);
-                    const titlePatch = titleClean && titleClean !== task.title ? { title: titleClean } : {};
-                    if (event.shiftKey) {
-                      if (task.parentId) {
-                        const parent = taskMap.get(task.parentId);
-                        upsertTask({ id: task.id, ...titlePatch, parentId: parent?.parentId ?? null });
-                      } else {
-                        if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
-                      }
-                    } else {
-                      if (depth < 3) {
-                        const siblings = [...taskMap.values()]
-                          .filter((t) => !t.archived && t.parentId === (task.parentId ?? null) && t.category === task.category && t.project === task.project)
-                          .sort((a, b) => {
-                            const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
-                            const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
-                            if (ao !== bo) return ao - bo;
-                            return a.title.localeCompare(b.title, "ja");
-                          });
-                        const idx = siblings.findIndex((t) => t.id === task.id);
-                        const prevSibling = siblings[idx - 1];
-                        if (prevSibling) upsertTask({ id: task.id, ...titlePatch, parentId: prevSibling.id });
-                        else if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
-                      } else {
-                        if (Object.keys(titlePatch).length) upsertTask({ id: task.id, ...titlePatch });
-                      }
-                    }
-                    setEditing(false);
-                  }
-                }}
+                {...b.textareaProps}
+                onBlur={() => { b.commit(); b.setEditing(false); }}
                 className={classNames(
                   "w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
                   task.status === "完了" && "line-through"
@@ -3948,9 +3992,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
             ) : (
               <div className="flex min-w-0 items-start gap-1 group/title">
                 <div
-                  onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
-                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", focusPickMode ? "cursor-crosshair" : "cursor-pointer", task.status === "完了" && "line-through")}
-                  style={taskTextStyle(task)}
+                  {...b.titleProps}
+                  className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]", b.focusPickMode ? "cursor-crosshair" : "cursor-pointer", task.status === "完了" && "line-through")}
                 >
                   {task.title}
                 </div>
@@ -4013,8 +4056,6 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
               projectsByCategory={projectsByCategory}
               categories={categories}
               selectMode={selectMode}
-              selectedIds={selectedIds}
-              onToggleSelect={onToggleSelect}
             />
           ))}
         </div>
@@ -4428,130 +4469,66 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   );
 }
 
-function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false, selectedIds, onToggleSelect }) {
-  const { focusPickMode, pickTask } = useFocusMode();
-  const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
-  const cardRef = useRef(null);
-  const [editing, setEditing] = useState(false);
-  const refocusCard = useRefocusAfterEdit(editing, cardRef);
-  const [draft, setDraft] = useState(task.title);
+function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false }) {
   const isDone = task.status === "完了";
-  const isSelected = !!(selectedIds && selectedIds.has(task.id));
-  const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
-    id: `traytask-${task.id}`,
-    data: { type: "task", id: task.id },
-    disabled: editing || selectMode,
-  });
-  const { setNodeRef: dropRef, isOver } = useDroppable({
-    id: `traytask-drop-${task.id}`,
-    data: { type: "task", id: task.id },
-  });
-  const setNodeRef = (el) => { dragRef(el); dropRef(el); cardRef.current = el; };
-
-  // 同上
-  useEffect(() => {
-    if (editing || pendingEditId === task.id) return;
-    setDraft(task.title);
-  }, [task.title, editing, pendingEditId, task.id]);
-
-  // 上と同じ理由で layout 相に置く（直後の打鍵を落とさない）
-  React.useLayoutEffect(() => {
-    if (pendingEditId !== task.id) return;
-    setEditing(true);
-    setDraft("");
-    clearPendingEdit?.();
-  }, [pendingEditId, task.id]);
-
-  function handleCardKeyDown(e) {
-    if (editing) return;
-    if (e.key === "Enter") { e.preventDefault(); addBlockBelow?.(task); return; }
-    if (e.key === "ArrowUp" || e.key === "ArrowDown") {
-      e.preventDefault();
-      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
-      return;
-    }
-    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setDraft(e.key); setEditing(true); }
-  }
-
   const children = childrenOf?.(task.id) || [];
+
+  const b = useTaskBlock({
+    task,
+    dragId: `traytask-${task.id}`,
+    dragData: { type: "task", id: task.id },
+    dropId: `traytask-drop-${task.id}`,
+    dropData: { type: "task", id: task.id },
+    dragDisabled: selectMode,
+    upsertTask,
+    removeTask,
+    // タイトルを確定してから親子を変える。同じ tick で2回 commit すると
+    // 後の書き込みが前の書き込みを消すので、間に1フレーム挟む。
+    onTab: (e, { draft, setEditing }) => {
+      const isShift = e.shiftKey;
+      const clean = draft.trim();
+      if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
+      setEditing(false);
+      setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
+    },
+  });
 
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <div
-        ref={setNodeRef}
-        {...(!editing && !selectMode && !focusPickMode ? attributes : {})}
-        {...(!editing && !selectMode && !focusPickMode ? listeners : {})}
-        onClick={() => { if (focusPickMode) { pickTask?.(task.id); return; } onToggleSelect?.(task.id); }}
-        tabIndex={editing ? -1 : 0}
-        onKeyDown={handleCardKeyDown}
-        data-task-id={task.id}
+        {...b.blockProps}
         className={classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
-          focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70",
-          selectMode ? "cursor-pointer" : editing ? "cursor-text" : "cursor-grab",
-          isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
-          editing && "bg-white/[0.07]",
-          isDragging && "opacity-30",
-          isOver && !isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
+          b.focusRingClass,
+          selectMode ? "cursor-pointer" : b.editing ? "cursor-text" : "cursor-grab",
+          b.isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
+          b.editing && "bg-white/[0.07]",
+          b.isDragging && "opacity-30",
+          b.isOver && !b.isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
         )}
       >
         {selectMode ? (
-          <button onClick={(e) => { e.stopPropagation(); onToggleSelect?.(task.id); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300">
-            <CheckSquare className={classNames("h-3 w-3", isSelected && "text-sky-400")} />
+          <button onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300">
+            <CheckSquare className={classNames("h-3 w-3", b.isSelected && "text-sky-400")} />
           </button>
         ) : (
           <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>{isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}</button>
         )}
         <div className="min-w-0 flex-1">
-          {editing ? (
+          {b.editing ? (
             <textarea
-              autoFocus
-              rows={1}
-              ref={autoResize}
-              value={draft}
-              onFocus={(e) => focusEnd(e.target)}
-              onChange={(e) => { setDraft(e.target.value); autoResize(e.target); }}
-              onBlur={() => { if (draft.trim() && draft !== task.title) upsertTask({ id: task.id, title: draft.trim() }); setEditing(false); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  const cur = cardRef.current;
-                  if (!draft.trim()) {
-                    setEditing(false);
-                    removeTask(task.id);
-                    setTimeout(() => focusAdjacentBlock(cur, -1), 0);
-                    return;
-                  }
-                  if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() });
-                  // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
-                  refocusCard.current = true;
-                  setEditing(false);
-                  return;
-                }
-                if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
-                if ((e.key === "Backspace" || e.key === "Delete") && !draft) {
-                  e.preventDefault();
-                  const cur = cardRef.current;
-                  removeTask(task.id);
-                  setTimeout(() => focusAdjacentBlock(cur, -1), 0);
-                  return;
-                }
-                if (e.key === "Tab") {
-                  e.preventDefault();
-                  const isShift = e.shiftKey;
-                  const clean = draft.trim();
-                  if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
-                  setEditing(false);
-                  setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
-                }
-              }}
-              onClick={(e) => e.stopPropagation()}
-              onPointerDown={(e) => e.stopPropagation()}
+              {...b.textareaProps}
+              onBlur={() => { b.commit(); b.setEditing(false); }}
               className="w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"
             />
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
-              <div onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }} style={taskTextStyle(task)} className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text", focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}>{task.title}</div>
+              <div
+                {...b.titleProps}
+                className={classNames("min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text", b.focusPickMode ? "cursor-crosshair" : "cursor-pointer", isDone && "line-through opacity-40")}
+              >
+                {task.title}
+              </div>
               <button onClick={(e) => { e.stopPropagation(); setSelectedTaskId(task.id); }} className="shrink-0 opacity-0 group-hover/title:opacity-100 transition text-neutral-500 hover:text-neutral-300"><Info className="h-3 w-3" /></button>
             </div>
           )}
@@ -4575,12 +4552,9 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
           selectedTaskId={selectedTaskId}
           childrenOf={childrenOf}
           selectMode={selectMode}
-          selectedIds={selectedIds}
-          onToggleSelect={onToggleSelect}
           onIndent={() => {
             if (idx === 0) return;
-            const prevSibling = children[idx - 1];
-            upsertTask({ id: child.id, parentId: prevSibling.id });
+            upsertTask({ id: child.id, parentId: children[idx - 1].id });
           }}
           onOutdent={() => {
             upsertTask({ id: child.id, parentId: task.parentId || null });
