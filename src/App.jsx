@@ -3652,6 +3652,20 @@ function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories,
   );
 }
 
+// 編集終了と同じフレームでカードへフォーカスを戻すためのフック。
+// setTimeout(0) では Enter を素早く 2 回押したとき、2 回目がフォーカス移動前に
+// 届いて取りこぼされる。
+function useRefocusAfterEdit(editing, cardRef) {
+  const pending = useRef(false);
+  React.useLayoutEffect(() => {
+    if (!editing && pending.current) {
+      pending.current = false;
+      cardRef.current?.focus();
+    }
+  }, [editing, cardRef]);
+  return pending;
+}
+
 // #rrggbb の相対輝度（0=黒, 1=白）
 function relativeLuminance(hex) {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
@@ -3693,18 +3707,25 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
   const selected = selectedTaskId === task.id;
   const cardRef = useRef(null);
   const [editing, setEditing] = useState(false);
+  const refocusCard = useRefocusAfterEdit(editing, cardRef);
   const parent = task.parentId && taskMap ? taskMap.get(task.parentId) : null;
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [contextMenu, setContextMenu] = useState(null); // { x, y }
   const longPressTimer = useRef(null);
   const longPressActive = useRef(false);
 
+  // 編集していない間だけ外からの変更（他端末の同期など）を取り込む。
+  // これから編集に入るブロック（pendingEditId）も対象外。さもないと
+  // マウント直後のこの effect が、空にしたドラフトを placeholder で上書きしてしまう。
   useEffect(() => {
+    if (editing || pendingEditId === task.id) return;
     setTitleDraft(task.title);
-  }, [task.id, task.title]);
+  }, [task.id, task.title, editing, pendingEditId]);
 
-  // Enter で作られた直後の空ブロックは、そのまま編集状態で開く
-  useEffect(() => {
+  // Enter で作られた直後の空ブロックは、そのまま編集状態で開く。
+  // useEffect（描画後）だと textarea が載るまでに1フレーム空き、
+  // 続けて打った文字を取りこぼすので layout 相で入る。
+  React.useLayoutEffect(() => {
     if (pendingEditId !== task.id) return;
     setEditing(true);
     setTitleDraft("");
@@ -3791,6 +3812,8 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
     }
     // 印字可能文字でそのまま編集開始
     if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      // preventDefault しないと、直後に開く textarea にも同じ文字が入って重複する
+      e.preventDefault();
       setTitleDraft(e.key);
       setEditing(true);
     }
@@ -3866,9 +3889,9 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
                       return;
                     }
                     commitTitle();
-                    setEditing(false);
                     // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
-                    setTimeout(() => cardRef.current?.focus(), 0);
+                    refocusCard.current = true;
+                    setEditing(false);
                     return;
                   }
                   if ((event.key === "Backspace" || event.key === "Delete") && event.currentTarget.value.length === 0) {
@@ -4410,6 +4433,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   const { addBlockBelow, pendingEditId, clearPendingEdit } = useBlockEdit();
   const cardRef = useRef(null);
   const [editing, setEditing] = useState(false);
+  const refocusCard = useRefocusAfterEdit(editing, cardRef);
   const [draft, setDraft] = useState(task.title);
   const isDone = task.status === "完了";
   const isSelected = !!(selectedIds && selectedIds.has(task.id));
@@ -4424,9 +4448,14 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   });
   const setNodeRef = (el) => { dragRef(el); dropRef(el); cardRef.current = el; };
 
-  useEffect(() => { setDraft(task.title); }, [task.title]);
-
+  // 同上
   useEffect(() => {
+    if (editing || pendingEditId === task.id) return;
+    setDraft(task.title);
+  }, [task.title, editing, pendingEditId, task.id]);
+
+  // 上と同じ理由で layout 相に置く（直後の打鍵を落とさない）
+  React.useLayoutEffect(() => {
     if (pendingEditId !== task.id) return;
     setEditing(true);
     setDraft("");
@@ -4441,7 +4470,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
       focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
       return;
     }
-    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) { setDraft(e.key); setEditing(true); }
+    if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setDraft(e.key); setEditing(true); }
   }
 
   const children = childrenOf?.(task.id) || [];
@@ -4494,9 +4523,9 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
                     return;
                   }
                   if (draft.trim() !== task.title) upsertTask({ id: task.id, title: draft.trim() });
-                  setEditing(false);
                   // カードにフォーカスを戻す → もう一度 Enter で下にブロック追加
-                  setTimeout(() => cur?.focus(), 0);
+                  refocusCard.current = true;
+                  setEditing(false);
                   return;
                 }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
@@ -4582,6 +4611,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
   const cardRef = useRef(null);
   const textareaRef = useRef(null);
   const [editing, setEditing] = useState(!!autoEdit);
+  const refocusCard = useRefocusAfterEdit(editing, cardRef);
   const [draft, setDraft] = useState(autoEdit ? "" : task.title);
   useEffect(() => { if (autoEdit) { setEditing(true); setDraft(""); onEditDone?.(); } }, [autoEdit]);
   useEffect(() => {
@@ -4617,6 +4647,8 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
             return;
           }
           if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+            // preventDefault しないと、直後に開く textarea にも同じ文字が入って重複する
+            e.preventDefault();
             setDraft(e.key);
             setEditing(true);
           }
@@ -4658,7 +4690,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
                 }
               }}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); setTimeout(() => cardRef.current?.focus(), 0); }
+                if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); commitTitle(); refocusCard.current = true; setEditing(false); }
                 if (e.key === "Escape") { e.preventDefault(); setDraft(task.title); setEditing(false); }
                 if ((e.key === "Backspace" || e.key === "Delete") && !draft) { e.preventDefault(); onDeleteFocusPrev?.(task.id); removeTask?.(task.id); }
                 if (e.key === "Tab") {
