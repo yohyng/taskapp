@@ -501,26 +501,32 @@ function useBlockEdit() {
   return React.useContext(BlockEditContext);
 }
 
-// "/" コマンドの検出とメニュー操作。ブロックのエディタでも、列の「追加…」欄でも使う。
+// コマンドの呼び出し文字。日本語入力のままでも打てるよう全角も受ける。
+const SLASH_TRIGGERS = ["/", "／", "；", ";"];
+function isSlashTrigger(ch) {
+  return SLASH_TRIGGERS.includes(ch);
+}
+
+// コマンドの検出とメニュー操作。ブロックのエディタでも、列の「追加…」欄でも使う。
 // onPick には選ばれたコマンドと、"/query" を取り除いた残りの文字列を渡す。
 function useSlashQuery({ enabled = true, onPick }) {
   const [slash, setSlash] = useState(null); // { from, query, index }
   const matches = slash ? matchSlashCommands(slash.query) : [];
 
-  // 入力のたびに "/" の開始位置と絞り込み語を追う
+  // 入力のたびに開始位置と絞り込み語を追う
   function detect(value, caret) {
     if (!enabled) return;
     const at = caret ?? value.length;
     if (slash) {
-      // "/" が消えた、または空白が入ったら閉じる
-      if (value[slash.from] !== "/" || at <= slash.from) { setSlash(null); return; }
+      // トリガー文字が消えた、または空白が入ったら閉じる
+      if (!isSlashTrigger(value[slash.from]) || at <= slash.from) { setSlash(null); return; }
       const q = value.slice(slash.from + 1, at);
       if (/\s/.test(q)) { setSlash(null); return; }
       setSlash({ ...slash, query: q, index: 0 });
       return;
     }
-    if (value[at - 1] !== "/") return;
-    // 行頭か空白の直後の "/" だけをコマンド開始とみなす
+    if (!isSlashTrigger(value[at - 1])) return;
+    // 行頭か空白の直後だけをコマンド開始とみなす
     const prev = value[at - 2];
     if (prev === undefined || /\s/.test(prev)) setSlash({ from: at - 1, query: "", index: 0 });
   }
@@ -4059,6 +4065,7 @@ function useTaskBlock({
     cardRef, textareaRef,
     blockProps, textareaProps, titleProps, focusRingClass,
     commit, removeAndLeave,
+    addBelow: () => addBlockBelow?.(task),
     slash: sq.slash, slashMatches: sq.matches,
     runSlash: (cmd) => sq.pick(cmd, draft),
   };
@@ -4137,6 +4144,38 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
   );
 }
 
+// ブロック左端の操作列（Notion の + と ⠿）。ホバーで出る。
+// 場所は常に確保しておく。出入りで幅が変わると行がガタつくため。
+function BlockGutter({ block, compact }) {
+  return (
+    <div
+      className={classNames(
+        "flex shrink-0 items-center self-start pt-0.5 opacity-0 transition group-hover/block:opacity-60 focus-within:opacity-60",
+        compact ? "w-[14px]" : "w-[26px]",
+      )}
+    >
+      {!compact && (
+        <button
+          onClick={(e) => { e.stopPropagation(); block.addBelow(); }}
+          title="下にブロックを追加"
+          className="rounded p-px text-neutral-400 hover:bg-white/10 hover:text-neutral-100"
+        >
+          <Plus className="h-3 w-3" />
+        </button>
+      )}
+      {/* 行全体がドラッグできるので、ここは掴む位置の目印。
+          クリックは止めて選択が走らないようにする。 */}
+      <span
+        onClick={(e) => e.stopPropagation()}
+        title="ドラッグで移動"
+        className="cursor-grab rounded p-px text-neutral-500 hover:text-neutral-200"
+      >
+        <GripVertical className="h-3 w-3" />
+      </span>
+    </div>
+  );
+}
+
 // タスク1行。ビューごとに違うのは飾り（左のボタン類・チップ・下の補助行）だけなので、
 // それだけをスロットで受け取り、行そのもの（枠・タイトル・インライン編集）はここが持つ。
 // スロットは useTaskBlock の戻り値 b を受け取る関数で、選択状態などに応じて描き分けられる。
@@ -4153,6 +4192,7 @@ function TaskBlock({
   titleAttrs,
   setSelectedTaskId,
   onEmptyBlur,
+  compactGutter = false,
   ...blockOptions
 }) {
   const b = useTaskBlock(blockOptions);
@@ -4166,12 +4206,13 @@ function TaskBlock({
         {...b.blockProps}
         {...extraProps}
         className={classNames(
-          "group flex items-center px-1.5 py-1.5 outline-none",
+          "group/block flex items-center gap-1 px-1.5 py-1.5 outline-none",
           b.focusRingClass,
           b.isSelected && "rounded bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
           b.isDragging && "opacity-30",
         )}
       >
+        <BlockGutter block={b} compact={compactGutter} />
         <span className="h-px w-full shrink-0 bg-current opacity-40" />
       </div>
     );
@@ -4182,11 +4223,13 @@ function TaskBlock({
       {...b.blockProps}
       {...extraProps}
       className={classNames(
+        "group/block",
         rowClassName?.(b),
         kind === "callout" && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
       )}
     >
-      <div className="flex items-start gap-1.5">
+      <div className="flex w-full min-w-0 items-start gap-1.5">
+        <BlockGutter block={b} compact={compactGutter} />
         {kind === "callout" && <span className="mt-0.5 shrink-0 text-[11px] leading-none">💡</span>}
         {BLOCK_TYPES[kind].checkbox && leading?.(b)}
         <div className="min-w-0 flex-1">
@@ -4194,6 +4237,7 @@ function TaskBlock({
             <div className="relative">
               <textarea
                 {...b.textareaProps}
+                placeholder="コマンドは / または ；"
                 onBlur={() => {
                   // メニュー操作でフォーカスが外れただけのときは閉じない
                   if (b.slash) return;
@@ -4215,7 +4259,7 @@ function TaskBlock({
                   className={titleClassName?.(b)}
                   style={{ ...b.titleProps.style, ...(kind === "heading" ? { fontSize: 14, fontWeight: 700, letterSpacing: "0.01em" } : null) }}
                 >
-                  {task.title}
+                  {task.title || <span className="opacity-40">コマンドは / または ；</span>}
                 </div>
                 {titleExtra?.(b)}
               </div>
@@ -4986,6 +5030,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
         }}
         setSelectedTaskId={setSelectedTaskId}
         extraProps={{ "data-daytask": "true" }}
+        compactGutter
         rowClassName={(b) => classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
           b.focusRingClass,

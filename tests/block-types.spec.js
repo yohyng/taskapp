@@ -86,3 +86,55 @@ test.describe("追加欄のスラッシュ", () => {
     expect(created.scheduledDate).toBe(todayKey());
   });
 });
+
+test.describe("ブロックの操作列", () => {
+  test("ホバーで + と ⠿ が出て、+ で下にブロックが増える", async ({ page }) => {
+    const before = (await storedTasks(page)).length;
+    const row = block(page, "a-solo");
+    await row.hover();
+
+    const plus = row.locator('button[title="下にブロックを追加"]');
+    await expect(plus).toBeVisible();
+    await expect(row.locator('span[title="ドラッグで移動"]')).toBeVisible();
+
+    await plus.click();
+    await expect.poll(async () => (await storedTasks(page)).length).toBe(before + 1);
+    // 追加された空ブロックがそのまま編集状態になる
+    await expect(page.locator("textarea")).toHaveCount(1);
+  });
+
+  test("⠿ をクリックしても選択にはならない", async ({ page }) => {
+    const row = block(page, "a-solo");
+    await row.hover();
+    await row.locator('span[title="ドラッグで移動"]').click();
+    await expect(page.getByText(/件選択中/)).toHaveCount(0);
+  });
+
+  test("空のブロックには入力のヒントが出る", async ({ page }) => {
+    const row = block(page, "a-solo");
+    await row.hover();
+    await row.locator('button[title="下にブロックを追加"]').click();
+    await expect(page.locator("textarea")).toHaveAttribute("placeholder", /コマンドは/);
+  });
+});
+
+test.describe("全角のコマンド呼び出し", () => {
+  for (const trigger of ["；", "／"]) {
+    test(`「${trigger}」でもメニューが開く`, async ({ page }) => {
+      await block(page, "a-solo").locator("div.cursor-pointer").first().dblclick();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" " + trigger);
+      await expect(menuItem(page, "見出し")).toBeVisible();
+    });
+  }
+
+  test("「；」で選んだコマンドが実行され、記号は残らない", async ({ page }) => {
+    await block(page, "b-1").locator("div.cursor-pointer").first().dblclick();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" ；今日");
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await storedTask(page, "b-1")).scheduledDate).toBe(todayKey());
+    expect((await storedTask(page, "b-1")).title).toBe("ベータ1");
+  });
+});
