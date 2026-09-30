@@ -146,7 +146,9 @@ test.describe("マークダウン記法での変換", () => {
     ["### ", "heading3"],
     ["- ", "bulleted"],
     ["1. ", "numbered"],
-    ["> ", "quote"],
+    // Notion 公式では > はトグル、引用は "
+    ["> ", "toggle"],
+    ['" ', "quote"],
     ["[] ", "task"],
     ["--- ", "divider"],
   ];

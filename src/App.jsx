@@ -138,17 +138,20 @@ const TASK_TEXT_COLORS = [
 //   size/weight … 見出しの強さ
 // 既定は task（＝ToDo）。既存データは全部これなので、見え方は変わらない。
 const BLOCK_TYPES = {
-  task:      { label: "ToDo", checkbox: true,  md: "[] " },
+  task:      { label: "ToDo", checkbox: true,  md: ["[] "] },
   text:      { label: "テキスト" },
-  heading1:  { label: "見出し1", size: 17, weight: 700, md: "# " },
-  heading2:  { label: "見出し2", size: 15, weight: 700, md: "## " },
-  heading3:  { label: "見出し3", size: 13.5, weight: 600, md: "### " },
-  bulleted:  { label: "箇条書きリスト", marker: "•", md: "- " },
-  numbered:  { label: "番号付きリスト", numbered: true, md: "1. " },
-  quote:     { label: "引用", quote: true, md: "> " },
+  heading1:  { label: "見出し1", size: 17, weight: 700, md: ["# "] },
+  heading2:  { label: "見出し2", size: 15, weight: 700, md: ["## "] },
+  heading3:  { label: "見出し3", size: 13.5, weight: 600, md: ["### "] },
+  bulleted:  { label: "箇条書きリスト", marker: "•", md: ["- ", "* "] },
+  numbered:  { label: "番号付きリスト", numbered: true, md: ["1. "] },
+  toggle:    { label: "トグルリスト", toggle: true, md: ["> "] },
+  quote:     { label: "引用", quote: true, md: ['" '] },
   callout:   { label: "コールアウト", marker: "💡", callout: true },
-  divider:   { label: "区切り線", text: false, md: "--- " },
+  code:      { label: "コード", code: true, md: ["```"] },
+  divider:   { label: "区切り線", text: false, md: ["--- "] },
 };
+
 function blockTypeOf(task) {
   return BLOCK_TYPES[task?.blockType] ? task.blockType : "task";
 }
@@ -159,7 +162,7 @@ function isTaskBlockType(task) {
 // 行頭のマークダウン記法を種別に変換する（"# " で見出し1 など）
 const MARKDOWN_PREFIXES = Object.entries(BLOCK_TYPES)
   .filter(([, cfg]) => cfg.md)
-  .map(([key, cfg]) => [cfg.md, key])
+  .flatMap(([key, cfg]) => cfg.md.map((prefix) => [prefix, key]))
   .sort((a, b) => b[0].length - a[0].length); // "## " を "# " より先に見る
 
 // 同じ並びの中で、直前まで連続している numbered ブロックの数から番号を出す。
@@ -231,7 +234,7 @@ const SLASH_COMMANDS = [
   ...Object.entries(BLOCK_TYPES).map(([key, cfg]) => ({
     key: `type-${key}`,
     label: cfg.label,
-    hint: cfg.md ? cfg.md.trim() : "種類を変える",
+    hint: cfg.md ? cfg.md[0].trim() : "種類を変える",
     keywords: `${cfg.label} ${key} block type`,
     group: "種類",
     run: ({ task, ctx }) => ctx.setBlockType(task, key),
@@ -429,6 +432,16 @@ function toneClasses(tone) {
 
 function normalizeTitle(title) {
   return title.trim().replace(/\s+/g, " ");
+}
+
+// ページ本文は Shift+Enter の改行を残す。
+// 行内の連続空白だけ詰めて、改行はそのまま。
+function normalizeBlockText(text) {
+  return String(text ?? "")
+    .split("\n")
+    .map((line) => line.replace(/[^\S\n]+/g, " ").trim())
+    .join("\n")
+    .replace(/^\n+|\n+$/g, "");
 }
 
 function projectKey(category, project) {
@@ -4030,6 +4043,7 @@ function useTaskBlock({
   onEnterBlock,   // Enter: 直下に同じ種類のブロックを作る
   onMergeBack,    // 行頭 Backspace: 前のブロックに繋げる
   onMoveBlock,    // Alt+Shift+↑↓: 並びを入れ替える
+  onDuplicate,    // Cmd+D: ブロックを複製する
 }) {
   const { focusPickMode, pickTask } = useFocusMode();
   const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
@@ -4105,16 +4119,16 @@ function useTaskBlock({
   // 毎打鍵だと履歴が細かくなりすぎるので、少し止まってから書く。
   useEffect(() => {
     if (!notionMode || !editing) return;
-    if (normalizeTitle(draft) === task.title) return;
+    if (normalizeBlockText(draft) === task.title) return;
     const id = setTimeout(() => {
-      const clean = normalizeTitle(draft);
+      const clean = normalizeBlockText(draft);
       if (clean !== task.title) upsertTask?.({ id: task.id, title: clean });
     }, 400);
     return () => clearTimeout(id);
   }, [draft, editing, notionMode, task.id, task.title]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function commit() {
-    const clean = normalizeTitle(draft);
+    const clean = notionMode ? normalizeBlockText(draft) : normalizeTitle(draft);
     if (!clean) return false; // 空 → 呼び出し側が削除を決める
     if (clean !== task.title) upsertTask?.({ id: task.id, title: clean });
     return true;
@@ -4168,7 +4182,25 @@ function useTaskBlock({
       e.preventDefault();
       // 確定と並べ替えを別々に書くと、後の書き込みが確定前の状態を元にして
       // タイトルを巻き戻すので、まとめて渡す
-      onMoveBlock?.(task, e.key === "ArrowUp" ? -1 : 1, normalizeTitle(draft));
+      onMoveBlock?.(task, e.key === "ArrowUp" ? -1 : 1, normalizeBlockText(draft));
+      return;
+    }
+    // Cmd/Ctrl+B / I / E で選択範囲を装飾する（Notion と同じ割り当て）
+    if (notionMode && (e.metaKey || e.ctrlKey) && ["b", "i", "e"].includes(e.key.toLowerCase())) {
+      e.preventDefault();
+      const mark = { b: "**", i: "*", e: "`" }[e.key.toLowerCase()];
+      const el2 = e.currentTarget;
+      const [a, z] = [el2.selectionStart, el2.selectionEnd];
+      if (a === z) return;
+      const next = draft.slice(0, a) + mark + draft.slice(a, z) + mark + draft.slice(z);
+      setDraft(next);
+      setTimeout(() => { el2.setSelectionRange(a + mark.length, z + mark.length); }, 0);
+      return;
+    }
+    // Cmd/Ctrl+D でブロックを複製する
+    if (notionMode && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+      e.preventDefault();
+      onDuplicate?.(task, normalizeBlockText(draft));
       return;
     }
     // Cmd/Ctrl+Enter で完了を切り替える
@@ -4183,7 +4215,7 @@ function useTaskBlock({
       if (notionMode) {
         // 空のリスト項目で Enter → リストを抜けてテキストに戻る
         const kind = blockTypeOf(task);
-        if (!normalizeTitle(draft) && kind !== "text" && kind !== "task") {
+        if (!normalizeBlockText(draft) && kind !== "text" && kind !== "task") {
           slashCtx?.setBlockType?.(task, "text");
           return;
         }
@@ -4225,7 +4257,7 @@ function useTaskBlock({
           e.preventDefault();
           // 種類とタイトルを1回で書く。別々だと、まだ保存していない
           // 打ちかけの文字が種類変更の書き込みに巻き込まれて消える。
-          upsertTask?.({ id: task.id, blockType: "text", title: normalizeTitle(draft) });
+          upsertTask?.({ id: task.id, blockType: "text", title: normalizeBlockText(draft) });
           return;
         }
         e.preventDefault();
@@ -4402,8 +4434,10 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
 }
 
 // ページ本文の1ブロック。Notion の本文行に合わせて、列ビューより少し大きめ。
-function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops }) {
+function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse }) {
   const children = childrenOf?.(task.id) || [];
+  // トグルは閉じている間、子を隠す
+  const isCollapsed = blockTypeOf(task) === "toggle" && collapsedSet?.has(task.id);
   return (
     <div style={depth > 0 ? { marginLeft: depth * 24 } : undefined}>
       <TaskBlock
@@ -4417,19 +4451,19 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         removeTask={removeTask}
         setSelectedTaskId={setSelectedTaskId}
         notionMode
+        collapsed={isCollapsed}
+        onToggleCollapse={onToggleCollapse}
         onEnterBlock={(t, draft) => ops.enterBlock(t, draft, siblings, idx)}
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
         onMoveBlock={(t, dir, title) => ops.moveBlock(t, dir, siblings, idx, title)}
-        onTab={(e, { draft, setEditing }) => {
-          const isShift = e.shiftKey;
-          const clean = (draft || "").trim();
-          if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
-          setEditing(false);
-          // 同じ tick で2回書くと後の書き込みが前を消すので1フレーム空ける
-          setTimeout(() => {
-            if (isShift) upsertTask({ id: task.id, parentId: null });
-            else if (idx > 0) upsertTask({ id: task.id, parentId: siblings[idx - 1].id });
-          }, 0);
+        onDuplicate={(t, title) => ops.duplicate(t, title)}
+        onTab={(e, { draft }) => {
+          // 確定と親子変更を1回で書く。別々だと、後の書き込みが確定前の
+          // 状態を元にしてタイトルを巻き戻す。
+          const title = normalizeBlockText(draft);
+          if (e.shiftKey) upsertTask({ id: task.id, title, parentId: null });
+          else if (idx > 0) upsertTask({ id: task.id, title, parentId: siblings[idx - 1].id });
+          else upsertTask({ id: task.id, title });
         }}
         rowClassName={(b) => classNames(
           "rounded px-1 py-[3px] transition hover:bg-white/[0.035]",
@@ -4453,7 +4487,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           </button>
         )}
       />
-      {children.map((child, i) => (
+      {!isCollapsed && children.map((child, i) => (
         <PageBlock
           key={child.id}
           task={child}
@@ -4467,6 +4501,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           toggleDone={toggleDone}
           setSelectedTaskId={setSelectedTaskId}
           ops={ops}
+          collapsedSet={collapsedSet}
+          onToggleCollapse={onToggleCollapse}
         />
       ))}
     </div>
@@ -4477,6 +4513,19 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 // 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
 function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, onReorder, onMergeBlocks }) {
   const { markForEdit } = useBlockEdit();
+  // トグルの開閉は見た目の設定なので端末内だけに持つ
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("taskspace-page-collapsed") || "[]")); }
+    catch { return new Set(); }
+  });
+  const toggleCollapse = useCallback((id) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      try { localStorage.setItem("taskspace-page-collapsed", JSON.stringify([...next])); } catch { /* quota */ }
+      return next;
+    });
+  }, []);
   const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
   const active = pages.find((p) => p.id === activeId) || pages[0];
   const [iconOpen, setIconOpen] = useState(false);
@@ -4515,6 +4564,20 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       const prev = siblings[idx - 1];
       if (!prev) return;
       onMergeBlocks(prev.id, task.id, (prev.title || "") + (draft || ""));
+    },
+    // Cmd+D: 同じ内容のブロックを直下に作る
+    duplicate: (task, title) => {
+      const created = addTask({
+        title: title || task.title || "",
+        allowEmpty: true,
+        plain: true,
+        pageId: task.pageId,
+        parentId: task.parentId || null,
+        blockType: blockTypeOf(task),
+        afterId: task.id,
+        silent: true,
+      });
+      if (created) markForEdit?.(created.id);
     },
     // Alt+Shift+↑↓: 並びを入れ替える
     moveBlock: (task, dir, siblings, idx, title) => {
@@ -4626,6 +4689,8 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
                 toggleDone={toggleDone}
                 setSelectedTaskId={setSelectedTaskId}
                 ops={ops}
+                collapsedSet={collapsed}
+                onToggleCollapse={toggleCollapse}
               />
             ))}
           </div>
@@ -4876,6 +4941,8 @@ function TaskBlock({
   onEmptyBlur,
   compactGutter = false,
   listNumber,
+  collapsed = false,
+  onToggleCollapse,
   ...blockOptions
 }) {
   const b = useTaskBlock(blockOptions);
@@ -4913,10 +4980,20 @@ function TaskBlock({
         rowClassName?.(b),
         cfg.callout && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
         cfg.quote && "border-l-2 border-l-current/30 pl-2 opacity-80",
+        cfg.code && "rounded border border-white/10 bg-black/30 font-mono",
       )}
     >
       <div className="flex w-full min-w-0 items-start gap-1.5">
         <BlockGutter block={b} compact={compactGutter} />
+        {cfg.toggle && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(task.id); }}
+            title={collapsed ? "開く" : "閉じる"}
+            className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-neutral-200"
+          >
+            {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+          </button>
+        )}
         {cfg.marker && <span className="mt-0.5 shrink-0 text-[11px] leading-none">{cfg.marker}</span>}
         {cfg.numbered && <span className="mt-0.5 shrink-0 text-[11px] leading-none tabular-nums opacity-60">{listNumber ?? 1}.</span>}
         {cfg.checkbox && leading?.(b)}
@@ -4948,7 +5025,9 @@ function TaskBlock({
                   className={titleClassName?.(b)}
                   style={{ ...b.titleProps.style, ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null) }}
                 >
-                  {task.title || <span className="opacity-25">&nbsp;</span>}
+                  {task.title
+                    ? (b.notionMode ? renderBlockText(task.title) : task.title)
+                    : <span className="opacity-25">&nbsp;</span>}
                 </div>
                 {titleExtra?.(b)}
               </div>
@@ -4980,6 +5059,52 @@ function useRefocusAfterEdit(editing, cardRef) {
     }
   }, [editing, cardRef]);
   return pending;
+}
+
+// 本文のインライン装飾。**太字** *斜体* `コード` ~打ち消し~ と、URL の自動リンク。
+// 編集中は記法のまま見せて、確定表示のときだけ組む（軽量なマークダウン表示）。
+const INLINE_RULES = [
+  { re: /\*\*([^*]+)\*\*/g, render: (t, k) => <strong key={k}>{t}</strong> },
+  { re: /(?<!\*)\*([^*\n]+)\*(?!\*)/g, render: (t, k) => <em key={k}>{t}</em> },
+  { re: /`([^`\n]+)`/g, render: (t, k) => <code key={k} className="rounded bg-white/10 px-1 py-px text-[0.9em]">{t}</code> },
+  { re: /~([^~\n]+)~/g, render: (t, k) => <s key={k} className="opacity-60">{t}</s> },
+  { re: /(https?:\/\/[^\s]+)/g, render: (t, k) => (
+      <a key={k} href={t} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:opacity-80" onClick={(e) => e.stopPropagation()}>{t}</a>
+    ) },
+];
+
+function renderInline(text) {
+  if (!text) return text;
+  // 一番早く現れた記法から順に切り出していく
+  let rest = text;
+  const out = [];
+  let key = 0;
+  let guard = 0;
+  while (rest && guard++ < 200) {
+    let best = null;
+    for (const rule of INLINE_RULES) {
+      rule.re.lastIndex = 0;
+      const m = rule.re.exec(rest);
+      if (m && (!best || m.index < best.m.index)) best = { rule, m };
+    }
+    if (!best) break;
+    if (best.m.index > 0) out.push(rest.slice(0, best.m.index));
+    out.push(best.rule.render(best.m[1], key++));
+    rest = rest.slice(best.m.index + best.m[0].length);
+  }
+  if (rest) out.push(rest);
+  return out.length ? out : text;
+}
+
+// Shift+Enter の改行を保った表示
+function renderBlockText(text) {
+  const lines = String(text ?? "").split("\n");
+  return lines.map((line, i) => (
+    <React.Fragment key={i}>
+      {i > 0 && <br />}
+      {renderInline(line)}
+    </React.Fragment>
+  ));
 }
 
 // #rrggbb の相対輝度（0=黒, 1=白）
