@@ -44,6 +44,7 @@ import {
   Pencil,
   Focus,
   Airplay,
+  LayoutGrid,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -200,6 +201,14 @@ const SLASH_COMMANDS = [
   {
     key: "unschedule", group: "予定", label: "日付を外す", hint: "予定なしに戻す", keywords: "clear unschedule hizuke 日付",
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
+  },
+  {
+    key: "to-canvas", group: "予定", label: "キャンバスへ", hint: "自由配置に置く", keywords: "canvas キャンバス 配置",
+    run: ({ task, ctx }) => ctx.placeOnCanvas(task),
+  },
+  {
+    key: "off-canvas", group: "予定", label: "キャンバスから外す", hint: "自由配置をやめる", keywords: "canvas キャンバス 外す",
+    run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, canvasX: null, canvasY: null }),
   },
   {
     key: "done", group: "操作", label: "完了", hint: "完了にする", keywords: "done complete kanryou 完了",
@@ -505,6 +514,8 @@ function normalizeTask(task) {
     stockViewId: null,
     style: null,
     blockType: "task",
+    canvasX: null,
+    canvasY: null,
     ...task,
   };
 }
@@ -743,6 +754,8 @@ function App() {
     return () => mq.removeEventListener("change", handler);
   }, []);
   const use5col = true; // 7days上 + Board下 固定レイアウト
+  const [canvasMode, setCanvasMode] = useState(() => localStorage.getItem("taskspace-canvas-mode") === "1");
+  useEffect(() => { localStorage.setItem("taskspace-canvas-mode", canvasMode ? "1" : "0"); }, [canvasMode]);
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1400,7 +1413,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -1419,6 +1432,8 @@ function App() {
       memo: parent ? `「${parent.title}」の子タスクとして追加` : "",
       dueDate,
       scheduledDate,
+      canvasX,
+      canvasY,
     });
     commitTasks((prev) => {
       if (afterId) {
@@ -2385,6 +2400,11 @@ function App() {
     removeTask,
     toggleDone,
     defaultStockViewId: stockViews[0]?.id,
+    // キャンバスに置く。重ならないよう、既にある分だけ少しずらす。
+    placeOnCanvas: (task) => {
+      const n = tasks.filter((t) => t.canvasX != null).length;
+      upsertTask({ id: task.id, canvasX: 40 + (n % 4) * 280, canvasY: 40 + Math.floor(n / 4) * 90 });
+    },
     setBlockType: (task, blockType) => {
       // 区切り線は本文を持たないので、タイトルは種別名で置いておく
       const patch = { id: task.id, blockType };
@@ -2402,6 +2422,7 @@ function App() {
     removeTask: (...a) => slashHandlers.current.removeTask(...a),
     toggleDone: (...a) => slashHandlers.current.toggleDone(...a),
     setBlockType: (...a) => slashHandlers.current.setBlockType(...a),
+    placeOnCanvas: (...a) => slashHandlers.current.placeOnCanvas(...a),
     setStyle: (...a) => slashHandlers.current.setStyle(...a),
     get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
   }), []);
@@ -2468,6 +2489,13 @@ function App() {
               className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", focusPickMode ? "border-amber-400/40 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
             >
               <Focus className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setCanvasMode((v) => !v)}
+              title={canvasMode ? "リスト表示に戻す" : "キャンバス表示"}
+              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", canvasMode ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
             </button>
             <KeepAwakeButton />
             <div className="relative">
@@ -2757,7 +2785,19 @@ function App() {
           </section>
         )}
 
-        {use5col && (
+        {canvasMode && (
+          <CanvasView
+            tasks={tasks}
+            upsertTask={upsertTask}
+            removeTask={removeTask}
+            toggleDone={toggleDone}
+            setSelectedTaskId={setSelectedTaskId}
+            selectedTaskId={selectedTaskId}
+            childrenOf={childrenOf}
+            addTask={addTask}
+          />
+        )}
+        {!canvasMode && use5col && (
           <>
           {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -2869,7 +2909,7 @@ function App() {
           </>
         )}
 
-        {!use5col && (
+        {!canvasMode && !use5col && (
         <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           {(() => {
             // Group consecutive board-type sections into a shared auto-fit grid
@@ -4176,6 +4216,189 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
         className={className}
       />
       {sq.slash && <SlashMenu slash={sq.slash} matches={sq.matches} onPick={(cmd) => sq.pick(cmd, value)} />}
+    </div>
+  );
+}
+
+// キャンバス上の1ブロック。位置は task に持たせ、移動は素の pointer で行う。
+// 列ビューの dnd-kit は「どこに落としたか」で意味が決まるが、ここは座標そのものが
+// 意味なので、同じ仕組みに載せないほうが素直。
+function CanvasBlock({ task, scale, onMove, ...rest }) {
+  const dragging = useRef(null);
+
+  function onPointerDown(e) {
+    // 左ボタンのみ。テキスト編集やボタンの操作は邪魔しない。
+    if (e.button !== 0) return;
+    if (e.target.closest("textarea,button,input,a")) return;
+    dragging.current = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: task.canvasX, oy: task.canvasY, moved: false };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.stopPropagation(); // 背景のパンを開始させない
+  }
+  function onPointerMove(e) {
+    const d = dragging.current;
+    if (!d || d.id !== e.pointerId) return;
+    const dx = (e.clientX - d.x) / scale;
+    const dy = (e.clientY - d.y) / scale;
+    if (!d.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
+    d.moved = true;
+    onMove(task.id, Math.round(d.ox + dx), Math.round(d.oy + dy));
+  }
+  function onPointerUp(e) {
+    const d = dragging.current;
+    dragging.current = null;
+    if (d?.moved) {
+      // 移動だったらクリック扱いにしない（選択が走らないように）
+      e.stopPropagation();
+      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
+      e.currentTarget.addEventListener("click", stop, { capture: true, once: true });
+    }
+  }
+
+  return (
+    <div
+      className="absolute w-[260px]"
+      style={{ left: task.canvasX, top: task.canvasY }}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={onPointerUp}
+    >
+      <div className="rounded-md border border-white/10 ts-bg-veil px-1 py-0.5 shadow-lg backdrop-blur">
+        <TaskBlock task={task} {...rest} />
+      </div>
+    </div>
+  );
+}
+
+// 自由配置のキャンバス。列に縛られずブロックを置ける。
+// 背景ドラッグでパン、Ctrl+ホイールで拡大縮小、空き場所のダブルクリックで新規ブロック。
+function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, selectedTaskId, childrenOf, addTask }) {
+  const [view, setView] = useState(() => {
+    try {
+      const raw = localStorage.getItem("taskspace-canvas-view");
+      return raw ? JSON.parse(raw) : { x: 0, y: 0, scale: 1 };
+    } catch { return { x: 0, y: 0, scale: 1 }; }
+  });
+  const panRef = useRef(null);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem("taskspace-canvas-view", JSON.stringify(view)); } catch { /* quota */ }
+  }, [view]);
+
+  const placed = tasks.filter((t) => !t.archived && t.canvasX != null && t.canvasY != null);
+
+  // 画面座標 → キャンバス座標
+  function toCanvas(clientX, clientY) {
+    const r = wrapRef.current.getBoundingClientRect();
+    return {
+      x: Math.round((clientX - r.left - view.x) / view.scale),
+      y: Math.round((clientY - r.top - view.y) / view.scale),
+    };
+  }
+
+  function onPointerDown(e) {
+    if (e.button !== 0 || e.target.closest("[data-task-id]")) return;
+    panRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+  function onPointerMove(e) {
+    const p = panRef.current;
+    if (!p || p.id !== e.pointerId) return;
+    setView((v) => ({ ...v, x: p.vx + (e.clientX - p.x), y: p.vy + (e.clientY - p.y) }));
+  }
+  function onPointerUp() { panRef.current = null; }
+
+  function onWheel(e) {
+    if (!e.ctrlKey && !e.metaKey) return;
+    e.preventDefault();
+    const r = wrapRef.current.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+    setView((v) => {
+      const next = Math.min(2.5, Math.max(0.3, v.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
+      // ポインタ位置を固定したまま拡大縮小する
+      return { scale: next, x: mx - (mx - v.x) * (next / v.scale), y: my - (my - v.y) * (next / v.scale) };
+    });
+  }
+
+  function onDoubleClick(e) {
+    if (e.target.closest("[data-task-id]")) return;
+    const at = toCanvas(e.clientX, e.clientY);
+    addTask({ title: "新規ブロック", plain: true, canvasX: at.x, canvasY: at.y, silent: true });
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-white/10" style={{ height: "calc(100vh - 150px)" }}>
+      <div className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-2 text-[10px] text-neutral-500">
+        <span>{placed.length} ブロック</span>
+        <span>·</span>
+        <span>{Math.round(view.scale * 100)}%</span>
+        <span>·</span>
+        <span>背景ドラッグで移動 / Ctrl+ホイールで拡大 / ダブルクリックで追加</span>
+      </div>
+      <button
+        onClick={() => setView({ x: 0, y: 0, scale: 1 })}
+        className="absolute right-2 top-2 z-10 rounded border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/10"
+      >位置をリセット</button>
+
+      <div
+        ref={wrapRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onWheel={onWheel}
+        onDoubleClick={onDoubleClick}
+        data-canvas
+        className="h-full w-full cursor-grab active:cursor-grabbing"
+        style={{
+          backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--ts-text) 12%, transparent) 1px, transparent 1px)",
+          backgroundSize: `${24 * view.scale}px ${24 * view.scale}px`,
+          backgroundPosition: `${view.x}px ${view.y}px`,
+        }}
+      >
+        <div
+          className="absolute left-0 top-0 origin-top-left"
+          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
+        >
+          {placed.map((task, i) => (
+            <CanvasBlock
+              key={task.id}
+              task={task}
+              listNumber={numberedIndex(placed, i)}
+              scale={view.scale}
+              onMove={(id, x, y) => upsertTask({ id, canvasX: x, canvasY: y })}
+              upsertTask={upsertTask}
+              removeTask={removeTask}
+              setSelectedTaskId={setSelectedTaskId}
+              dragDisabled
+              dragId={`canvas-${task.id}`}
+              dragData={{ type: "task", id: task.id }}
+              dropId={`canvas-drop-${task.id}`}
+              dropData={{ type: "task", id: task.id }}
+              rowClassName={(b) => classNames(
+                "rounded px-1 py-0.5 transition",
+                b.focusRingClass,
+                b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+              )}
+              textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
+              titleClassName={(b) => classNames(
+                "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
+                b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+                task.status === "完了" && "line-through opacity-40",
+              )}
+              leading={() => (
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+                  className={classNames("mt-0.5 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+                >
+                  {task.status === "完了" ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
+                </button>
+              )}
+
+            />
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

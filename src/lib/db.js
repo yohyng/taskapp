@@ -9,6 +9,8 @@ const OPTIONAL_TASK_COLUMNS = {
   stock_view_id: { note: 'どの STOCK ビューに入れたか' },
   style: { note: 'タスクごとの色・太さ' },
   block_type: { note: '見出し・区切り線などのブロック種別' },
+  canvas_x: { note: 'キャンバス上の位置' },
+  canvas_y: { note: 'キャンバス上の位置' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -42,6 +44,8 @@ function taskToRow(t) {
     row.style = t.style && Object.keys(t.style).length ? JSON.stringify(t.style) : null
   }
   if (optionalColumnSupported.block_type) row.block_type = t.blockType ?? 'task'
+  if (optionalColumnSupported.canvas_x) row.canvas_x = t.canvasX ?? null
+  if (optionalColumnSupported.canvas_y) row.canvas_y = t.canvasY ?? null
   return {
     ...row,
     id: t.id,
@@ -91,6 +95,8 @@ export function rowToTask(r) {
     stockViewId: r.stock_view_id ?? null,
     style: parseStyle(r.style),
     blockType: r.block_type ?? 'task',
+    canvasX: r.canvas_x ?? null,
+    canvasY: r.canvas_y ?? null,
   }
 }
 
