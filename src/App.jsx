@@ -1446,9 +1446,10 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false }) {
     const clean = normalizeTitle(title);
-    if (!clean) return null;
+    // ページ本文は空のブロックも成立する（Notion と同じ）
+    if (!clean && !allowEmpty) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
     const inheritedCategory = plain ? (category || "") : (parent?.category || category || categories[0]?.key || "NOMLAB");
     const inheritedProject = plain ? (project || "") : (parent?.project || project || "未分類");
@@ -1468,6 +1469,7 @@ function App() {
       canvasX,
       canvasY,
       pageId,
+      blockType,
     });
     commitTasks((prev) => {
       if (afterId) {
@@ -2252,6 +2254,27 @@ function App() {
 
   // 選択分をまとめて STOCK へ。プロジェクト所属はそのまま、日付だけ外す。
   // TRAY 行はタスク化してから入れる（カテゴリなしのまま）。
+  // 前のブロックに文字を足して自分を消す。1回の更新でやらないと、
+  // 後の書き込みが更新前の状態を元にして前の書き込みを消してしまう。
+  function mergeBlockInto(prevId, taskId, mergedTitle) {
+    commitTasks((prev) => prev
+      .map((t) => (t.id === prevId ? { ...t, title: mergedTitle } : t))
+      .filter((t) => t.id !== taskId));
+  }
+
+  // 配列順がそのまま表示順なので、2件の位置を入れ替える
+  function swapTaskOrder(id, targetId, title) {
+    commitTasks((prev) => {
+      const a = prev.findIndex((t) => t.id === id);
+      const b = prev.findIndex((t) => t.id === targetId);
+      if (a < 0 || b < 0) return prev;
+      // タイトルの確定も同じ更新に含める（別々に書くと巻き戻る）
+      const next = prev.map((t) => (t.id === id && title != null ? { ...t, title } : t));
+      [next[a], next[b]] = [next[b], next[a]];
+      return next;
+    });
+  }
+
   function bulkMoveToStock(viewId) {
     const trayIds = [...selectedTrayIds];
     const taskCount = selectedIds.size;
@@ -2839,6 +2862,8 @@ function App() {
             setSelectedTaskId={setSelectedTaskId}
             childrenOf={childrenOf}
             addTask={addTask}
+            onReorder={swapTaskOrder}
+            onMergeBlocks={mergeBlockInto}
           />
         )}
         {canvasMode && (
@@ -3998,6 +4023,13 @@ function useTaskBlock({
   // 前の行から送られてきたとき、編集状態にして末尾にカーソルを置く
   autoFocusEnd = false,
   onFocusEndDone,
+  // ページ本文だけ Notion と同じキー操作・クリック操作にする。
+  // タスク側のビューは「クリック＝選択」「Enter 2回でブロック追加」のままにしたいので、
+  // 全体を切り替えず、この旗を立てたビューだけ挙動を変える。
+  notionMode = false,
+  onEnterBlock,   // Enter: 直下に同じ種類のブロックを作る
+  onMergeBack,    // 行頭 Backspace: 前のブロックに繋げる
+  onMoveBlock,    // Alt+Shift+↑↓: 並びを入れ替える
 }) {
   const { focusPickMode, pickTask } = useFocusMode();
   const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
@@ -4068,6 +4100,19 @@ function useTaskBlock({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoFocusEnd]);
 
+  // ページ本文は打っている最中も保存する。確定が離脱時だけだと、
+  // 書いている途中でリロードすると消えてしまい Notion と違う。
+  // 毎打鍵だと履歴が細かくなりすぎるので、少し止まってから書く。
+  useEffect(() => {
+    if (!notionMode || !editing) return;
+    if (normalizeTitle(draft) === task.title) return;
+    const id = setTimeout(() => {
+      const clean = normalizeTitle(draft);
+      if (clean !== task.title) upsertTask?.({ id: task.id, title: clean });
+    }, 400);
+    return () => clearTimeout(id);
+  }, [draft, editing, notionMode, task.id, task.title]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function commit() {
     const clean = normalizeTitle(draft);
     if (!clean) return false; // 空 → 呼び出し側が削除を決める
@@ -4113,8 +4158,39 @@ function useTaskBlock({
   function onTextareaKeyDown(e) {
     // メニューが開いている間はそちらの操作を優先する
     if (sq.handleKeyDown(e, draft)) return;
+
+    const el = e.currentTarget;
+    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
+    const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+
+    // Alt+Shift+↑↓ でブロックの並びを入れ替える（Notion と同じ）
+    if (notionMode && e.altKey && e.shiftKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      e.preventDefault();
+      // 確定と並べ替えを別々に書くと、後の書き込みが確定前の状態を元にして
+      // タイトルを巻き戻すので、まとめて渡す
+      onMoveBlock?.(task, e.key === "ArrowUp" ? -1 : 1, normalizeTitle(draft));
+      return;
+    }
+    // Cmd/Ctrl+Enter で完了を切り替える
+    if (notionMode && e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+      e.preventDefault();
+      slashCtx?.toggleDone?.(task);
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      if (notionMode) {
+        // 空のリスト項目で Enter → リストを抜けてテキストに戻る
+        const kind = blockTypeOf(task);
+        if (!normalizeTitle(draft) && kind !== "text" && kind !== "task") {
+          slashCtx?.setBlockType?.(task, "text");
+          return;
+        }
+        commit();
+        onEnterBlock?.(task, draft);
+        return;
+      }
       // 空のまま確定したブロックは残さない
       if (!normalizeTitle(draft)) { removeAndLeave(); return; }
       commit();
@@ -4125,14 +4201,57 @@ function useTaskBlock({
     }
     if (e.key === "Escape") {
       e.preventDefault();
+      if (notionMode) {
+        // Notion は Escape で「ブロックを選択した状態」に抜ける。
+        // ここで止めないと、同じネイティブイベントが window まで届いて
+        // 「Esc で選択解除」が直後に走り、選択が消えてしまう。
+        e.stopPropagation();
+        e.nativeEvent?.stopImmediatePropagation?.();
+        commit();
+        refocusCard.current = true;
+        setEditing(false);
+        toggleTask?.(task.id);
+        return;
+      }
       setDraft(task.title);
       setEditing(false);
       return;
     }
-    if ((e.key === "Backspace" || e.key === "Delete") && !e.currentTarget.value) {
-      e.preventDefault();
-      removeAndLeave();
-      return;
+    if (e.key === "Backspace" || e.key === "Delete") {
+      if (notionMode && e.key === "Backspace" && atStart) {
+        const kind = blockTypeOf(task);
+        // まず種類をテキストに戻し、それから前のブロックに繋げる
+        if (kind !== "text" && kind !== "task") {
+          e.preventDefault();
+          // 種類とタイトルを1回で書く。別々だと、まだ保存していない
+          // 打ちかけの文字が種類変更の書き込みに巻き込まれて消える。
+          upsertTask?.({ id: task.id, blockType: "text", title: normalizeTitle(draft) });
+          return;
+        }
+        e.preventDefault();
+        onMergeBack?.(task, draft);
+        return;
+      }
+      if (!el.value) {
+        e.preventDefault();
+        removeAndLeave();
+        return;
+      }
+    }
+    // 端で上下キーを押したら隣のブロックへ移る（編集したまま）
+    if (notionMode && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const leaving = e.key === "ArrowUp" ? atStart : atEnd;
+      if (leaving) {
+        e.preventDefault();
+        commit();
+        const cur = cardRef.current;
+        setEditing(false);
+        setTimeout(() => {
+          const next = focusAdjacentBlock(cur, e.key === "ArrowUp" ? -1 : 1);
+          next?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+        }, 0);
+        return;
+      }
     }
     if (e.key === "Tab" && onTab) {
       e.preventDefault();
@@ -4149,7 +4268,10 @@ function useTaskBlock({
     onClick: () => {
       if (clickGuard?.()) return;
       if (focusPickMode) { pickTask?.(task.id); return; }
-      if (!editing) toggleTask?.(task.id);
+      if (editing) return;
+      // ページ本文はクリックでそのまま書き始められる（選択ではなく編集）
+      if (notionMode) { setEditing(true); return; }
+      toggleTask?.(task.id);
     },
     ...(dragOff ? {} : attributes),
     ...(dragOff ? {} : listeners),
@@ -4187,6 +4309,8 @@ function useTaskBlock({
     onDoubleClick: (e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); },
     style: taskTextStyle(task),
   };
+  // Notion では Enter でも編集に入れる（選択状態からの復帰）
+  const notionEditable = notionMode;
 
   // フォーカスモード中に付ける目印（全ビュー共通）
   const focusRingClass = focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70";
@@ -4198,6 +4322,7 @@ function useTaskBlock({
     blockProps, textareaProps, titleProps, focusRingClass,
     commit, removeAndLeave,
     addBelow: () => addBlockBelow?.(task),
+    notionMode,
     slash: sq.slash, slashMatches: sq.matches,
     runSlash: (cmd) => sq.pick(cmd, draft),
   };
@@ -4277,7 +4402,7 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
 }
 
 // ページ本文の1ブロック。Notion の本文行に合わせて、列ビューより少し大きめ。
-function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx }) {
+function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops }) {
   const children = childrenOf?.(task.id) || [];
   return (
     <div style={depth > 0 ? { marginLeft: depth * 24 } : undefined}>
@@ -4291,6 +4416,10 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         upsertTask={upsertTask}
         removeTask={removeTask}
         setSelectedTaskId={setSelectedTaskId}
+        notionMode
+        onEnterBlock={(t, draft) => ops.enterBlock(t, draft, siblings, idx)}
+        onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
+        onMoveBlock={(t, dir, title) => ops.moveBlock(t, dir, siblings, idx, title)}
         onTab={(e, { draft, setEditing }) => {
           const isShift = e.shiftKey;
           const clean = (draft || "").trim();
@@ -4337,6 +4466,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           removeTask={removeTask}
           toggleDone={toggleDone}
           setSelectedTaskId={setSelectedTaskId}
+          ops={ops}
         />
       ))}
     </div>
@@ -4345,7 +4475,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 
 // ドキュメント型のページ。左にページ一覧、右に本文。
 // 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask }) {
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, onReorder, onMergeBlocks }) {
   const { markForEdit } = useBlockEdit();
   const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
   const active = pages.find((p) => p.id === activeId) || pages[0];
@@ -4362,6 +4492,37 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       .filter((t) => t.pageId === active.id && !t.archived && !t.parentId)
       .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   }, [tasks, active]);
+
+  // Notion のブロック操作。並びは tasks の配列順なので、入れ替えもそこを動かす。
+  const ops = useMemo(() => ({
+    // Enter: 直下に同じ種類のブロックを作って、そのまま書き続けられるようにする
+    enterBlock: (task) => {
+      const kind = blockTypeOf(task);
+      const created = addTask({
+        title: "",
+        allowEmpty: true,
+        plain: true,
+        pageId: task.pageId,
+        parentId: task.parentId || null,
+        blockType: kind === "heading1" || kind === "heading2" || kind === "heading3" || kind === "callout" || kind === "quote" ? "text" : kind,
+        afterId: task.id,
+        silent: true,
+      });
+      if (created) markForEdit?.(created.id);
+    },
+    // 行頭 Backspace: 前のブロックの末尾に文字を足して、自分は消える
+    mergeBack: (task, draft, siblings, idx) => {
+      const prev = siblings[idx - 1];
+      if (!prev) return;
+      onMergeBlocks(prev.id, task.id, (prev.title || "") + (draft || ""));
+    },
+    // Alt+Shift+↑↓: 並びを入れ替える
+    moveBlock: (task, dir, siblings, idx, title) => {
+      const target = siblings[idx + dir];
+      if (!target) return;
+      onReorder(task.id, target.id, title);
+    },
+  }), [addTask, upsertTask, removeTask, markForEdit, onReorder, onMergeBlocks]);
 
   function addPage() {
     const page = { id: `page-${uid()}`, title: "無題のページ", icon: PAGE_ICONS[pages.length % PAGE_ICONS.length] };
@@ -4380,7 +4541,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
   function addBlockAtEnd() {
     const last = blocks[blocks.length - 1];
     if (last && !last.title.trim()) return; // 末尾が空なら増やさない
-    const created = addTask({ title: "新規ブロック", plain: true, pageId: active.id, silent: true, afterId: last?.id });
+    const created = addTask({ title: "", allowEmpty: true, plain: true, pageId: active.id, silent: true, afterId: last?.id });
     if (created) markForEdit?.(created.id);
   }
 
@@ -4464,6 +4625,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
                 removeTask={removeTask}
                 toggleDone={toggleDone}
                 setSelectedTaskId={setSelectedTaskId}
+                ops={ops}
               />
             ))}
           </div>
@@ -4719,6 +4881,8 @@ function TaskBlock({
   const b = useTaskBlock(blockOptions);
   const task = blockOptions.task;
   const kind = blockTypeOf(task);
+  // Notion はフォーカス中の空ブロックにだけヒントを出す
+  const draftPlaceholder = b.draft ? "" : (b.notionMode ? "「/」でコマンド" : "コマンドは / または ；");
   const cfg = BLOCK_TYPES[kind];
 
   // 区切り線は本文を持たない。選択とドラッグはできるので行そのものは残す。
@@ -4761,12 +4925,13 @@ function TaskBlock({
             <div className="relative">
               <textarea
                 {...b.textareaProps}
-                placeholder="コマンドは / または ；"
+                placeholder={draftPlaceholder}
                 onBlur={() => {
                   // メニュー操作でフォーカスが外れただけのときは閉じない
                   if (b.slash) return;
-                  // 空のまま離れたブロックは残さない（ビューによっては据え置き）
-                  if (!b.commit() && onEmptyBlur) onEmptyBlur();
+                  // 空のまま離れたブロックの扱いはビュー次第。
+                  // ページ本文は Notion と同じく空行を残す。
+                  if (!b.commit() && !b.notionMode && onEmptyBlur) onEmptyBlur();
                   b.setEditing(false);
                 }}
                 className={textareaClassName?.(b)}
@@ -4783,7 +4948,7 @@ function TaskBlock({
                   className={titleClassName?.(b)}
                   style={{ ...b.titleProps.style, ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null) }}
                 >
-                  {task.title || <span className="opacity-40">コマンドは / または ；</span>}
+                  {task.title || <span className="opacity-25">&nbsp;</span>}
                 </div>
                 {titleExtra?.(b)}
               </div>
