@@ -11,6 +11,7 @@ const OPTIONAL_TASK_COLUMNS = {
   block_type: { note: '見出し・区切り線などのブロック種別' },
   canvas_x: { note: 'キャンバス上の位置' },
   canvas_y: { note: 'キャンバス上の位置' },
+  page_id: { note: 'どのページに書かれたブロックか' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -46,6 +47,7 @@ function taskToRow(t) {
   if (optionalColumnSupported.block_type) row.block_type = t.blockType ?? 'task'
   if (optionalColumnSupported.canvas_x) row.canvas_x = t.canvasX ?? null
   if (optionalColumnSupported.canvas_y) row.canvas_y = t.canvasY ?? null
+  if (optionalColumnSupported.page_id) row.page_id = t.pageId ?? null
   return {
     ...row,
     id: t.id,
@@ -97,6 +99,7 @@ export function rowToTask(r) {
     blockType: r.block_type ?? 'task',
     canvasX: r.canvas_x ?? null,
     canvasY: r.canvas_y ?? null,
+    pageId: r.page_id ?? null,
   }
 }
 

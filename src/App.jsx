@@ -265,6 +265,13 @@ const STOCK_VIEW_COLORS = [
 const DEFAULT_STOCK_VIEWS = [{ id: "stock", name: "STOCK", color: STOCK_VIEW_COLORS[0] }];
 const STOCK_VIEWS_SETTING_KEY = "stock_views";
 
+// ドキュメント型の「ページ」。タスク管理とは別に、Notion のように
+// ブロックを縦に並べて書く場所。中身は同じタスク（blockType 付き）で、
+// pageId でどのページに属するかを持たせる。
+const PAGES_SETTING_KEY = "pages";
+const DEFAULT_PAGES = [{ id: "page-1", title: "はじめてのページ", icon: "📄" }];
+const PAGE_ICONS = ["📄", "📝", "📌", "💡", "🗂", "🎯", "🌱", "🔧", "📚", "✏️"];
+
 // アプリ全体の配色。--ts-bg / --ts-text に流し込むと、面や枠は
 // alpha 指定なので自動で追従する。
 const APP_THEME_SETTING_KEY = "app_theme";
@@ -516,6 +523,7 @@ function normalizeTask(task) {
     blockType: "task",
     canvasX: null,
     canvasY: null,
+    pageId: null,
     ...task,
   };
 }
@@ -534,7 +542,7 @@ function useSelection() {
 }
 
 // Notion 風のブロック入力。Enter で下に新規ブロック、その直後に編集状態へ入る。
-const BlockEditContext = React.createContext({ addBlockBelow: null, pendingEditId: null, claimPendingEdit: null });
+const BlockEditContext = React.createContext({ addBlockBelow: null, markForEdit: null, pendingEditId: null, claimPendingEdit: null });
 function useBlockEdit() {
   return React.useContext(BlockEditContext);
 }
@@ -661,6 +669,20 @@ function App() {
     dbSaveSetting(APP_THEME_SETTING_KEY, JSON.stringify(next));
   }, []);
 
+  const [pages, setPages] = useState(() => {
+    try {
+      const raw = localStorage.getItem("taskspace-pages");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed) && parsed.length) return parsed;
+    } catch { /* 壊れていたら既定 */ }
+    return DEFAULT_PAGES;
+  });
+  const persistPages = useCallback((next) => {
+    setPages(next);
+    try { localStorage.setItem("taskspace-pages", JSON.stringify(next)); } catch { /* quota */ }
+    dbSaveSetting(PAGES_SETTING_KEY, JSON.stringify(next));
+  }, []);
+
   const [stockViews, setStockViews] = useState(() => {
     try {
       const raw = localStorage.getItem("taskspace-stock-views");
@@ -754,8 +776,9 @@ function App() {
     return () => mq.removeEventListener("change", handler);
   }, []);
   const use5col = true; // 7days上 + Board下 固定レイアウト
-  const [canvasMode, setCanvasMode] = useState(() => localStorage.getItem("taskspace-canvas-mode") === "1");
-  useEffect(() => { localStorage.setItem("taskspace-canvas-mode", canvasMode ? "1" : "0"); }, [canvasMode]);
+  const [viewMode, setViewMode] = useState(() => localStorage.getItem("taskspace-view-mode") || "list");
+  useEffect(() => { localStorage.setItem("taskspace-view-mode", viewMode); }, [viewMode]);
+  const canvasMode = viewMode === "canvas";
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1141,6 +1164,16 @@ function App() {
           }
         } catch { /* 壊れていたらローカルのまま */ }
       }
+      const remotePages = settings?.[PAGES_SETTING_KEY];
+      if (remotePages) {
+        try {
+          const parsed = typeof remotePages === "string" ? JSON.parse(remotePages) : remotePages;
+          if (Array.isArray(parsed) && parsed.length) {
+            setPages(parsed);
+            localStorage.setItem("taskspace-pages", JSON.stringify(parsed));
+          }
+        } catch { /* 壊れていたらローカルのまま */ }
+      }
       const remoteViews = settings?.[STOCK_VIEWS_SETTING_KEY];
       if (remoteViews) {
         try {
@@ -1413,7 +1446,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null }) {
     const clean = normalizeTitle(title);
     if (!clean) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -1434,6 +1467,7 @@ function App() {
       scheduledDate,
       canvasX,
       canvasY,
+      pageId,
     });
     commitTasks((prev) => {
       if (afterId) {
@@ -2364,6 +2398,8 @@ function App() {
   const pendingClaimRef = useRef(null);
   const blockEditValue = useMemo(() => ({
     addBlockBelow,
+    // 自分で作ったブロックを編集状態で開きたいとき（ページの末尾追加など）
+    markForEdit: (id) => { pendingClaimRef.current = null; setPendingEditId(id); },
     pendingEditId,
     claimPendingEdit: (id) => {
       if (pendingEditId !== id || pendingClaimRef.current === id) return false;
@@ -2491,11 +2527,18 @@ function App() {
               <Focus className="h-3.5 w-3.5" />
             </button>
             <button
-              onClick={() => setCanvasMode((v) => !v)}
-              title={canvasMode ? "リスト表示に戻す" : "キャンバス表示"}
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", canvasMode ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+              onClick={() => setViewMode((v) => (v === "canvas" ? "list" : "canvas"))}
+              title={viewMode === "canvas" ? "リスト表示に戻す" : "キャンバス表示"}
+              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", viewMode === "canvas" ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
             >
               <LayoutGrid className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewMode((v) => (v === "pages" ? "list" : "pages"))}
+              title={viewMode === "pages" ? "リスト表示に戻す" : "ページ表示"}
+              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", viewMode === "pages" ? "border-sky-400/40 bg-sky-400/10 text-sky-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
+            >
+              <FileText className="h-3.5 w-3.5" />
             </button>
             <KeepAwakeButton />
             <div className="relative">
@@ -2785,6 +2828,19 @@ function App() {
           </section>
         )}
 
+        {viewMode === "pages" && (
+          <PagesView
+            pages={pages}
+            onPagesChange={persistPages}
+            tasks={tasks}
+            upsertTask={upsertTask}
+            removeTask={removeTask}
+            toggleDone={toggleDone}
+            setSelectedTaskId={setSelectedTaskId}
+            childrenOf={childrenOf}
+            addTask={addTask}
+          />
+        )}
         {canvasMode && (
           <CanvasView
             tasks={tasks}
@@ -2797,7 +2853,7 @@ function App() {
             addTask={addTask}
           />
         )}
-        {!canvasMode && use5col && (
+        {viewMode === "list" && use5col && (
           <>
           {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -2813,11 +2869,11 @@ function App() {
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
                 <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
                   <span className="text-sm font-bold text-neutral-200">TRAY</span>
-                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock).length + inboxItems.length}</span>
+                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId).length + inboxItems.length}</span>
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
                   {(() => {
-                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.parentId);
+                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId && !t.parentId);
                     return rootTrayTasks.map((task, idx) => (
                       <TrayTask
                         key={task.id}
@@ -2909,7 +2965,7 @@ function App() {
           </>
         )}
 
-        {!canvasMode && !use5col && (
+        {viewMode === "list" && !use5col && (
         <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           {(() => {
             // Group consecutive board-type sections into a shared auto-fit grid
@@ -4216,6 +4272,211 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
         className={className}
       />
       {sq.slash && <SlashMenu slash={sq.slash} matches={sq.matches} onPick={(cmd) => sq.pick(cmd, value)} />}
+    </div>
+  );
+}
+
+// ページ本文の1ブロック。Notion の本文行に合わせて、列ビューより少し大きめ。
+function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx }) {
+  const children = childrenOf?.(task.id) || [];
+  return (
+    <div style={depth > 0 ? { marginLeft: depth * 24 } : undefined}>
+      <TaskBlock
+        task={task}
+        listNumber={listNumber}
+        dragId={`page-${task.id}`}
+        dragData={{ type: "task", id: task.id }}
+        dropId={`page-drop-${task.id}`}
+        dropData={{ type: "task", id: task.id }}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        setSelectedTaskId={setSelectedTaskId}
+        onTab={(e, { draft, setEditing }) => {
+          const isShift = e.shiftKey;
+          const clean = (draft || "").trim();
+          if (clean && clean !== task.title) upsertTask({ id: task.id, title: clean });
+          setEditing(false);
+          // 同じ tick で2回書くと後の書き込みが前を消すので1フレーム空ける
+          setTimeout(() => {
+            if (isShift) upsertTask({ id: task.id, parentId: null });
+            else if (idx > 0) upsertTask({ id: task.id, parentId: siblings[idx - 1].id });
+          }, 0);
+        }}
+        rowClassName={(b) => classNames(
+          "rounded px-1 py-[3px] transition hover:bg-white/[0.035]",
+          b.focusRingClass,
+          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isDragging && "opacity-30",
+          b.isOver && "ring-1 ring-inset ring-white/20",
+        )}
+        textareaClassName={() => "w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
+        titleClassName={(b) => classNames(
+          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[14px] leading-relaxed ts-text",
+          b.focusPickMode ? "cursor-crosshair" : "cursor-text",
+          task.status === "完了" && "line-through opacity-40",
+        )}
+        leading={() => (
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+            className={classNames("mt-1 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+          >
+            {task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+          </button>
+        )}
+      />
+      {children.map((child, i) => (
+        <PageBlock
+          key={child.id}
+          task={child}
+          depth={depth + 1}
+          idx={i}
+          siblings={children}
+          listNumber={numberedIndex(children, i)}
+          childrenOf={childrenOf}
+          upsertTask={upsertTask}
+          removeTask={removeTask}
+          toggleDone={toggleDone}
+          setSelectedTaskId={setSelectedTaskId}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ドキュメント型のページ。左にページ一覧、右に本文。
+// 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask }) {
+  const { markForEdit } = useBlockEdit();
+  const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
+  const active = pages.find((p) => p.id === activeId) || pages[0];
+  const [iconOpen, setIconOpen] = useState(false);
+
+  useEffect(() => {
+    if (active) localStorage.setItem("taskspace-active-page", active.id);
+  }, [active]);
+
+  const blocks = useMemo(() => {
+    if (!active) return [];
+    const order = new Map(tasks.map((t, i) => [t.id, i]));
+    return tasks
+      .filter((t) => t.pageId === active.id && !t.archived && !t.parentId)
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  }, [tasks, active]);
+
+  function addPage() {
+    const page = { id: `page-${uid()}`, title: "無題のページ", icon: PAGE_ICONS[pages.length % PAGE_ICONS.length] };
+    onPagesChange([...pages, page]);
+    setActiveId(page.id);
+  }
+
+  function removePage(id) {
+    if (pages.length <= 1) return;
+    // 中のブロックも一緒に消える。ページ＝本文なので残しても行き場がない。
+    tasks.filter((t) => t.pageId === id).forEach((t) => removeTask(t.id));
+    onPagesChange(pages.filter((p) => p.id !== id));
+    if (activeId === id) setActiveId(pages.find((p) => p.id !== id).id);
+  }
+
+  function addBlockAtEnd() {
+    const last = blocks[blocks.length - 1];
+    if (last && !last.title.trim()) return; // 末尾が空なら増やさない
+    const created = addTask({ title: "新規ブロック", plain: true, pageId: active.id, silent: true, afterId: last?.id });
+    if (created) markForEdit?.(created.id);
+  }
+
+  if (!active) return null;
+
+  return (
+    <div className="flex gap-3" style={{ minHeight: "calc(100vh - 150px)" }}>
+      {/* ページ一覧 */}
+      <aside className="w-48 shrink-0 rounded-lg border border-white/10 bg-white/[0.02] p-2">
+        <div className="mb-1 px-1 text-[10px] font-semibold text-neutral-500">ページ</div>
+        {pages.map((p) => (
+          <div key={p.id} className="group/pg flex items-center gap-1">
+            <button
+              onClick={() => setActiveId(p.id)}
+              className={classNames(
+                "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs transition",
+                p.id === active.id ? "bg-white/10 ts-text" : "text-neutral-400 hover:bg-white/[0.06]",
+              )}
+            >
+              <span className="shrink-0">{p.icon}</span>
+              <span className="min-w-0 truncate">{p.title}</span>
+            </button>
+            {pages.length > 1 && (
+              <button
+                onClick={() => removePage(p.id)}
+                title="このページを削除（中身も消えます）"
+                className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-red-300 group-hover/pg:opacity-100"
+              >
+                <Trash2 className="h-3 w-3" />
+              </button>
+            )}
+          </div>
+        ))}
+        <button
+          onClick={addPage}
+          className="mt-1 flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          <Plus className="h-3 w-3" /> 新規ページ
+        </button>
+      </aside>
+
+      {/* 本文 */}
+      <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-6 py-6">
+        <div className="mx-auto max-w-2xl">
+          <div className="mb-4 flex items-start gap-2">
+            <div className="relative">
+              <button onClick={() => setIconOpen((v) => !v)} title="アイコンを変える" className="text-3xl leading-none transition hover:opacity-70">
+                {active.icon}
+              </button>
+              {iconOpen && (
+                <div className="absolute left-0 top-full z-20 mt-1 flex w-44 flex-wrap gap-1 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
+                  {PAGE_ICONS.map((ic) => (
+                    <button
+                      key={ic}
+                      onClick={() => { onPagesChange(pages.map((p) => p.id === active.id ? { ...p, icon: ic } : p)); setIconOpen(false); }}
+                      className="rounded p-1 text-lg transition hover:bg-white/10"
+                    >{ic}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <input
+              value={active.title}
+              onChange={(e) => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, title: e.target.value } : p))}
+              placeholder="無題"
+              className="min-w-0 flex-1 bg-transparent text-3xl font-bold tracking-tight ts-text outline-none placeholder:text-neutral-700"
+            />
+          </div>
+
+          <div className="flex flex-col">
+            {blocks.map((task, i) => (
+              <PageBlock
+                key={task.id}
+                task={task}
+                depth={0}
+                idx={i}
+                siblings={blocks}
+                listNumber={numberedIndex(blocks, i)}
+                childrenOf={childrenOf}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                setSelectedTaskId={setSelectedTaskId}
+              />
+            ))}
+          </div>
+
+          {/* 本文の下の空き。クリックで末尾にブロックを足す（Notion と同じ） */}
+          <div
+            onClick={addBlockAtEnd}
+            className="mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700"
+          >
+            {blocks.length === 0 && "クリックして書き始める。/ でコマンド。"}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
