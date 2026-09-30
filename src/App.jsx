@@ -131,11 +131,22 @@ const TASK_TEXT_COLORS = [
 ];
 
 // ブロック種別。task 以外は「やること」ではなく、リストを構造化するための行。
+// ブロック種別。Notion の基本ブロックのうち、タスク管理で意味のあるものを揃える。
+//   checkbox … 完了トグルを持つ（ToDo だけ）
+//   marker   … 行頭に出す記号
+//   size/weight … 見出しの強さ
+// 既定は task（＝ToDo）。既存データは全部これなので、見え方は変わらない。
 const BLOCK_TYPES = {
-  task: { label: "タスク", checkbox: true, text: true },
-  heading: { label: "見出し", checkbox: false, text: true },
-  callout: { label: "コールアウト", checkbox: false, text: true },
-  divider: { label: "区切り線", checkbox: false, text: false },
+  task:      { label: "ToDo", checkbox: true,  md: "[] " },
+  text:      { label: "テキスト" },
+  heading1:  { label: "見出し1", size: 17, weight: 700, md: "# " },
+  heading2:  { label: "見出し2", size: 15, weight: 700, md: "## " },
+  heading3:  { label: "見出し3", size: 13.5, weight: 600, md: "### " },
+  bulleted:  { label: "箇条書きリスト", marker: "•", md: "- " },
+  numbered:  { label: "番号付きリスト", numbered: true, md: "1. " },
+  quote:     { label: "引用", quote: true, md: "> " },
+  callout:   { label: "コールアウト", marker: "💡", callout: true },
+  divider:   { label: "区切り線", text: false, md: "--- " },
 };
 function blockTypeOf(task) {
   return BLOCK_TYPES[task?.blockType] ? task.blockType : "task";
@@ -144,15 +155,38 @@ function isTaskBlockType(task) {
   return blockTypeOf(task) === "task";
 }
 
+// 行頭のマークダウン記法を種別に変換する（"# " で見出し1 など）
+const MARKDOWN_PREFIXES = Object.entries(BLOCK_TYPES)
+  .filter(([, cfg]) => cfg.md)
+  .map(([key, cfg]) => [cfg.md, key])
+  .sort((a, b) => b[0].length - a[0].length); // "## " を "# " より先に見る
+
+// 同じ並びの中で、直前まで連続している numbered ブロックの数から番号を出す。
+// 別種が挟まると 1 に戻る（Notion と同じ）。CSS カウンタだと行のラッパーで
+// スコープが切れて全部 1 になるため、ここで数える。
+function numberedIndex(list, idx) {
+  if (blockTypeOf(list[idx]) !== "numbered") return undefined;
+  let n = 1;
+  for (let i = idx - 1; i >= 0 && blockTypeOf(list[i]) === "numbered"; i--) n++;
+  return n;
+}
+
+function matchMarkdownPrefix(value) {
+  for (const [prefix, key] of MARKDOWN_PREFIXES) {
+    if (value === prefix) return { key, rest: "" };
+  }
+  return null;
+}
+
 // スラッシュコマンド。編集中に "/" で開き、キーワードで絞って Enter で実行する。
 // run は { task, ctx } を受け取り、ctx からアプリ側の操作を呼ぶ。
 const SLASH_COMMANDS = [
   {
-    key: "today", label: "今日", hint: "今日に置く", keywords: "today kyou きょう 今日",
+    key: "today", group: "予定", label: "今日", hint: "今日に置く", keywords: "today kyou きょう 今日",
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: toDateKey(new Date()), today: false, thisWeek: false }),
   },
   {
-    key: "tomorrow", label: "明日", hint: "明日に置く", keywords: "tomorrow ashita あした 明日",
+    key: "tomorrow", group: "予定", label: "明日", hint: "明日に置く", keywords: "tomorrow ashita あした 明日",
     run: ({ task, ctx }) => {
       const d = new Date();
       d.setDate(d.getDate() + 1);
@@ -160,48 +194,41 @@ const SLASH_COMMANDS = [
     },
   },
   {
-    key: "stock", label: "STOCK", hint: "日付を外して寝かせる", keywords: "stock すとっく あとで later",
+    key: "stock", group: "予定", label: "STOCK", hint: "日付を外して寝かせる", keywords: "stock すとっく あとで later",
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, stock: true, stockViewId: ctx.defaultStockViewId, scheduledDate: "", today: false, thisWeek: false }),
   },
   {
-    key: "unschedule", label: "日付を外す", hint: "予定なしに戻す", keywords: "clear unschedule hizuke 日付",
+    key: "unschedule", group: "予定", label: "日付を外す", hint: "予定なしに戻す", keywords: "clear unschedule hizuke 日付",
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
   },
   {
-    key: "done", label: "完了", hint: "完了にする", keywords: "done complete kanryou 完了",
+    key: "done", group: "操作", label: "完了", hint: "完了にする", keywords: "done complete kanryou 完了",
     run: ({ task, ctx }) => ctx.toggleDone(task),
   },
   {
-    key: "bold", label: "太字", hint: "太字にする", keywords: "bold futoji 太字",
+    key: "bold", group: "書式", label: "太字", hint: "太字にする", keywords: "bold futoji 太字",
     run: ({ task, ctx }) => ctx.setStyle(task, { bold: !task.style?.bold }),
   },
   ...TASK_TEXT_COLORS.filter((c) => c.key).map((c) => ({
-    key: `color-${c.key}`, label: `色: ${c.label}`, hint: "文字色を変える", keywords: `color iro 色 ${c.label}`,
+    key: `color-${c.key}`, group: "書式", label: `色: ${c.label}`, hint: "文字色を変える", keywords: `color iro 色 ${c.label}`,
     swatch: c.key,
     run: ({ task, ctx }) => ctx.setStyle(task, { color: c.key }),
   })),
   {
-    key: "color-reset", label: "色: 既定", hint: "文字色を戻す", keywords: "color reset iro 色 既定",
+    key: "color-reset", group: "書式", label: "色: 既定", hint: "文字色を戻す", keywords: "color reset iro 色 既定",
     run: ({ task, ctx }) => ctx.setStyle(task, { color: "" }),
   },
+  // --- ブロックの種類（Notion の基本ブロック） ---
+  ...Object.entries(BLOCK_TYPES).map(([key, cfg]) => ({
+    key: `type-${key}`,
+    label: cfg.label,
+    hint: cfg.md ? cfg.md.trim() : "種類を変える",
+    keywords: `${cfg.label} ${key} block type`,
+    group: "種類",
+    run: ({ task, ctx }) => ctx.setBlockType(task, key),
+  })),
   {
-    key: "heading", label: "見出し", hint: "セクションの見出しに", keywords: "heading midashi 見出し h1 section",
-    run: ({ task, ctx }) => ctx.setBlockType(task, "heading"),
-  },
-  {
-    key: "callout", label: "コールアウト", hint: "メモとして目立たせる", keywords: "callout memo note メモ 補足",
-    run: ({ task, ctx }) => ctx.setBlockType(task, "callout"),
-  },
-  {
-    key: "divider", label: "区切り線", hint: "リストを区切る", keywords: "divider line kugiri 区切り 線 hr",
-    run: ({ task, ctx }) => ctx.setBlockType(task, "divider"),
-  },
-  {
-    key: "to-task", label: "タスクに戻す", hint: "ふつうのタスクに", keywords: "task todo タスク 戻す",
-    run: ({ task, ctx }) => ctx.setBlockType(task, "task"),
-  },
-  {
-    key: "delete", label: "削除", hint: "このブロックを消す", keywords: "delete remove sakujo 削除",
+    key: "delete", group: "操作", label: "削除", hint: "このブロックを消す", keywords: "delete remove sakujo 削除",
     danger: true,
     run: ({ task, ctx }) => ctx.removeTask(task.id),
   },
@@ -3419,6 +3446,7 @@ function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsert
           tasks.map((task, idx) => (
             <div key={task.id} className="group/stock relative">
               <TrayTask
+                listNumber={numberedIndex(tasks, idx)}
                 task={task}
                 depth={0}
                 toggleDone={toggleDone}
@@ -3754,7 +3782,7 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
       </div>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{roots.map((task) => <TaskCard key={task.id} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} />)}</AnimatePresence>
+          <AnimatePresence initial={false}>{roots.map((task, i) => <TaskCard key={task.id} listNumber={numberedIndex(roots, i)} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} />)}</AnimatePresence>
           <div className="mt-1 flex gap-1">
             <AddBlockInput
               value={newTitle}
@@ -4038,9 +4066,17 @@ function useTaskBlock({
     ref: (el) => { textareaRef.current = el; autoResize(el); },
     onFocus: (e) => focusEnd(e.target),
     onChange: (e) => {
-      setDraft(e.target.value);
+      const v = e.target.value;
+      // 行頭の "# " や "- " はその場で種別に変える（Notion と同じ）
+      const md = slashCtx && matchMarkdownPrefix(v);
+      if (md) {
+        setDraft("");
+        slashCtx.setBlockType(task, md.key);
+        return;
+      }
+      setDraft(v);
       autoResize(e.target);
-      sq.detect(e.target.value, e.target.selectionStart);
+      sq.detect(v, e.target.selectionStart);
     },
     onKeyDown: onTextareaKeyDown,
     onClick: (e) => e.stopPropagation(),
@@ -4193,11 +4229,13 @@ function TaskBlock({
   setSelectedTaskId,
   onEmptyBlur,
   compactGutter = false,
+  listNumber,
   ...blockOptions
 }) {
   const b = useTaskBlock(blockOptions);
   const task = blockOptions.task;
   const kind = blockTypeOf(task);
+  const cfg = BLOCK_TYPES[kind];
 
   // 区切り線は本文を持たない。選択とドラッグはできるので行そのものは残す。
   if (kind === "divider") {
@@ -4225,13 +4263,15 @@ function TaskBlock({
       className={classNames(
         "group/block",
         rowClassName?.(b),
-        kind === "callout" && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
+        cfg.callout && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
+        cfg.quote && "border-l-2 border-l-current/30 pl-2 opacity-80",
       )}
     >
       <div className="flex w-full min-w-0 items-start gap-1.5">
         <BlockGutter block={b} compact={compactGutter} />
-        {kind === "callout" && <span className="mt-0.5 shrink-0 text-[11px] leading-none">💡</span>}
-        {BLOCK_TYPES[kind].checkbox && leading?.(b)}
+        {cfg.marker && <span className="mt-0.5 shrink-0 text-[11px] leading-none">{cfg.marker}</span>}
+        {cfg.numbered && <span className="mt-0.5 shrink-0 text-[11px] leading-none tabular-nums opacity-60">{listNumber ?? 1}.</span>}
+        {cfg.checkbox && leading?.(b)}
         <div className="min-w-0 flex-1">
           {b.editing ? (
             <div className="relative">
@@ -4246,7 +4286,7 @@ function TaskBlock({
                   b.setEditing(false);
                 }}
                 className={textareaClassName?.(b)}
-                style={kind === "heading" ? { fontSize: 14, fontWeight: 700 } : undefined}
+                style={cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight } : undefined}
               />
               {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} />}
             </div>
@@ -4257,7 +4297,7 @@ function TaskBlock({
                   {...b.titleProps}
                   {...titleAttrs?.(b)}
                   className={titleClassName?.(b)}
-                  style={{ ...b.titleProps.style, ...(kind === "heading" ? { fontSize: 14, fontWeight: 700, letterSpacing: "0.01em" } : null) }}
+                  style={{ ...b.titleProps.style, ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null) }}
                 >
                   {task.title || <span className="opacity-40">コマンドは / または ；</span>}
                 </div>
@@ -4326,7 +4366,7 @@ function focusEnd(el) {
   el.setSelectionRange(len, len);
 }
 
-function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false }) {
+function TaskCard({ task, listNumber, taskMap, categoryTone, children = [], childrenOf, depth, collapsed, setCollapsed, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, handleDropOnTask, moveWeeklyTask, compact = false, projectsByCategory, categories, selectMode = false }) {
   const hasChildren = children.length > 0;
   const isCollapsed = collapsed[task.id];
   const selected = selectedTaskId === task.id;
@@ -4377,6 +4417,7 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
       )}
       <TaskBlock
         task={task}
+        listNumber={listNumber}
         dragId={`task-${task.id}`}
         dragData={{ type: "task", id: task.id, category: task.category, project: task.project, parentId: task.parentId }}
         dropId={`task-drop-${task.id}`}
@@ -4482,9 +4523,10 @@ function TaskCard({ task, taskMap, categoryTone, children = [], childrenOf, dept
       />
       {hasChildren && !isCollapsed && (
         <div className={classNames("flex flex-col gap-0.5", compact && "ml-2 border-l border-amber-200/10 pl-2")}>
-          {children.map((child) => (
+          {children.map((child, i) => (
             <TaskCard
               key={child.id}
+              listNumber={numberedIndex(children, i)}
               task={child}
               taskMap={taskMap}
               children={childrenOf ? childrenOf(child.id) : []}
@@ -4918,7 +4960,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
   );
 }
 
-function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false }) {
+function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, childrenOf, selectMode = false }) {
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
 
@@ -4926,6 +4968,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <TaskBlock
         task={task}
+        listNumber={listNumber}
         dragId={`traytask-${task.id}`}
         dragData={{ type: "task", id: task.id }}
         dropId={`traytask-drop-${task.id}`}
@@ -4977,6 +5020,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
       {children.map((child, idx) => (
         <TrayTask
           key={child.id}
+          listNumber={numberedIndex(children, idx)}
           task={child}
           depth={depth + 1}
           toggleDone={toggleDone}
@@ -4999,7 +5043,7 @@ function TrayTask({ task, depth = 0, toggleDone, upsertTask, removeTask, setSele
   );
 }
 
-function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
+function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
@@ -5008,6 +5052,7 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
       <TaskBlock
         task={task}
+        listNumber={listNumber}
         dragId={`daytask-${task.id}`}
         dragData={{ type: "task", id: task.id }}
         dropId={`daytask-drop-${task.id}`}
@@ -5064,9 +5109,10 @@ function DayTask({ task, depth = 0, hideProject = false, childrenOf, categoryTon
           <div className={classNames("mt-0.5 truncate text-[9px]", task.category ? tone.accent : "text-neutral-500")}>{task.project}</div>
         )}
       />
-      {children.map((child) => (
+      {children.map((child, i) => (
         <DayTask
           key={child.id}
+          listNumber={numberedIndex(children, i)}
           task={child}
           depth={depth + 1}
           childrenOf={childrenOf}
@@ -5110,8 +5156,8 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
       </div>
       {!collapsed && (
         <div className="flex flex-col gap-0.5">
-          {g.items.map((task) => (
-            <DayTask key={task.id} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => onIndent(task.id)} onOutdent={() => onOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={onFocusEndDone} onDeleteFocusPrev={onDeleteFocusPrev} />
+          {g.items.map((task, i) => (
+            <DayTask key={task.id} listNumber={numberedIndex(g.items, i)} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => onIndent(task.id)} onOutdent={() => onOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={onFocusEndDone} onDeleteFocusPrev={onDeleteFocusPrev} />
           ))}
         </div>
       )}
@@ -5214,14 +5260,14 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       <div className="flex flex-col gap-1">
         {flatView ? (
           // Bモード: フラット表示（全タスク＋プロジェクトチップ）
-          flatRoots.map((task) => (
-            <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} showProjectChip />
+          flatRoots.map((task, i) => (
+            <DayTask key={task.id} listNumber={numberedIndex(flatRoots, i)} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} showProjectChip />
           ))
         ) : (
           // Aモード: プロジェクトグループヘッダーあり（現状）
           <>
-            {plainTasks.map((task) => (
-              <DayTask key={task.id} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
+            {plainTasks.map((task, i) => (
+              <DayTask key={task.id} listNumber={numberedIndex(plainTasks, i)} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
             ))}
             {projectGroups.map((g) => (
               <DayProjectGroup
