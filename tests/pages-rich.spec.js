@@ -137,3 +137,75 @@ test.describe("その他の拡充", () => {
     expect(family.toLowerCase()).toMatch(/mono/);
   });
 });
+
+test.describe("ブロックメニューと並べ替え", () => {
+  // 3つのブロックを書いた状態にする
+  async function threeBlocks(page) {
+    await startWriting(page, "いち");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("に");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("さん");
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => (await pageBlocks(page)).map((t) => t.title))
+      .toEqual(["いち", "に", "さん"]);
+  }
+
+  test("⠿ のメニューから種類を変えられる", async ({ page }) => {
+    await startWriting(page, "みだしにする");
+    await page.keyboard.press("Escape");
+
+    const row = page.locator("[data-task-id]").first();
+    await row.hover();
+    await row.locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+    await row.getByRole("button", { name: "見出し1" }).click();
+
+    await expect.poll(async () => (await pageBlocks(page))[0].blockType).toBe("heading1");
+  });
+
+  test("⠿ のメニューから複製できる", async ({ page }) => {
+    await startWriting(page, "ふくせい");
+    await page.keyboard.press("Escape");
+
+    const row = page.locator("[data-task-id]").first();
+    await row.hover();
+    await row.locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+    await row.getByRole("button", { name: "複製" }).click();
+
+    await expect.poll(async () => (await pageBlocks(page)).map((t) => t.title))
+      .toEqual(["ふくせい", "ふくせい"]);
+  });
+
+  test("ドラッグで並べ替えられる", async ({ page }) => {
+    await threeBlocks(page);
+
+    // 3番目を1番目の上へ運ぶ
+    const rows = page.locator("[data-task-id]");
+    const from = await rows.nth(2).boundingBox();
+    const to = await rows.nth(0).boundingBox();
+
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2 - 12, { steps: 4 });
+    await page.mouse.move(to.x + to.width / 2, to.y + 3, { steps: 14 });
+    await page.mouse.up();
+
+    await expect.poll(async () => (await pageBlocks(page)).map((t) => t.title))
+      .toEqual(["さん", "いち", "に"]);
+  });
+
+  test("ドラッグしたときはメニューが出ない", async ({ page }) => {
+    await threeBlocks(page);
+    const row = page.locator("[data-task-id]").first();
+    await row.hover();
+    const handle = row.locator('span[title="ドラッグで移動／クリックでメニュー"]');
+    const h = await handle.boundingBox();
+
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2, h.y + 40, { steps: 8 });
+    await page.mouse.up();
+
+    await expect(row.getByRole("button", { name: "複製" })).toHaveCount(0);
+  });
+});

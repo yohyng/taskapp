@@ -95,7 +95,7 @@ test.describe("ブロックの操作列", () => {
 
     const plus = row.locator('button[title="下にブロックを追加"]');
     await expect(plus).toBeVisible();
-    await expect(row.locator('span[title="ドラッグで移動"]')).toBeVisible();
+    await expect(row.locator('span[title="ドラッグで移動／クリックでメニュー"]')).toBeVisible();
 
     await plus.click();
     await expect.poll(async () => (await storedTasks(page)).length).toBe(before + 1);
@@ -103,11 +103,14 @@ test.describe("ブロックの操作列", () => {
     await expect(page.locator("textarea")).toHaveCount(1);
   });
 
-  test("⠿ をクリックしても選択にはならない", async ({ page }) => {
+  test("⠿ をクリックすると選択ではなくメニューが出る", async ({ page }) => {
     const row = block(page, "a-solo");
     await row.hover();
-    await row.locator('span[title="ドラッグで移動"]').click();
+    await row.locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+
     await expect(page.getByText(/件選択中/)).toHaveCount(0);
+    await expect(row.getByRole("button", { name: "複製" })).toBeVisible();
+    await expect(row.getByText("種類", { exact: true })).toBeVisible();
   });
 
   test("空のブロックには入力のヒントが出る", async ({ page }) => {

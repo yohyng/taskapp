@@ -42,6 +42,7 @@ import {
   Info,
   Pin,
   Pencil,
+  Copy,
   Focus,
   Airplay,
   LayoutGrid,
@@ -1068,6 +1069,12 @@ function App() {
     }
 
     // Tray item dropped into tray drop zone
+    // ページ内のブロック並べ替え。落とした相手の上半分なら前、下半分なら後ろ。
+    if (src.type === "task" && dst.type === "page-block" && src.id !== dst.id) {
+      movePageBlock(src.id, dst.id, isBottomHalf());
+      return;
+    }
+
     // Task → STOCK (日付を外して寝かせる。category/project は維持)
     if (src.type === "task" && dst.type === "stock-zone") {
       const name = stockViews.find((v) => v.id === dst.viewId)?.name || "STOCK";
@@ -1358,14 +1365,34 @@ function App() {
     return [current.parentId, ...collectAncestorIds(current.parentId, sourceTasks)];
   }
 
+  // 書き込みの土台。
+  //
+  // 以前はレンダー時点の state をそのまま読んでいたため、同じ tick で2回書くと
+  // 2回目が1回目より前の状態を元にして、1回目を無かったことにしていた。
+  // 「タイトルを確定してから親子を変える」のような、ごく普通の操作で起きる。
+  // 最新を ref で持ち、commitState の中で同期的に進めることで、連続した
+  // 書き込みが積み上がるようにしてある。
+  // 同期や undo など、commitState を通さない更新も拾えるよう、
+  // どれか1つでも差し替わっていたら ref を作り直す。
+  const stateRef = useRef(null);
+  {
+    const c = stateRef.current;
+    if (!c || c.tasks !== tasks || c.categories !== categories || c.projectRules !== projectRules
+        || c.projectOrder !== projectOrder || c.inboxItems !== inboxItems) {
+      stateRef.current = { tasks, categories, projectRules, projectOrder, inboxItems };
+    }
+  }
+
   function snapshot() {
-    return { tasks, categories, projectRules, projectOrder, inboxItems };
+    return stateRef.current;
   }
 
   function commitState(updater) {
-    const current = snapshot();
+    const current = stateRef.current;
     const next = typeof updater === "function" ? updater(current) : updater;
     if (JSON.stringify(current) === JSON.stringify(next)) return false;
+    // 後続の書き込みがこの結果を見られるよう、描画を待たずに進めておく
+    stateRef.current = next;
     setHistory((prev) => ({ past: [...prev.past.slice(-49), current], future: [] }));
     setTasks(next.tasks);
     setCategories(next.categories);
@@ -2267,6 +2294,22 @@ function App() {
 
   // 選択分をまとめて STOCK へ。プロジェクト所属はそのまま、日付だけ外す。
   // TRAY 行はタスク化してから入れる（カテゴリなしのまま）。
+  // ページ内でブロックを並べ替える。配列順がそのまま表示順。
+  function movePageBlock(id, targetId, after) {
+    commitTasks((prev) => {
+      const from = prev.findIndex((t) => t.id === id);
+      if (from < 0) return prev;
+      const moved = prev[from];
+      const rest = prev.filter((t) => t.id !== id);
+      const to = rest.findIndex((t) => t.id === targetId);
+      if (to < 0) return prev;
+      // 落とした相手と同じ階層に揃える
+      const next = [...rest];
+      next.splice(after ? to + 1 : to, 0, { ...moved, parentId: rest[to].parentId ?? null });
+      return next;
+    });
+  }
+
   // 前のブロックに文字を足して自分を消す。1回の更新でやらないと、
   // 後の書き込みが更新前の状態を元にして前の書き込みを消してしまう。
   function mergeBlockInto(prevId, taskId, mergedTitle) {
@@ -4402,12 +4445,10 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
   const sq = useSlashQuery({
     enabled: !!slashCtx,
     onPick: (cmd, rest) => {
-      // 残りの文字列でタスクを作ってから、そのタスクにコマンドを当てる。
-      // 作成とコマンドを同じ tick で書くと、後の書き込みが作成前の状態を
-      // 元にしてしまい無視されるので、1フレーム空ける。
+      // 残りの文字列でタスクを作ってから、そのタスクにコマンドを当てる
       const created = onSubmit(rest || "新規タスク");
       onChange("");
-      if (created) setTimeout(() => cmd.run({ task: created, ctx: slashCtx }), 0);
+      if (created) cmd.run({ task: created, ctx: slashCtx });
     },
   });
 
@@ -4446,7 +4487,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         dragId={`page-${task.id}`}
         dragData={{ type: "task", id: task.id }}
         dropId={`page-drop-${task.id}`}
-        dropData={{ type: "task", id: task.id }}
+        // ページ内の並べ替えはプロジェクト移動とは別の意味なので型を分ける
+        dropData={{ type: "page-block", id: task.id }}
         upsertTask={upsertTask}
         removeTask={removeTask}
         setSelectedTaskId={setSelectedTaskId}
@@ -4457,6 +4499,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
         onMoveBlock={(t, dir, title) => ops.moveBlock(t, dir, siblings, idx, title)}
         onDuplicate={(t, title) => ops.duplicate(t, title)}
+        onDuplicateBlock={(t) => ops.duplicate(t)}
         onTab={(e, { draft }) => {
           // 確定と親子変更を1回で書く。別々だと、後の書き込みが確定前の
           // 状態を元にしてタイトルを巻き戻す。
@@ -4577,7 +4620,9 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
         afterId: task.id,
         silent: true,
       });
-      if (created) markForEdit?.(created.id);
+      // 複製は編集状態で開かない。開くと空のドラフトが自動保存で
+      // 複製した中身を上書きしてしまう（Notion も開かない）。
+      return created;
     },
     // Alt+Shift+↑↓: 並びを入れ替える
     moveBlock: (task, dir, siblings, idx, title) => {
@@ -4893,14 +4938,44 @@ function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTask
 
 // ブロック左端の操作列（Notion の + と ⠿）。ホバーで出る。
 // 場所は常に確保しておく。出入りで幅が変わると行がガタつくため。
-function BlockGutter({ block, compact }) {
+function BlockGutter({ block, compact, task, onDuplicate }) {
+  const slashCtx = useSlash();
+  const [menu, setMenu] = useState(false);
+  const grabbed = useRef(false);
+
+  // ⠿ はドラッグの掴みどころ。動かさずに離したらメニューを出す（Notion と同じ）。
+  // 外側を触ったら閉じる。capture で拾うので、メニュー自身の中かどうかは
+  // 要素の包含で見る（target 側の stopPropagation では止められない）。
+  const menuRef = useRef(null);
+  useEffect(() => {
+    if (!menu) return;
+    function close(e) {
+      if (menuRef.current?.contains(e.target)) return;
+      setMenu(false);
+    }
+    window.addEventListener("pointerdown", close, { capture: true });
+    return () => window.removeEventListener("pointerdown", close, { capture: true });
+  }, [menu]);
+
+  const groups = useMemo(() => {
+    const by = new Map();
+    for (const cmd of SLASH_COMMANDS) {
+      const g = cmd.group || "その他";
+      if (!by.has(g)) by.set(g, []);
+      by.get(g).push(cmd);
+    }
+    return [...by.entries()];
+  }, []);
+
   return (
-    <div
-      className={classNames(
-        "flex shrink-0 items-center self-start pt-0.5 opacity-0 transition group-hover/block:opacity-60 focus-within:opacity-60",
-        compact ? "w-[14px]" : "w-[26px]",
-      )}
-    >
+    <div className={classNames("relative flex shrink-0 items-center self-start pt-0.5", compact ? "w-[14px]" : "w-[26px]")}>
+      {/* 薄く出すのはアイコンだけ。メニューまで透けると下の文字と重なって読めない。 */}
+      <div
+        className={classNames(
+          "flex items-center transition group-hover/block:opacity-60 focus-within:opacity-60",
+          menu ? "opacity-60" : "opacity-0",
+        )}
+      >
       {!compact && (
         <button
           onClick={(e) => { e.stopPropagation(); block.addBelow(); }}
@@ -4910,15 +4985,55 @@ function BlockGutter({ block, compact }) {
           <Plus className="h-3 w-3" />
         </button>
       )}
-      {/* 行全体がドラッグできるので、ここは掴む位置の目印。
-          クリックは止めて選択が走らないようにする。 */}
       <span
-        onClick={(e) => e.stopPropagation()}
-        title="ドラッグで移動"
+        onPointerDown={() => { grabbed.current = false; }}
+        onPointerMove={() => { grabbed.current = true; }}
+        onClick={(e) => {
+          e.stopPropagation();
+          // ドラッグしたときはメニューを出さない
+          if (grabbed.current) return;
+          setMenu((v) => !v);
+        }}
+        title="ドラッグで移動／クリックでメニュー"
         className="cursor-grab rounded p-px text-neutral-500 hover:text-neutral-200"
       >
         <GripVertical className="h-3 w-3" />
       </span>
+      </div>
+
+      {menu && (
+        <div
+          ref={menuRef}
+          className="absolute left-0 top-full z-[130] mt-1 max-h-72 w-52 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl"
+        >
+          <button
+            onMouseDown={(e) => { e.preventDefault(); onDuplicate?.(task); setMenu(false); }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 transition hover:bg-white/[0.07]"
+          >
+            <Copy className="h-3 w-3 shrink-0" /> 複製
+          </button>
+          {groups.map(([name, cmds]) => (
+            <div key={name}>
+              <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">{name}</div>
+              {cmds.map((cmd) => (
+                <button
+                  key={cmd.key}
+                  onMouseDown={(e) => { e.preventDefault(); cmd.run({ task, ctx: slashCtx }); setMenu(false); }}
+                  className={classNames(
+                    "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] transition hover:bg-white/[0.07]",
+                    cmd.danger ? "text-red-300" : "text-neutral-300",
+                  )}
+                >
+                  {cmd.swatch
+                    ? <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: cmd.swatch }} />
+                    : <span className="h-2.5 w-2.5 shrink-0" />}
+                  <span className="min-w-0 flex-1 truncate">{cmd.label}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -4943,6 +5058,7 @@ function TaskBlock({
   listNumber,
   collapsed = false,
   onToggleCollapse,
+  onDuplicateBlock,
   ...blockOptions
 }) {
   const b = useTaskBlock(blockOptions);
@@ -4965,7 +5081,7 @@ function TaskBlock({
           b.isDragging && "opacity-30",
         )}
       >
-        <BlockGutter block={b} compact={compactGutter} />
+        <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
         <span className="h-px w-full shrink-0 bg-current opacity-40" />
       </div>
     );
@@ -4984,7 +5100,7 @@ function TaskBlock({
       )}
     >
       <div className="flex w-full min-w-0 items-start gap-1.5">
-        <BlockGutter block={b} compact={compactGutter} />
+        <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
         {cfg.toggle && (
           <button
             onClick={(e) => { e.stopPropagation(); onToggleCollapse?.(task.id); }}
@@ -5844,8 +5960,7 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
           const clean = (draft || "").trim();
           if (clean && clean !== task.title) upsertTask?.({ id: task.id, title: clean });
           setEditing(false);
-          // 同じ tick で2回書くと後の書き込みが前を消すので1フレーム空ける
-          setTimeout(() => { if (isShift) onOutdent?.(); else onIndent?.(); }, 0);
+          if (isShift) onOutdent?.(); else onIndent?.();
         }}
         setSelectedTaskId={setSelectedTaskId}
         extraProps={{ "data-daytask": "true" }}
