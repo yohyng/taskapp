@@ -48,6 +48,7 @@ import {
   LayoutGrid,
   Maximize2,
   Minimize2,
+  Link as LinkIcon,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -967,7 +968,7 @@ function App() {
     return true;
   }
 
-  function handleDragEnd({ active, over }) {
+  function handleDragEnd({ active, over, delta, activatorEvent }) {
     setActiveDrag(null);
     if (!over) return;
     const src = active.data.current;
@@ -989,18 +990,24 @@ function App() {
       return pointerY > midY;
     }
 
+    // ページ本文は指の位置で決める。画面に出している線と同じ基準にしないと、
+    // 線の場所と実際に入る場所がずれる。
+    const pointer = activatorEvent && delta
+      ? { x: (activatorEvent.clientX ?? 0) + delta.x, y: (activatorEvent.clientY ?? 0) + delta.y }
+      : null;
+
     // 落とした相手の左端／右端なら、そこに新しい列を起こす（Notion と同じ）。
     // 真ん中なら 0 を返して、ふつうの並べ替えに任せる。
     function dropSide() {
-      if (!over.rect) return 0;
+      if (!over.rect || !pointer) return 0;
       const r = over.rect;
-      const d = active.rect?.current?.translated;
-      const x = d ? d.left + d.width / 2 : r.left + r.width / 2;
       const edge = Math.min(r.width * 0.3, 140);
-      if (x < r.left + edge) return -1;
-      if (x > r.right - edge) return 1;
+      if (pointer.x < r.left + edge) return -1;
+      if (pointer.x > r.right - edge) return 1;
       return 0;
     }
+    const pointerBelowMiddle = () =>
+      pointer && over.rect ? pointer.y > over.rect.top + over.rect.height / 2 : isBottomHalf();
 
     // Column header reorder
     if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
@@ -1193,7 +1200,7 @@ function App() {
         movePageBlockToNewColumn(src.id, dst.id, side);
         setToast(side < 0 ? "左に列を作りました" : "右に列を作りました");
       } else {
-        movePageBlock(src.id, dst.id, isBottomHalf());
+        movePageBlock(src.id, dst.id, pointerBelowMiddle());
       }
       return;
     }
@@ -3718,6 +3725,7 @@ function App() {
       </div>
     </div>
     <DragOverlay dropAnimation={null}>
+      <span data-drag-ghost />
       {activeDrag?.type === "task" && (
         selectedIds.size > 1 && selectedIds.has(activeDrag.id) ? (
           <div className="flex items-center gap-2 rounded-md border border-sky-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">
@@ -4484,6 +4492,7 @@ function useTaskBlock({
   onEnterBlock,   // Enter: 直下に同じ種類のブロックを作る
   onMergeBack,    // 行頭 Backspace: 前のブロックに繋げる
   onMergeForward, // 行末 Delete: 次のブロックを引き上げる
+  onIndentSelection, // 選んだブロックをまとめて字下げ
   onMoveBlock,    // Alt+Shift+↑↓: 並びを入れ替える
   onDuplicate,    // Cmd+D: ブロックを複製する
 }) {
@@ -4522,6 +4531,23 @@ function useTaskBlock({
     disabled: dragOff,
   });
   const { setNodeRef: dropRef, isOver } = useDroppable({ id: dropId, data: dropData });
+
+  // 重ねているあいだ、どこに入るかを線で出す。指の位置で決めるので、
+  // 実際に落ちる場所（handleDragEnd）と同じ基準になる。
+  const [dropHint, setDropHint] = useState(null);
+  useEffect(() => {
+    if (!isOver || !notionMode) { setDropHint(null); return; }
+    function onMove(ev) {
+      const r = cardRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const edge = Math.min(r.width * 0.3, 140);
+      if (ev.clientX < r.left + edge) return setDropHint("left");
+      if (ev.clientX > r.right - edge) return setDropHint("right");
+      setDropHint(ev.clientY > r.top + r.height / 2 ? "bottom" : "top");
+    }
+    window.addEventListener("pointermove", onMove);
+    return () => window.removeEventListener("pointermove", onMove);
+  }, [isOver, notionMode]);
 
   const setRefs = (el) => {
     dragRef(el);
@@ -4602,6 +4628,13 @@ function useTaskBlock({
       addBlockBelow?.(task);
       return;
     }
+    // 選んでいるときの Tab は、選んだぶんをまとめて字下げする
+    if (e.key === "Tab" && isSelected && selectedIds?.size && onIndentSelection) {
+      e.preventDefault();
+      e.stopPropagation();
+      onIndentSelection([...selectedIds], e.shiftKey ? -1 : 1);
+      return;
+    }
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
       const dir = e.key === "ArrowUp" ? -1 : 1;
@@ -4624,6 +4657,45 @@ function useTaskBlock({
     }
   }
 
+  // 選んでいる範囲。装飾バーを出す位置と、掛ける相手を決めるのに使う。
+  const [mark, setMark] = useState(null);      // { start, end, top, left }
+  const [linkRange, setLinkRange] = useState(null);
+
+  function applyMark(kind) {
+    const el = textareaRef.current;
+    if (!el) return;
+    const next = toggleInlineMark(draft, el.selectionStart, el.selectionEnd, kind);
+    if (!next) return;
+    setDraft(next.text);
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(next.start, next.end);
+    });
+  }
+
+  function applyLink(url) {
+    const el = textareaRef.current;
+    const [a, z] = linkRange || [];
+    setLinkRange(null);
+    if (!el || a == null || !url) return;
+    const text = draft.slice(0, a) + `[${draft.slice(a, z)}](${url})` + draft.slice(z);
+    setDraft(text);
+    // その場で確定する。URL 欄から戻る途中でフォーカスが外れることがあり、
+    // あとの commit 任せにすると書いたリンクごと消える。
+    upsertTask?.({ id: task.id, title: normalizeBlockText(text) });
+    requestAnimationFrame(() => el.focus());
+  }
+
+  // 範囲を選んでいるあいだだけ装飾バーを出す（Notion と同じ）
+  function syncMarkBar() {
+    const el = textareaRef.current;
+    if (!el || !notionMode) return;
+    const [a, z] = [el.selectionStart, el.selectionEnd];
+    if (a === z) { setMark(null); return; }
+    const box = el.getBoundingClientRect();
+    setMark({ start: a, end: z, top: box.top, left: box.left });
+  }
+
   function onTextareaKeyDown(e) {
     // メニューが開いている間はそちらの操作を優先する
     if (sq.handleKeyDown(e, draft)) return;
@@ -4640,17 +4712,24 @@ function useTaskBlock({
       onMoveBlock?.(task, e.key === "ArrowUp" ? -1 : 1, normalizeBlockText(draft));
       return;
     }
-    // Cmd/Ctrl+B / I / E で選択範囲を装飾する（Notion と同じ割り当て）
-    if (notionMode && (e.metaKey || e.ctrlKey) && ["b", "i", "e"].includes(e.key.toLowerCase())) {
-      e.preventDefault();
-      const mark = { b: "**", i: "*", e: "`" }[e.key.toLowerCase()];
-      const el2 = e.currentTarget;
-      const [a, z] = [el2.selectionStart, el2.selectionEnd];
-      if (a === z) return;
-      const next = draft.slice(0, a) + mark + draft.slice(a, z) + mark + draft.slice(z);
-      setDraft(next);
-      setTimeout(() => { el2.setSelectionRange(a + mark.length, z + mark.length); }, 0);
-      return;
+    // Cmd/Ctrl+B / I / E / U / Shift+S で選択範囲を装飾する（Notion と同じ割り当て）。
+    // 同じキーをもう一度押すと外れる。
+    if (notionMode && (e.metaKey || e.ctrlKey)) {
+      const k = e.key.toLowerCase();
+      const mark = e.shiftKey
+        ? (k === "s" ? "strike" : null)
+        : { b: "bold", i: "italic", e: "code", u: "underline" }[k];
+      if (mark) {
+        e.preventDefault();
+        applyMark(mark);
+        return;
+      }
+      // Cmd+K: 選んだところをリンクにする
+      if (!e.shiftKey && k === "k" && el.selectionStart !== el.selectionEnd) {
+        e.preventDefault();
+        setLinkRange([el.selectionStart, el.selectionEnd]);
+        return;
+      }
     }
     // Cmd/Ctrl+A は段階的に広がる（Notion と同じ）。
     // 1回目は本文を全選択、すでに全部選べていたら本文全体のブロック選択へ。
@@ -4823,7 +4902,8 @@ function useTaskBlock({
       sq.detect(v, e.target.selectionStart);
     },
     onKeyDown: onTextareaKeyDown,
-    onClick: (e) => e.stopPropagation(),
+    onSelect: syncMarkBar,
+    onClick: (e) => { e.stopPropagation(); syncMarkBar(); },
     onPointerDown: (e) => e.stopPropagation(),
     onMouseDown: (e) => e.stopPropagation(),
   };
@@ -4845,7 +4925,8 @@ function useTaskBlock({
     editing, setEditing, draft, setDraft,
     isSelected, isDragging, isOver, focusPickMode,
     cardRef, textareaRef,
-    blockProps, textareaProps, titleProps, focusRingClass,
+    blockProps, textareaProps, titleProps, focusRingClass, dropHint,
+    mark, applyMark, linkRange, setLinkRange, applyLink,
     commit, removeAndLeave,
     addBelow: () => addBlockBelow?.(task),
     notionMode,
@@ -5114,6 +5195,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         onEnterBlock={(t, before, after) => ops.enterBlock(t, before, after)}
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
         onMergeForward={(t, draft) => ops.mergeForward(t, draft, siblings, idx)}
+        onIndentSelection={(ids, dir) => ops.indentSelection(ids, dir)}
         onMoveBlock={(t, dir, title) => ops.moveBlock(t, dir, siblings, idx, title)}
         onDuplicate={(t, title) => ops.duplicate(t, title)}
         onDuplicateBlock={(t) => ops.duplicate(t)}
@@ -5130,8 +5212,10 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           b.focusRingClass,
           b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
           b.isDragging && "opacity-30",
-          // 左右の端に細い印を出して「端に落とすと列になる」と分かるようにする
-          b.isOver && "ring-1 ring-inset ring-white/20 [box-shadow:inset_3px_0_0_rgba(96,165,250,.55),inset_-3px_0_0_rgba(96,165,250,.55)]",
+          // 入る場所を線で出す。上下なら並べ替え、左右ならそこに列ができる。
+          b.dropHint && "relative",
+          b.dropHint === "left" && "[box-shadow:inset_3px_0_0_rgb(96,165,250)]",
+          b.dropHint === "right" && "[box-shadow:inset_-3px_0_0_rgb(96,165,250)]",
         )}
         textareaClassName={() => "w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
@@ -5340,6 +5424,33 @@ function BlockArea({
       if (!prev) return;
       onMergeBlocks(prev.id, task.id, (prev.title || "") + (draft || ""));
     },
+    // 選んだブロックをまとめて字下げ／戻す
+    indentSelection: (ids, dir) => {
+      const set = new Set(ids);
+      const here = tasks.filter((t) => t.pageId === pageId && !t.archived);
+      const parentOf = new Map(here.map((t) => [t.id, t.parentId ?? null]));
+      const patch = new Map();
+      for (const t of here) {
+        if (!set.has(t.id)) continue;
+        if (dir < 0) {
+          const p = parentOf.get(t.id);
+          if (p) patch.set(t.id, parentOf.get(p) ?? null);
+          continue;
+        }
+        // 直前の兄弟の子になる。その兄弟も一緒に選ばれているなら、
+        // そちらの移動先に揃える（選んだ塊の中で入れ子にならないように）。
+        const sibs = here.filter((x) => (x.parentId ?? null) === (t.parentId ?? null));
+        const prev = sibs[sibs.findIndex((x) => x.id === t.id) - 1];
+        if (!prev) continue;
+        if (set.has(prev.id)) {
+          if (patch.has(prev.id)) patch.set(t.id, patch.get(prev.id));
+          continue;
+        }
+        patch.set(t.id, prev.id);
+      }
+      if (!patch.size) return;
+      mapTasks((t) => (patch.has(t.id) ? { ...t, parentId: patch.get(t.id) } : t));
+    },
     // 行末 Delete: 次のブロックを引き上げて繋げる（Backspace の逆）
     mergeForward: (task, draft, siblings, idx) => {
       const next = siblings[idx + 1];
@@ -5373,7 +5484,7 @@ function BlockArea({
       if (!target) return;
       onReorder(task.id, target.id, title);
     },
-  }), [addTask, markForEdit, onReorder, onMergeBlocks]);
+  }), [addTask, markForEdit, onReorder, onMergeBlocks, upsertTask, mapTasks, tasks, pageId]);
 
   // 列をまるごと左右に差し替える。col の値を2つの列のあいだで入れ替えるだけ。
   const swapColumns = useCallback((rowKey, a, b) => {
@@ -6122,6 +6233,13 @@ function TaskBlock({
         cfg.panelCls,
       )}
     >
+      {(b.dropHint === "top" || b.dropHint === "bottom") && (
+        <div
+          data-drop-line
+          className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-sky-400"
+          style={b.dropHint === "top" ? { top: -1 } : { bottom: -1 }}
+        />
+      )}
       <div className="flex w-full min-w-0 items-start gap-1.5">
         <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
         {cfg.toggle && (
@@ -6139,12 +6257,25 @@ function TaskBlock({
         <div className="min-w-0 flex-1">
           {b.editing ? (
             <div className="relative">
+              {b.notionMode && (b.mark || b.linkRange) && (
+                <FormatBar
+                  onMark={b.applyMark}
+                  linking={!!b.linkRange}
+                  onLink={() => b.setLinkRange([b.mark.start, b.mark.end])}
+                  onLinkDone={b.applyLink}
+                  onLinkCancel={() => b.setLinkRange(null)}
+                />
+              )}
               <textarea
                 {...b.textareaProps}
                 placeholder={draftPlaceholder}
-                onBlur={() => {
+                onBlur={(e) => {
                   // メニュー操作でフォーカスが外れただけのときは閉じない
                   if (b.slash) return;
+                  // 装飾バー（リンク入力）に移っただけのときも閉じない。
+                  // 閉じるとバーごと消えて、URL を打つ場所がなくなる。
+                  if (e.relatedTarget?.closest?.("[data-format-bar]")) return;
+                  if (b.linkRange) return;
                   // 空のまま離れたブロックの扱いはビュー次第。
                   // ページ本文は Notion と同じく空行を残す。
                   if (!b.commit() && !b.notionMode && onEmptyBlur) onEmptyBlur();
@@ -6210,7 +6341,16 @@ const INLINE_RULES = [
   { re: /\*\*([^*]+)\*\*/g, render: (t, k) => <strong key={k}>{t}</strong> },
   { re: /(?<!\*)\*([^*\n]+)\*(?!\*)/g, render: (t, k) => <em key={k}>{t}</em> },
   { re: /`([^`\n]+)`/g, render: (t, k) => <code key={k} className="rounded bg-white/10 px-1 py-px text-[0.9em]">{t}</code> },
-  { re: /~([^~\n]+)~/g, render: (t, k) => <s key={k} className="opacity-60">{t}</s> },
+  { re: /~~([^~\n]+)~~/g, render: (t, k) => <s key={k} className="opacity-60">{t}</s> },
+  { re: /(?<!~)~([^~\n]+)~(?!~)/g, render: (t, k) => <s key={k} className="opacity-60">{t}</s> },
+  { re: /__([^_\n]+)__/g, render: (t, k) => <u key={k}>{t}</u> },
+  // [文字](URL)。表示は文字だけで、リンク先は裏に持つ。
+  {
+    re: /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    render: (t, k, m) => (
+      <a key={k} href={m[2]} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:opacity-80" onClick={(e) => e.stopPropagation()}>{t}</a>
+    ),
+  },
   { re: /(https?:\/\/[^\s]+)/g, render: (t, k) => (
       <a key={k} href={t} target="_blank" rel="noreferrer" className="underline decoration-dotted underline-offset-2 hover:opacity-80" onClick={(e) => e.stopPropagation()}>{t}</a>
     ) },
@@ -6232,7 +6372,7 @@ function renderInline(text) {
     }
     if (!best) break;
     if (best.m.index > 0) out.push(rest.slice(0, best.m.index));
-    out.push(best.rule.render(best.m[1], key++));
+    out.push(best.rule.render(best.m[1], key++, best.m));
     rest = rest.slice(best.m.index + best.m[0].length);
   }
   if (rest) out.push(rest);
@@ -6288,6 +6428,102 @@ function normalizeHex(v) {
   let s = String(v || "").trim().replace(/^#/, "");
   if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.split("").map((c) => c + c).join("");
   return /^[0-9a-fA-F]{6}$/.test(s) ? `#${s.toLowerCase()}` : null;
+}
+
+// 選んだところに記法を掛ける／外す。
+// すでに掛かっていたら外す（Notion と同じく、同じキーで行き来する）。
+const INLINE_MARKS = { bold: "**", italic: "*", code: "`", underline: "__", strike: "~~" };
+function toggleInlineMark(text, start, end, mark) {
+  const m = INLINE_MARKS[mark];
+  if (!m || start === end) return null;
+  const inside = text.slice(start, end);
+  // 選んだ範囲の内側に記法がある場合
+  if (inside.startsWith(m) && inside.endsWith(m) && inside.length > m.length * 2) {
+    const stripped = inside.slice(m.length, -m.length);
+    return { text: text.slice(0, start) + stripped + text.slice(end), start, end: start + stripped.length };
+  }
+  // 選んだ範囲のすぐ外側にある場合
+  if (text.slice(start - m.length, start) === m && text.slice(end, end + m.length) === m) {
+    return {
+      text: text.slice(0, start - m.length) + inside + text.slice(end + m.length),
+      start: start - m.length,
+      end: end - m.length,
+    };
+  }
+  return {
+    text: text.slice(0, start) + m + inside + m + text.slice(end),
+    start: start + m.length,
+    end: end + m.length,
+  };
+}
+
+// 文字を選んでいるあいだ、その上に浮く装飾バー。Notion の要。
+// mousedown では preventDefault して、選んだ範囲が外れないようにする。
+function FormatBar({ onMark, linking, onLink, onLinkDone, onLinkCancel }) {
+  const [url, setUrl] = useState("");
+  const hit = (fn) => (e) => { e.preventDefault(); e.stopPropagation(); fn(); };
+
+  if (linking) {
+    return (
+      <div
+        data-format-bar
+        onMouseDown={(e) => e.stopPropagation()}
+        className="absolute bottom-full left-0 z-[140] mb-1 flex items-center gap-1 rounded-lg border border-white/15 ts-surface p-1 shadow-2xl"
+      >
+        <input
+          autoFocus
+          aria-label="リンク先のURL"
+          placeholder="https://"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") { e.preventDefault(); onLinkDone(url.trim()); }
+            if (e.key === "Escape") { e.preventDefault(); onLinkCancel(); }
+          }}
+          className="w-52 rounded border border-white/10 bg-black/25 px-1.5 py-1 text-[11px] ts-text outline-none placeholder:text-neutral-600"
+        />
+        <button onMouseDown={hit(() => onLinkDone(url.trim()))} className="rounded px-1.5 py-1 text-[11px] text-neutral-300 hover:bg-white/10">付ける</button>
+      </div>
+    );
+  }
+
+  const items = [
+    ["bold", "B", "太字", "font-bold"],
+    ["italic", "i", "斜体", "italic font-serif"],
+    ["underline", "U", "下線", "underline"],
+    ["strike", "S", "打ち消し線", "line-through"],
+    ["code", "</>", "コード", "font-mono text-[9px]"],
+  ];
+  return (
+    <div
+      data-format-bar
+      role="toolbar"
+      onMouseDown={(e) => e.stopPropagation()}
+      className="absolute bottom-full left-0 z-[140] mb-1 flex items-center gap-0.5 rounded-lg border border-white/15 ts-surface p-0.5 shadow-2xl"
+    >
+      {items.map(([kind, label, title, cls]) => (
+        <button
+          key={kind}
+          title={title}
+          aria-label={title}
+          onMouseDown={hit(() => onMark(kind))}
+          className={classNames("min-w-[22px] rounded px-1 py-1 text-[11px] leading-none text-neutral-300 transition hover:bg-white/10 hover:text-neutral-100", cls)}
+        >
+          {label}
+        </button>
+      ))}
+      <span className="mx-0.5 h-3 w-px bg-white/10" />
+      <button
+        title="リンク"
+        aria-label="リンク"
+        onMouseDown={hit(onLink)}
+        className="rounded px-1 py-1 text-neutral-300 transition hover:bg-white/10 hover:text-neutral-100"
+      >
+        <LinkIcon className="h-3 w-3" />
+      </button>
+    </div>
+  );
 }
 
 // 外のアプリに渡すときの書き方。Notion も Markdown で渡してくる。

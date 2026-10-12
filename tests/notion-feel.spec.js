@@ -317,8 +317,180 @@ test.describe("親子", () => {
   });
 });
 
+test.describe("文字の装飾", () => {
+  const one = (text) => ({ tasks: [b("a", text)] });
+  const selectAll = async (page, title) => {
+    await edit(page, title);
+    await page.keyboard.press("ControlOrMeta+a");
+  };
+
+  for (const [name, combo, want] of [
+    ["Cmd+B で太字", "ControlOrMeta+b", "**もじ**"],
+    ["Cmd+I で斜体", "ControlOrMeta+i", "*もじ*"],
+    ["Cmd+U で下線", "ControlOrMeta+u", "__もじ__"],
+    ["Cmd+Shift+S で打ち消し線", "ControlOrMeta+Shift+s", "~~もじ~~"],
+    ["Cmd+E でコード", "ControlOrMeta+e", "`もじ`"],
+  ]) {
+    test(name, async ({ page, seed }) => {
+      await seed(one("もじ"));
+      await toPages(page);
+      await selectAll(page, "もじ");
+      await page.keyboard.press(combo);
+      await page.keyboard.press("Escape");
+      expect((await pageBlocks(page))[0].title).toBe(want);
+    });
+  }
+
+  test("同じキーをもう一度押すと外れる", async ({ page, seed }) => {
+    await seed(one("もじ"));
+    await toPages(page);
+    await selectAll(page, "もじ");
+    await page.keyboard.press("ControlOrMeta+b");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("ControlOrMeta+b");
+    await page.keyboard.press("Escape");
+    expect((await pageBlocks(page))[0].title).toBe("もじ");
+  });
+
+  test("文字を選ぶと、浮く装飾バーが出る", async ({ page, seed }) => {
+    await seed(one("えらぶ"));
+    await toPages(page);
+    await edit(page, "えらぶ");
+    await expect(page.locator("[data-format-bar]")).toHaveCount(0);
+    await page.keyboard.press("ControlOrMeta+a");
+    await expect(page.locator("[data-format-bar]")).toHaveCount(1);
+  });
+
+  test("装飾バーのボタンでも掛かる", async ({ page, seed }) => {
+    await seed(one("もじ"));
+    await toPages(page);
+    await edit(page, "もじ");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.locator("[data-format-bar]").getByLabel("打ち消し線").click();
+    await page.keyboard.press("Escape");
+    expect((await pageBlocks(page))[0].title).toBe("~~もじ~~");
+  });
+
+  test("Cmd+K で URL を聞かれ、リンクになる", async ({ page, seed }) => {
+    await seed(one("れいのサイト"));
+    await toPages(page);
+    await edit(page, "れいのサイト");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("ControlOrMeta+k");
+
+    const url = page.getByLabel("リンク先のURL");
+    await expect(url).toBeVisible();
+    await url.fill("https://example.com");
+    await url.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => (await pageBlocks(page))[0].title)
+      .toBe("[れいのサイト](https://example.com)");
+  });
+
+  for (const [name, text, tag] of [
+    ["~~…~~ は打ち消し線で描かれる", "~~けす~~ のこり", "s"],
+    ["__…__ は下線で描かれる", "__ひく__ のこり", "u"],
+    ["**…** は太字で描かれる", "**ふとい** のこり", "strong"],
+  ]) {
+    test(name, async ({ page, seed }) => {
+      await seed({ tasks: [b("a", text)] });
+      await toPages(page);
+      const html = await row(page, "のこり").innerHTML();
+      expect(new RegExp(`<${tag}[ >]`).test(html)).toBe(true);
+    });
+  }
+
+  test("[文字](URL) はリンクになり、文字だけが見える", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "[れいのサイト](https://example.com) のこり")] });
+    await toPages(page);
+    const link = row(page, "のこり").locator("a");
+    await expect(link).toHaveAttribute("href", "https://example.com");
+    await expect(link).toHaveText("れいのサイト");
+  });
+
+  test("むき出しの URL もリンクになる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "みて https://example.com のこり")] });
+    await toPages(page);
+    await expect(row(page, "のこり").locator("a")).toHaveAttribute("href", "https://example.com");
+  });
+});
+
+test.describe("ドラッグの手がかり", () => {
+  const grip = (page, title) => row(page, title).locator('span[title="ドラッグで移動／クリックでメニュー"]');
+
+  async function dragOver(page, fromTitle, toTitle, xRatio) {
+    await row(page, fromTitle).hover();
+    const g = await grip(page, fromTitle).boundingBox();
+    const to = await row(page, toTitle).boundingBox();
+    await page.mouse.move(g.x + 4, g.y + 6);
+    await page.mouse.down();
+    await page.mouse.move(to.x + to.width * xRatio, to.y + 3, { steps: 14 });
+  }
+
+  test("真ん中あたりに重ねると、入る位置に線が出る", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "いち"), b("c", "に")] });
+    await toPages(page);
+    await dragOver(page, "に", "いち", 0.5);
+    await expect(page.locator("[data-drop-line]")).toHaveCount(1);
+    await page.mouse.up();
+  });
+
+  test("端に重ねたときは線ではなく、列になる印が出る", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "いち"), b("c", "に")] });
+    await toPages(page);
+    await dragOver(page, "に", "いち", 0.02);
+    await expect(page.locator("[data-drop-line]")).toHaveCount(0);
+    await page.mouse.up();
+  });
+
+  test("線の出た場所に、そのとおり入る", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "いち"), b("c", "に")] });
+    await toPages(page);
+    await dragOver(page, "に", "いち", 0.5); // 上半分 = いち の前
+    await page.mouse.up();
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title))).toEqual(["に", "いち"]);
+  });
+});
+
+test.describe("選んでまとめて字下げ", () => {
+  test("上に受け皿があれば、選んだぶんがまとめて子になる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "おや"), b("c", "いち"), b("d", "に")] });
+    await toPages(page);
+    await edit(page, "いち");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("Tab");
+
+    await expect.poll(async () =>
+      (await pageBlocks(page)).filter((t) => t.parentId === "a").map((t) => t.title))
+      .toEqual(["いち", "に"]);
+  });
+
+  test("Shift+Tab で元に戻る", async ({ page, seed }) => {
+    await seed({
+      tasks: [b("a", "おや"), { ...b("c", "こ"), parentId: "a" }],
+    });
+    await toPages(page);
+    await edit(page, "こ");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Shift+Tab");
+    await expect.poll(async () => (await pageBlocks(page)).find((t) => t.title === "こ").parentId).toBeFalsy();
+  });
+
+  test("いちばん上のブロックは、字下げしても動かない", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "いち"), b("c", "に")] });
+    await toPages(page);
+    await edit(page, "いち");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Shift+ArrowDown");
+    await page.keyboard.press("Tab");
+    await page.waitForTimeout(300);
+    expect((await pageBlocks(page)).every((t) => !t.parentId)).toBe(true);
+  });
+});
+
 test.describe("まだ寄せきれていないもの", () => {
-  test.fixme("選んだブロックを Tab でまとめて字下げできる", async () => {});
   test.fixme("選んだ状態で文字を打つと、まとめて置き換わる", async () => {});
-  test.fixme("ドラッグ中に、入る位置の線が出る", async () => {});
+  test.fixme("Alt+ドラッグで複製できる", async () => {});
+  test.fixme("ブロックの左の余白クリックで選択できる", async () => {});
 });
