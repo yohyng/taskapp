@@ -1594,6 +1594,40 @@ function App() {
     setToast("Redoしました");
   }
 
+  // 切り取り・コピーしたブロックの控え。外のクリップボードは文字しか
+  // 運べないので、種別や色まで保つためにこちらを使う。
+  const clipboardRef = useRef(null);
+
+  function pasteBlocks(list) {
+    const anchor = [...selectedIds].pop() || null;
+    const made = list.map((t) => normalizeTask({
+      ...t,
+      id: uid(),
+      // 貼り先が決まっているときは、その列に合わせる
+      ...(anchor ? pasteTargetShape(taskMap.get(anchor)) : {}),
+    }));
+    commitTasks((prev) => {
+      const at = anchor ? prev.findIndex((t) => t.id === anchor) : -1;
+      if (at < 0) return [...prev, ...made];
+      const next = [...prev];
+      next.splice(at + 1, 0, ...made);
+      return next;
+    });
+    setSelectedIds(new Set(made.map((t) => t.id)));
+    setToast(`${made.length}件を貼り付けました`);
+  }
+
+  function pasteTargetShape(target) {
+    if (!target) return {};
+    return {
+      pageId: target.pageId ?? null,
+      rowKey: target.rowKey ?? null,
+      col: target.col ?? 0,
+      colWidth: target.colWidth ?? null,
+      parentId: target.parentId ?? null,
+    };
+  }
+
   useEffect(() => {
     function handleKeyDown(event) {
       const tag = document.activeElement?.tagName?.toLowerCase();
@@ -1613,6 +1647,24 @@ function App() {
       if (!isMod) return;
       if (inInput) return;
       const key = event.key.toLowerCase();
+
+      // 選んだブロックの切り貼り（Notion と同じ）。
+      // 貼り付けは手元の控えから作る。外のアプリへは Markdown で渡す。
+      if ((key === "c" || key === "x") && selectedIds.size > 0) {
+        event.preventDefault();
+        const picked = tasks.filter((t) => selectedIds.has(t.id));
+        clipboardRef.current = picked.map((t) => ({ ...t }));
+        try { navigator.clipboard?.writeText?.(picked.map(blockToMarkdown).join("\n")); } catch { /* 不許可なら手元だけ */ }
+        if (key === "x") bulkDelete();
+        else setToast(`${picked.length}件をコピーしました`);
+        return;
+      }
+      if (key === "v" && clipboardRef.current?.length) {
+        event.preventDefault();
+        pasteBlocks(clipboardRef.current);
+        return;
+      }
+
       if (key === "z" && !event.shiftKey) {
         event.preventDefault();
         undo();
@@ -1637,8 +1689,8 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false, rowKey = null, col = 0, colWidth = null }) {
-    const clean = normalizeTitle(title);
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false, rowKey = null, col = 0, colWidth = null, blockText = false }) {
+    const clean = blockText ? normalizeBlockText(title) : normalizeTitle(title);
     // ページ本文は空のブロックも成立する（Notion と同じ）
     if (!clean && !allowEmpty) return null;
     const parent = parentId ? taskMap.get(parentId) : null;
@@ -2434,7 +2486,10 @@ function App() {
   }
 
   function bulkDelete() {
-    const ids = [...selectedIds];
+    // ページ本文のブロックは、中の子も一緒に消す（Notion と同じ）。
+    // タスク側の子タスクは親と別に生きるものなので、そのまま残す。
+    const ids = [...new Set([...selectedIds].flatMap((id) =>
+      taskMap.get(id)?.pageId ? [id, ...collectDescendantIds(id)] : [id]))];
     // プロジェクト所属タスクは Today/Weekly から外すだけ（プロジェクト側は保持）
     // plain タスク（カテゴリなし）のみ完全削除
     const toRemoveFromView = ids.filter((id) => taskMap.get(id)?.category);
@@ -4428,6 +4483,7 @@ function useTaskBlock({
   notionMode = false,
   onEnterBlock,   // Enter: 直下に同じ種類のブロックを作る
   onMergeBack,    // 行頭 Backspace: 前のブロックに繋げる
+  onMergeForward, // 行末 Delete: 次のブロックを引き上げる
   onMoveBlock,    // Alt+Shift+↑↓: 並びを入れ替える
   onDuplicate,    // Cmd+D: ブロックを複製する
 }) {
@@ -4612,6 +4668,13 @@ function useTaskBlock({
       selectMany?.(ids);
       return;
     }
+    // Cmd/Ctrl+Opt+1〜3 で見出し、0 でテキストに戻す（Notion と同じ割り当て）
+    if (notionMode && (e.metaKey || e.ctrlKey) && e.altKey && "0123".includes(e.key)) {
+      e.preventDefault();
+      const kind = { 0: "text", 1: "heading1", 2: "heading2", 3: "heading3" }[e.key];
+      upsertTask?.({ id: task.id, blockType: kind, title: normalizeBlockText(draft) });
+      return;
+    }
     // Cmd/Ctrl+D でブロックを複製する
     if (notionMode && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
       e.preventDefault();
@@ -4634,8 +4697,11 @@ function useTaskBlock({
           slashCtx?.setBlockType?.(task, "text");
           return;
         }
-        commit();
-        onEnterBlock?.(task, draft);
+        // カーソルのところで割る。末尾なら after は空。
+        const before = draft.slice(0, el.selectionStart);
+        const after = draft.slice(el.selectionEnd);
+        setEditing(false);
+        onEnterBlock?.(task, before, after);
         return;
       }
       // 空のまま確定したブロックは残さない
@@ -4679,6 +4745,14 @@ function useTaskBlock({
         onMergeBack?.(task, draft);
         return;
       }
+      if (notionMode && e.key === "Delete" && atEnd && el.value) {
+        e.preventDefault();
+        // 引き上げた文字を手元の下書きにも反映する。
+        // 忘れると、開いたままの編集欄が古い下書きを書き戻して消える。
+        const merged = onMergeForward?.(task, draft);
+        if (typeof merged === "string") setDraft(merged);
+        return;
+      }
       if (!el.value) {
         e.preventDefault();
         removeAndLeave();
@@ -4719,6 +4793,8 @@ function useTaskBlock({
       if (editing) return;
       // Shift+クリックは、起点からここまでをまとめて選ぶ（Notion と同じ）
       if (e?.shiftKey) { e.preventDefault(); selectRange?.(task.id); return; }
+      // Cmd/Ctrl+クリックは、飛び飛びに選ぶ
+      if (e?.metaKey || e?.ctrlKey) { e.preventDefault(); toggleTask?.(task.id); return; }
       // ページ本文はクリックでそのまま書き始められる（選択ではなく編集）
       if (notionMode) { noteAnchor?.(task.id); setEditing(true); return; }
       toggleTask?.(task.id);
@@ -5035,8 +5111,9 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         notionMode
         collapsed={isCollapsed}
         onToggleCollapse={onToggleCollapse}
-        onEnterBlock={(t, draft) => ops.enterBlock(t, draft, siblings, idx)}
+        onEnterBlock={(t, before, after) => ops.enterBlock(t, before, after)}
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
+        onMergeForward={(t, draft) => ops.mergeForward(t, draft, siblings, idx)}
         onMoveBlock={(t, dir, title) => ops.moveBlock(t, dir, siblings, idx, title)}
         onDuplicate={(t, title) => ops.duplicate(t, title)}
         onDuplicateBlock={(t) => ops.duplicate(t)}
@@ -5231,11 +5308,16 @@ function BlockArea({
 
   // Notion のブロック操作。並びは tasks の配列順なので、入れ替えもそこを動かす。
   const ops = useMemo(() => ({
-    // Enter: 直下に同じ種類のブロックを作って、そのまま書き続けられるようにする
-    enterBlock: (task) => {
+    // Enter: カーソルのところで割って、後ろ半分を下のブロックに送る（Notion と同じ）。
+    // 末尾なら after が空なので、これまで通り空のブロックが増えるだけ。
+    enterBlock: (task, before, after = "") => {
       const kind = task.blockType || "task";
+      // 割った前半を先に確定する。commit と別々に書くと、後の書き込みが
+      // 確定前の状態を元にして前半を巻き戻す。
+      upsertTask({ id: task.id, title: normalizeBlockText(before ?? task.title) });
       const created = addTask({
-        title: "",
+        title: after,
+        blockText: true,
         allowEmpty: true,
         plain: true,
         pageId: task.pageId,
@@ -5249,13 +5331,22 @@ function BlockArea({
         col: task.col ?? 0,
         colWidth: task.colWidth ?? null,
       });
-      if (created) markForEdit?.(created.id);
+      // 後ろ半分を連れていったときは、その中身のまま開く
+      if (created) markForEdit?.(created.id, !!after);
     },
     // 行頭 Backspace: 前のブロックの末尾に文字を足して、自分は消える
     mergeBack: (task, draft, siblings, idx) => {
       const prev = siblings[idx - 1];
       if (!prev) return;
       onMergeBlocks(prev.id, task.id, (prev.title || "") + (draft || ""));
+    },
+    // 行末 Delete: 次のブロックを引き上げて繋げる（Backspace の逆）
+    mergeForward: (task, draft, siblings, idx) => {
+      const next = siblings[idx + 1];
+      if (!next) return null;
+      const merged = (draft || "") + (next.title || "");
+      onMergeBlocks(task.id, next.id, merged);
+      return merged;
     },
     // Cmd+D: 同じ内容のブロックを直下に作る
     duplicate: (task, title) => {
@@ -6197,6 +6288,24 @@ function normalizeHex(v) {
   let s = String(v || "").trim().replace(/^#/, "");
   if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.split("").map((c) => c + c).join("");
   return /^[0-9a-fA-F]{6}$/.test(s) ? `#${s.toLowerCase()}` : null;
+}
+
+// 外のアプリに渡すときの書き方。Notion も Markdown で渡してくる。
+function blockToMarkdown(task) {
+  const text = task.title || "";
+  switch (task.blockType) {
+    case "heading1": return `# ${text}`;
+    case "heading2": return `## ${text}`;
+    case "heading3": return `### ${text}`;
+    case "bulleted": return `- ${text}`;
+    case "numbered": return `1. ${text}`;
+    case "toggle": return `> ${text}`;
+    case "quote": return `> ${text}`;
+    case "code": return "```\n" + text + "\n```";
+    case "divider": return "---";
+    case "task": return `- [${task.status === "完了" ? "x" : " "}] ${text}`;
+    default: return text;
+  }
 }
 
 // タスク個別の見た目（色・太さ）を style 属性に落とす

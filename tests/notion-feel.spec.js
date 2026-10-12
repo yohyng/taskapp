@@ -168,7 +168,157 @@ test.describe("Notion と同じキー操作", () => {
     expect((await pageBlocks(page))[0].title).toBe("**ふとじ**");
   });
 
-  // まだ寄せきれていないもの
-  test.fixme("選んだブロックを Cmd+C → Cmd+V で複製できる", async () => {});
-  test.fixme("選んだブロックを他のアプリに貼ると Markdown になる", async () => {});
+  test("Cmd+Opt+1〜3 で見出しに、0 でテキストに戻る", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "みだし")] });
+    await toPages(page);
+    await edit(page, "みだし");
+    await page.keyboard.press("ControlOrMeta+Alt+2");
+    await expect.poll(async () => (await pageBlocks(page))[0].blockType).toBe("heading2");
+    await page.keyboard.press("ControlOrMeta+Alt+0");
+    await expect.poll(async () => (await pageBlocks(page))[0].blockType).toBe("text");
+    expect((await pageBlocks(page))[0].title).toBe("みだし");
+  });
+});
+
+test.describe("カーソルのところで割れる", () => {
+  test("行の途中で Enter → そこで2つに割れる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "ぜんはんこうはん")] });
+    await toPages(page);
+    await edit(page, "ぜんはんこうはん");
+    await page.keyboard.press("Home");
+    for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title)))
+      .toEqual(["ぜんはん", "こうはん"]);
+  });
+
+  test("割ったあとは、後ろ半分のほうを続けて書ける", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "ぜんはんこうはん")] });
+    await toPages(page);
+    await edit(page, "ぜんはんこうはん");
+    await page.keyboard.press("Home");
+    for (let i = 0; i < 4; i++) await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => focusedValue(page)).toBe("こうはん");
+  });
+
+  test("行頭で Enter → 上に空行ができ、自分は下へ", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "もとの行")] });
+    await toPages(page);
+    await edit(page, "もとの行");
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title)))
+      .toEqual(["", "もとの行"]);
+  });
+
+  test("行末 Enter は、これまで通り空のブロックが増えるだけ", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "いち")] });
+    await toPages(page);
+    await edit(page, "いち");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title))).toEqual(["いち", ""]);
+  });
+
+  test("行末 Delete → 次のブロックを引き上げて繋げる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "うえ"), b("c", "した")] });
+    await toPages(page);
+    await edit(page, "うえ");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Delete");
+    await page.keyboard.press("Escape");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title))).toEqual(["うえした"]);
+  });
+});
+
+test.describe("ブロックの切り貼り", () => {
+  test("Cmd+C → Cmd+V で、選んだブロックが複製される", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "コピーもと", "heading2")] });
+    await toPages(page);
+    await edit(page, "コピーもと");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+c");
+    await page.keyboard.press("ControlOrMeta+v");
+
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title)))
+      .toEqual(["コピーもと", "コピーもと"]);
+    // 種別まで連れていく（文字だけの貼り付けではない）
+    expect((await pageBlocks(page)).every((t) => t.blockType === "heading2")).toBe(true);
+  });
+
+  test("Cmd+X で切り取れて、貼り直せる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "のこる"), b("c", "きりとる")] });
+    await toPages(page);
+    await edit(page, "きりとる");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+x");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title))).toEqual(["のこる"]);
+
+    await row(page, "のこる").click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+v");
+    await expect.poll(() => pageBlocks(page).then((x) => x.map((t) => t.title))).toEqual(["のこる", "きりとる"]);
+  });
+
+  test("段組みの列に貼ると、その列に入る", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        { ...b("a", "そとの行") },
+        { ...b("c", "列のブロック"), rowKey: "r1", col: 2 },
+      ],
+    });
+    await toPages(page);
+    await edit(page, "そとの行");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+c");
+    await row(page, "列のブロック").click();
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("ControlOrMeta+v");
+
+    await expect.poll(() => pageBlocks(page).then((x) => x.length)).toBe(3);
+    const pasted = (await pageBlocks(page)).filter((t) => t.title === "そとの行");
+    expect(pasted.some((t) => t.rowKey === "r1" && t.col === 2)).toBe(true);
+  });
+});
+
+test.describe("親子", () => {
+  test("本文の親を消すと、中の子も消える", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        { ...b("a", "おや", "toggle") },
+        { ...b("c", "こ"), parentId: "a" },
+      ],
+    });
+    await toPages(page);
+    await edit(page, "おや");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Backspace");
+    await expect.poll(() => pageBlocks(page).then((x) => x.length)).toBe(0);
+  });
+
+  test("トグルの中で Enter を押すと、中に増える", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        { ...b("a", "おや", "toggle") },
+        { ...b("c", "こ"), parentId: "a" },
+      ],
+    });
+    await toPages(page);
+    await edit(page, "こ");
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    const made = (await pageBlocks(page)).find((t) => t.id !== "a" && t.id !== "c");
+    expect(made.parentId).toBe("a");
+  });
+});
+
+test.describe("まだ寄せきれていないもの", () => {
+  test.fixme("選んだブロックを Tab でまとめて字下げできる", async () => {});
+  test.fixme("選んだ状態で文字を打つと、まとめて置き換わる", async () => {});
+  test.fixme("ドラッグ中に、入る位置の線が出る", async () => {});
 });
