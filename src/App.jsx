@@ -157,6 +157,7 @@ const BASE_BLOCK_TYPES = {
   toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
   image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
   day:       { label: "その日の予定", text: false, reading: "よてい day かれんだー 曜日 ようび 7days いちにち" },
+  stock:     { label: "STOCK一覧", text: false, reading: "すとっく stock いちらん たな ねかせたもの" },
 };
 
 // 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
@@ -331,7 +332,20 @@ function matchSlashCommands(query, commands) {
   const list = commands || SLASH_COMMANDS;
   const q = kana(query).trim();
   if (!q) return list;
-  return list.filter((c) => kana(`${c.label} ${c.keywords || ""}`).includes(q));
+  // 名前がぴたり合うものを先に出す。「STOCK」と「STOCK一覧」のように
+  // 名前が被ると、打った通りのものが埋もれてしまうため。
+  const rank = (c) => {
+    const label = kana(c.label);
+    if (label === q) return 0;
+    if (label.startsWith(q)) return 1;
+    if (label.includes(q)) return 2;
+    return 3;
+  };
+  return list
+    .map((c, i) => ({ c, i, r: kana(`${c.label} ${c.keywords || ""}`).includes(q) ? rank(c) : -1 }))
+    .filter((x) => x.r >= 0)
+    .sort((a, b) => (a.r !== b.r ? a.r - b.r : a.i - b.i))
+    .map((x) => x.c);
 }
 
 const STOCK_VIEW_COLORS = [
@@ -624,6 +638,8 @@ function normalizeTask(task) {
     codeLang: "",
     // 日付ブロックが見ている日（7days と同じ scheduledDate を指す）
     dayDate: "",
+    // STOCK ブロックが見ているビュー
+    viewId: "",
     ...task,
   };
 }
@@ -2969,10 +2985,24 @@ function App() {
     setToast("一週間ぶんの日付ブロックを並べました");
   }
 
+  // STOCK ビューを1本ずつブロックにして、横一列に並べる
+  function addStockRow() {
+    if (!stockViews.length) return;
+    const rowKey = `row-${uid()}`;
+    const made = stockViews.map((v, i) => normalizeTask({
+      id: uid(), title: "", category: "", project: "", status: "未着手", plain: true,
+      pageId: BOARD_PAGE_ID, blockType: "stock", viewId: v.id,
+      rowKey, col: i,
+    }));
+    addRawBlocks(made);
+    setToast(`STOCK を${made.length}本、横に並べました`);
+  }
+
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   const dayDeps = {
     tasks: filteredTasks, projectRules, childrenOf, toggleDone, removeTask,
     categoryTone, setSelectedTaskId, selectedTaskId, setSelectedProject, addTask,
+    stockViews, stockRootsByView, updateStockView,
   };
 
   // 7days の下の自由ブロック。ページ本文と同じものを、固定の持ち主で置いている。
@@ -2995,6 +3025,13 @@ function App() {
           className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
           + 一週間
+        </button>
+        <button
+          onClick={addStockRow}
+          title="STOCK を1本ずつブロックにして横一列に並べる"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          + STOCK
         </button>
       </div>
       <BlockArea
@@ -4032,9 +4069,11 @@ function WeeklyColumn({
 // STOCK ビュー: 日付を決めずに寝かせておくタスクの置き場。
 // プロジェクト所属は保ったままなので PJ ボードにも出続ける（Notion の同期ブロック的な見え方）。
 // ビュー内に親がいる場合はその下にぶら下がるので、親子階層もそのまま持ち込める。
-function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, selectedTaskId, setSelectedTaskId, selectMode, selectedIds, onToggleSelect, onUnstock, onUpdateView, onRemoveView, canRemove }) {
+// zoneKey: 同じ STOCK を2か所（パネルとブロック）に出すので、置き場の名札を分ける。
+// 同じ名札だと dnd-kit がどちらか一方しか見なくなり、落としても入らない。
+function StockColumn({ view, tasks, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, selectedTaskId, setSelectedTaskId, selectMode, selectedIds, onToggleSelect, onUnstock, onUpdateView, onRemoveView, canRemove, zoneKey = "panel" }) {
   const { setNodeRef, isOver } = useDroppable({
-    id: `stock-zone-${view.id}`,
+    id: `stock-zone-${zoneKey}-${view.id}`,
     data: { type: "stock-zone", viewId: view.id },
   });
   const [editingName, setEditingName] = useState(false);
@@ -5313,6 +5352,7 @@ function DayBlock({ task, upsertTask, deps }) {
         <button onClick={(e) => { e.stopPropagation(); shiftDay(1); }} title="次の日" className="rounded px-1 py-0.5 transition hover:bg-white/10 hover:text-neutral-200">›</button>
       </div>
       <DayColumn
+        zoneKey={`block-${task.id}`}
         dateKey={dateKey}
         label={DAY_LABELS[labelIndex]}
         date={date}
@@ -5371,6 +5411,56 @@ function TableOfContents({ blocks }) {
   );
 }
 
+// STOCK ブロック。STOCK ビューの1本を、そのままブロックとして置けるようにしたもの。
+// 中身は STOCK パネルと同じ実体なので、どちらで触っても同じところが変わる。
+function StockBlock({ task, upsertTask, deps }) {
+  const { stockViews, stockRootsByView, childrenOf, categoryTone, toggleDone, removeTask,
+    setSelectedTaskId, selectedTaskId, updateStockView } = deps || {};
+  const views = stockViews || [];
+  const view = views.find((v) => v.id === task.viewId) || views[0];
+  if (!view) return <div className="px-1 py-1 text-[11.5px] text-neutral-600">STOCK がありません。</div>;
+
+  return (
+    <div className="min-w-0">
+      {/* どのビューを見ているか。STOCK が何本かあるときだけ選ばせる。 */}
+      {views.length > 1 && (
+        <div className="mb-0.5 flex flex-wrap items-center gap-1">
+          {views.map((v) => (
+            <button
+              key={v.id}
+              onClick={(e) => { e.stopPropagation(); upsertTask?.({ id: task.id, viewId: v.id }); }}
+              className={classNames(
+                "rounded px-1 py-0.5 text-[9px] transition",
+                v.id === view.id ? "ts-text" : "text-neutral-600 hover:text-neutral-300",
+              )}
+              style={v.id === view.id ? { color: v.color } : undefined}
+            >
+              {v.name}
+            </button>
+          ))}
+        </div>
+      )}
+      <StockColumn
+        zoneKey={`block-${task.id}`}
+        view={view}
+        tasks={stockRootsByView?.get(view.id) || []}
+        childrenOf={childrenOf}
+        categoryTone={categoryTone}
+        toggleDone={toggleDone}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        selectedTaskId={selectedTaskId}
+        setSelectedTaskId={setSelectedTaskId}
+        selectMode={false}
+        onUnstock={(id) => upsertTask?.({ id, stock: false, stockViewId: null })}
+        onUpdateView={(patch) => updateStockView?.(view.id, patch)}
+        onRemoveView={() => {}}
+        canRemove={false}
+      />
+    </div>
+  );
+}
+
 function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse, dayDeps }) {
   const children = childrenOf?.(task.id) || [];
   // トグルは閉じている間、子を隠す
@@ -5393,6 +5483,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         bodySlot={
           task.blockType === "toc" ? () => <TableOfContents blocks={siblings} />
           : task.blockType === "day" ? () => <DayBlock task={task} upsertTask={upsertTask} deps={dayDeps} />
+          : task.blockType === "stock" ? () => <StockBlock task={task} upsertTask={upsertTask} deps={dayDeps} />
           : undefined
         }
         onToggleCollapse={onToggleCollapse}
@@ -7818,8 +7909,9 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
   );
 }
 
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject }) {
-  const { setNodeRef, isOver } = useDroppable({ id: `day-col-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
+// zoneKey: 同じ日を2か所（7days とブロック）に出すので、置き場の名札を分ける。
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject, zoneKey = "week" }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `day-col-${zoneKey}-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [focusEndId, setFocusEndId] = useState(null);
   const addInputRef = useRef(null);

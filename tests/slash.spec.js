@@ -19,7 +19,8 @@ test.describe("スラッシュコマンド", () => {
     await expect(menu(page)).toBeVisible();
 
     await page.keyboard.type("stock");
-    await expect(menuItem(page, "STOCK")).toBeVisible();
+    // 名前がぴたり合うものが先頭に来る（「STOCK一覧」より「STOCK」が上）
+    await expect(menuPanel(page).locator("button").first()).toHaveText(/^STOCK日付を外して寝かせる$/);
     await expect(menu(page)).toHaveCount(0);
   });
 
