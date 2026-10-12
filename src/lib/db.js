@@ -15,6 +15,7 @@ const OPTIONAL_TASK_COLUMNS = {
   row_key: { note: '段組みの行' },
   col_index: { note: '段組みの列位置' },
   col_width: { note: '段組みの列幅（取り分）' },
+  code_lang: { note: 'コードブロックの言語' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -54,6 +55,7 @@ function taskToRow(t) {
   if (optionalColumnSupported.row_key) row.row_key = t.rowKey ?? null
   if (optionalColumnSupported.col_index) row.col_index = t.col ?? 0
   if (optionalColumnSupported.col_width) row.col_width = t.colWidth ?? null
+  if (optionalColumnSupported.code_lang) row.code_lang = t.codeLang ?? ''
   return {
     ...row,
     id: t.id,
@@ -109,6 +111,7 @@ export function rowToTask(r) {
     rowKey: r.row_key ?? null,
     col: r.col_index ?? 0,
     colWidth: r.col_width ?? null,
+    codeLang: r.code_lang ?? '',
   }
 }
 

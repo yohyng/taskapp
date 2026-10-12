@@ -142,18 +142,20 @@ const TASK_TEXT_COLORS = [
 //   size/weight … 見出しの強さ
 // 既定は task（＝ToDo）。既存データは全部これなので、見え方は変わらない。
 const BASE_BLOCK_TYPES = {
-  task:      { label: "ToDo", checkbox: true,  md: ["[] "] },
-  text:      { label: "テキスト" },
-  heading1:  { label: "見出し1", size: 17, weight: 700, md: ["# "] },
-  heading2:  { label: "見出し2", size: 15, weight: 700, md: ["## "] },
-  heading3:  { label: "見出し3", size: 13.5, weight: 600, md: ["### "] },
-  bulleted:  { label: "箇条書きリスト", marker: "•", md: ["- ", "* "] },
-  numbered:  { label: "番号付きリスト", numbered: true, md: ["1. "] },
-  toggle:    { label: "トグルリスト", toggle: true, md: ["> "] },
-  quote:     { label: "引用", quote: true, md: ['" '] },
-  callout:   { label: "コールアウト", marker: "💡", callout: true },
-  code:      { label: "コード", code: true, md: ["```"] },
-  divider:   { label: "区切り線", text: false, md: ["--- "] },
+  task:      { label: "ToDo", checkbox: true,  md: ["[] "], reading: "todo やること chk" },
+  text:      { label: "テキスト", reading: "text てきすと ふつう" },
+  heading1:  { label: "見出し1", size: 17, weight: 700, md: ["# "], reading: "みだし1 みだし h1 heading1 おおみだし" },
+  heading2:  { label: "見出し2", size: 15, weight: 700, md: ["## "], reading: "みだし2 みだし h2 heading2 なかみだし" },
+  heading3:  { label: "見出し3", size: 13.5, weight: 600, md: ["### "], reading: "みだし3 みだし h3 heading3 こみだし" },
+  bulleted:  { label: "箇条書きリスト", marker: "•", md: ["- ", "* "], reading: "かじょうがき りすと bullet list てん" },
+  numbered:  { label: "番号付きリスト", numbered: true, md: ["1. "], reading: "ばんごう りすと number list すうじ" },
+  toggle:    { label: "トグルリスト", toggle: true, md: ["> "], reading: "とぐる りすと toggle おりたたみ" },
+  quote:     { label: "引用", quote: true, md: ['" '], reading: "いんよう quote ひきよう" },
+  callout:   { label: "コールアウト", marker: "💡", callout: true, reading: "こーるあうと callout めだつ" },
+  code:      { label: "コード", code: true, md: ["```"], reading: "こーど code そーす" },
+  divider:   { label: "区切り線", text: false, md: ["--- "], reading: "くぎりせん divider せん しきり" },
+  toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
+  image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
 };
 
 // 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
@@ -307,7 +309,7 @@ function typeCommands(types) {
     key: `type-${key}`,
     label: cfg.label,
     hint: cfg.md ? cfg.md[0].trim() : "種類を変える",
-    keywords: `${cfg.label} ${key} block type`,
+    keywords: `${cfg.label} ${key} ${cfg.reading || ""} block type`,
     group: "種類",
     run: ({ task, ctx }) => ctx.setBlockType(task, key),
   }));
@@ -317,13 +319,17 @@ function allSlashCommands(types) {
   return [...typeCommands(types), ...SLASH_COMMANDS];
 }
 
+// カタカナはひらがなに寄せて比べる。日本語入力のまま打てるように。
+function kana(s) {
+  return String(s || "").toLowerCase()
+    .replace(/[\u30a1-\u30f6]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60));
+}
+
 function matchSlashCommands(query, commands) {
   const list = commands || SLASH_COMMANDS;
-  const q = (query || "").trim().toLowerCase();
+  const q = kana(query).trim();
   if (!q) return list;
-  return list.filter(
-    (c) => c.label.toLowerCase().includes(q) || c.keywords.toLowerCase().includes(q)
-  );
+  return list.filter((c) => kana(`${c.label} ${c.keywords || ""}`).includes(q));
 }
 
 const STOCK_VIEW_COLORS = [
@@ -613,6 +619,7 @@ function normalizeTask(task) {
     rowKey: null,
     col: 0,
     colWidth: null,
+    codeLang: "",
     ...task,
   };
 }
@@ -1601,6 +1608,8 @@ function App() {
     setToast("Redoしました");
   }
 
+  const [quickFind, setQuickFind] = useState(false);
+
   // 切り取り・コピーしたブロックの控え。外のクリップボードは文字しか
   // 運べないので、種別や色まで保つためにこちらを使う。
   const clipboardRef = useRef(null);
@@ -1654,6 +1663,13 @@ function App() {
       if (!isMod) return;
       if (inInput) return;
       const key = event.key.toLowerCase();
+
+      // Cmd+P: ページと行の早見
+      if (key === "p") {
+        event.preventDefault();
+        setQuickFind(true);
+        return;
+      }
 
       // 選んだブロックの切り貼り（Notion と同じ）。
       // 貼り付けは手元の控えから作る。外のアプリへは Markdown で渡す。
@@ -1770,6 +1786,11 @@ function App() {
       row.forEach((col, i) => walk(col, null, rowKey, i));
     }
     if (made.length) commitTasks((prev) => [...prev, ...made]);
+  }
+
+  // できあがったブロックをそのまま足す（ページの複製など）
+  function addRawBlocks(list) {
+    if (list?.length) commitTasks((prev) => [...prev, ...list]);
   }
 
   function addQuickMemo() {
@@ -3319,6 +3340,7 @@ function App() {
             childrenOf={childrenOf}
             addTask={addTask}
             addBlocks={addBlocks}
+            addRawBlocks={addRawBlocks}
             mapTasks={mapTasks}
             onReorder={swapTaskOrder}
             onMergeBlocks={mergeBlockInto}
@@ -3720,6 +3742,31 @@ function App() {
             </div>
           )}
           </>
+        )}
+        {quickFind && (
+          <QuickFind
+            pages={pages}
+            tasks={tasks}
+            onClose={() => setQuickFind(false)}
+            onPick={(hit) => {
+              setQuickFind(false);
+              setViewMode("pages");
+              const pageId = hit.kind === "page" ? hit.id : hit.pageId;
+              if (pageId) {
+                localStorage.setItem("taskspace-active-page", pageId);
+                // すでにページ表示にいるときは、読み直しでは切り替わらないので報せる
+                window.dispatchEvent(new CustomEvent("taskspace-open-page", { detail: pageId }));
+              }
+              if (hit.kind === "block") {
+                // 描き直しを待ってから、その行まで送る
+                setTimeout(() => {
+                  document.querySelector(`[data-task-id="${hit.id}"]`)
+                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }, 220);
+              }
+              setSelectedTaskId(null);
+            }}
+          />
         )}
         {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 ts-surface px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
@@ -4931,28 +4978,31 @@ function useTaskBlock({
     addBelow: () => addBlockBelow?.(task),
     notionMode,
     slash: sq.slash, slashMatches: sq.matches,
+    hoverSlash: (i) => sq.setSlash((cur) => (cur ? { ...cur, index: i } : cur)),
     runSlash: (cmd) => sq.pick(cmd, draft),
   };
 }
 
 // "/" で開くコマンドメニュー。編集中の textarea の直下に出す。
-function SlashMenu({ slash, matches, onPick }) {
+function SlashMenu({ slash, matches, onPick, onHover }) {
   const slashMatches = matches;
   const runSlash = onPick;
   if (!slashMatches.length) {
     return (
-      <div className="absolute left-0 top-full z-[120] mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 text-[11px] text-neutral-500 shadow-2xl">
+      <div data-slash-menu className="absolute left-0 top-full z-[120] mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 text-[11px] text-neutral-500 shadow-2xl">
         該当なし
       </div>
     );
   }
   return (
-    <div className="absolute left-0 top-full z-[120] mt-1 max-h-56 w-56 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl">
+    <div data-slash-menu className="absolute left-0 top-full z-[120] mt-1 max-h-56 w-56 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl">
       {slashMatches.map((cmd, i) => (
         <button
           key={cmd.key}
           // blur より先に拾わないとメニューが閉じてしまう
           onMouseDown={(e) => { e.preventDefault(); runSlash(cmd); }}
+          // 乗せた項目を選択状態にする。Enter と手の行き先を一致させる。
+          onMouseEnter={() => onHover?.(i)}
           className={classNames(
             "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] transition",
             i === slash.index ? "bg-white/15 ts-text" : "text-neutral-300 hover:bg-white/[0.07]",
@@ -5172,6 +5222,36 @@ function BlockTypeEditor({ customTypes, onSave, onClose }) {
 }
 
 // ページ本文の1ブロック。Notion の本文行に合わせて、列ビューより少し大きめ。
+const CODE_LANGS = ["js", "ts", "jsx", "tsx", "html", "css", "json", "sql", "python", "bash", "md", "yaml"];
+
+const HEADING_DEPTH = { heading1: 0, heading2: 1, heading3: 2 };
+
+// 目次。本文の見出しを拾って並べ、押すとそこへ飛ぶ。
+function TableOfContents({ blocks }) {
+  const heads = (blocks || []).filter((t) => HEADING_DEPTH[t.blockType] !== undefined && t.title.trim());
+  if (!heads.length) {
+    return <div className="px-1 py-1 text-[11.5px] text-neutral-600">目次。見出しを作るとここに並ぶ。</div>;
+  }
+  return (
+    <div data-toc className="py-0.5">
+      {heads.map((h) => (
+        <button
+          key={h.id}
+          onClick={(e) => {
+            e.stopPropagation();
+            const el = document.querySelector(`[data-task-id="${h.id}"]`);
+            el?.scrollIntoView({ behavior: "smooth", block: "center" });
+          }}
+          style={{ paddingLeft: 4 + HEADING_DEPTH[h.blockType] * 14 }}
+          className="block w-full truncate rounded py-[3px] pr-1 text-left text-[12.5px] text-neutral-400 underline decoration-transparent underline-offset-2 transition hover:bg-white/[0.05] hover:text-neutral-100 hover:decoration-current"
+        >
+          {h.title}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse }) {
   const children = childrenOf?.(task.id) || [];
   // トグルは閉じている間、子を隠す
@@ -5191,6 +5271,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         setSelectedTaskId={setSelectedTaskId}
         notionMode
         collapsed={isCollapsed}
+        bodySlot={task.blockType === "toc" ? () => <TableOfContents blocks={siblings} /> : undefined}
         onToggleCollapse={onToggleCollapse}
         onEnterBlock={(t, before, after) => ops.enterBlock(t, before, after)}
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
@@ -5232,6 +5313,10 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           </button>
         )}
       />
+      {/* 開いたのに何も無いと、壊れたのか空なのか分からない（Notion も断り書きを出す） */}
+      {!isCollapsed && task.blockType === "toggle" && children.length === 0 && (
+        <div className="pl-7 text-[11.5px] text-neutral-600">空のトグル。クリックして中身を書く。</div>
+      )}
       {!isCollapsed && children.map((child, i) => (
         <PageBlock
           key={child.id}
@@ -5544,7 +5629,11 @@ function BlockArea({
                       depth={0}
                       idx={blocks.indexOf(task)}
                       siblings={blocks}
-                      listNumber={numberedIndex(colBlocks, i)}
+                      // 単独行は1ブロックずつ別の行なので、そこで数えると常に 1. になる。
+                      // 段組みの中だけ列で数え、それ以外は本文全体の並びで数える。
+                      listNumber={row.single
+                        ? numberedIndex(blocks, blocks.indexOf(task))
+                        : numberedIndex(colBlocks, i)}
                       childrenOf={childrenOf}
                       upsertTask={upsertTask}
                       removeTask={removeTask}
@@ -5637,7 +5726,7 @@ function ColumnBar({ first, last, width, onMove, onWidth }) {
   );
 }
 
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, mapTasks, onReorder, onMergeBlocks }) {
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, addRawBlocks, mapTasks, onReorder, onMergeBlocks }) {
   const { customTypes, saveCustomTypes } = useBlockTypes();
   const [typeEditor, setTypeEditor] = useState(false);
   const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
@@ -5647,6 +5736,13 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
   useEffect(() => {
     if (active) localStorage.setItem("taskspace-active-page", active.id);
   }, [active]);
+
+  // 早見から選ばれたページに切り替える
+  useEffect(() => {
+    const open = (e) => setActiveId(e.detail);
+    window.addEventListener("taskspace-open-page", open);
+    return () => window.removeEventListener("taskspace-open-page", open);
+  }, []);
 
   function addPage({ title = "無題のページ", icon, rows, fullWidth = false } = {}) {
     const page = { id: `page-${uid()}`, title, icon: icon || PAGE_ICONS[pages.length % PAGE_ICONS.length], fullWidth };
@@ -5661,6 +5757,39 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
     tasks.filter((t) => t.pageId === id).forEach((t) => removeTask(t.id));
     onPagesChange(pages.filter((p) => p.id !== id));
     if (activeId === id) setActiveId(pages.find((p) => p.id !== id).id);
+  }
+
+  // ページを丸ごと写す。中のブロックも親子・段組みごと連れていく。
+  function duplicatePage(id) {
+    const src = pages.find((p) => p.id === id);
+    if (!src) return;
+    const copy = { ...src, id: `page-${uid()}`, title: `${src.title} のコピー` };
+    const body = tasks.filter((t) => t.pageId === id && !t.archived);
+    const idMap = new Map(body.map((t) => [t.id, uid()]));
+    // 行の名前も振り直す。元のページと同じだと、両方の段組みが1行に混ざる。
+    const rowMap = new Map();
+    for (const t of body) {
+      if (t.rowKey && !rowMap.has(t.rowKey)) rowMap.set(t.rowKey, `row-${uid()}`);
+    }
+    const made = body.map((t) => normalizeTask({
+      ...t,
+      id: idMap.get(t.id),
+      pageId: copy.id,
+      parentId: t.parentId ? (idMap.get(t.parentId) ?? null) : null,
+      rowKey: t.rowKey ? rowMap.get(t.rowKey) : null,
+    }));
+    onPagesChange([...pages, copy]);
+    addRawBlocks(made);
+    setActiveId(copy.id);
+  }
+
+  function movePage(id, dir) {
+    const i = pages.findIndex((p) => p.id === id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= pages.length) return;
+    const next = [...pages];
+    [next[i], next[j]] = [next[j], next[i]];
+    onPagesChange(next);
   }
 
   if (!active) return null;
@@ -5681,6 +5810,29 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             >
               <span className="shrink-0">{p.icon}</span>
               <span className="min-w-0 truncate">{p.title}</span>
+            </button>
+            <button
+              onClick={() => movePage(p.id, -1)}
+              title="上へ"
+              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 disabled:invisible"
+              disabled={pages[0]?.id === p.id}
+            >
+              <ChevronUp className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => movePage(p.id, 1)}
+              title="下へ"
+              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 disabled:invisible"
+              disabled={pages[pages.length - 1]?.id === p.id}
+            >
+              <ChevronDown className="h-3 w-3" />
+            </button>
+            <button
+              onClick={() => duplicatePage(p.id)}
+              title="このページを複製"
+              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100"
+            >
+              <Copy className="h-3 w-3" />
             </button>
             {pages.length > 1 && (
               <button
@@ -5980,8 +6132,19 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
       if (menuRef.current?.contains(e.target)) return;
       setMenu(false);
     }
+    function onEsc(e) {
+      if (e.key !== "Escape") return;
+      // 選択解除まで走らせない。閉じるのはメニューだけ。
+      e.stopPropagation();
+      e.preventDefault();
+      setMenu(false);
+    }
     window.addEventListener("pointerdown", close, { capture: true });
-    return () => window.removeEventListener("pointerdown", close, { capture: true });
+    window.addEventListener("keydown", onEsc, { capture: true });
+    return () => {
+      window.removeEventListener("pointerdown", close, { capture: true });
+      window.removeEventListener("keydown", onEsc, { capture: true });
+    };
   }, [menu]);
 
   // 色は一覧の末尾に文字で並べても見つからないので、見本の丸を上に出す。
@@ -6066,6 +6229,7 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
       {menu && (
         <div
           ref={menuRef}
+          data-block-menu
           className="absolute left-0 top-full z-[130] mt-1 max-h-72 w-52 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl"
         >
           <button
@@ -6073,6 +6237,17 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
             className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 transition hover:bg-white/[0.07]"
           >
             <Copy className="h-3 w-3 shrink-0" /> 複製
+          </button>
+          <button
+            onMouseDown={(e) => {
+              e.preventDefault();
+              const url = `${location.origin}${location.pathname}#block-${task.id}`;
+              try { navigator.clipboard?.writeText?.(url); } catch { /* 不許可 */ }
+              setMenu(false);
+            }}
+            className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 transition hover:bg-white/[0.07]"
+          >
+            <LinkIcon className="h-3 w-3 shrink-0" /> リンクをコピー
           </button>
 
           <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">色</div>
@@ -6191,15 +6366,74 @@ function TaskBlock({
   collapsed = false,
   onToggleCollapse,
   onDuplicateBlock,
+  bodySlot,
   ...blockOptions
 }) {
   const b = useTaskBlock(blockOptions);
   const task = blockOptions.task;
+  const patchTask = blockOptions.upsertTask;
   const { types } = useBlockTypes();
   const kind = blockTypeOf(task, types);
   const cfg = types[kind];
   // Notion はフォーカス中の空ブロックにだけヒントを出す
   const draftPlaceholder = b.draft ? "" : (b.notionMode ? "「/」でコマンド" : "コマンドは / または ；");
+
+  // 画像。本文に URL を書くと、その絵を出す。
+  if (kind === "image") {
+    const src = (task.title || "").trim();
+    return (
+      <div
+        {...b.blockProps}
+        {...extraProps}
+        className={classNames(
+          "group/block flex items-start gap-1 rounded px-1 py-[3px] outline-none transition",
+          b.focusRingClass,
+          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isDragging && "opacity-30",
+        )}
+      >
+        <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
+        <div className="min-w-0 flex-1">
+          {b.editing ? (
+            <div className="relative">
+              <textarea {...b.textareaProps} placeholder="画像のURLを貼る" />
+              {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} onHover={b.hoverSlash} />}
+            </div>
+          ) : /^https?:\/\//.test(src) ? (
+            <img
+              src={src}
+              alt=""
+              onDoubleClick={(e) => { e.stopPropagation(); b.setEditing(true); }}
+              className="max-h-[60vh] max-w-full rounded border border-white/10"
+            />
+          ) : (
+            <div {...b.titleProps} className="cursor-text py-1 text-[12.5px] text-neutral-600">
+              画像のURLを貼る（ダブルクリックで書く）
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // 目次のように、文字ではなく中身を描くブロック
+  if (bodySlot) {
+    return (
+      <div
+        {...b.blockProps}
+        {...extraProps}
+        className={classNames(
+          "group/block flex items-start gap-1 rounded px-1 py-[3px] outline-none transition",
+          b.focusRingClass,
+          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isDragging && "opacity-30",
+        )}
+      >
+        <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
+        <div className="min-w-0 flex-1">{bodySlot()}</div>
+      </div>
+    );
+  }
 
   // 区切り線は本文を持たない。選択とドラッグはできるので行そのものは残す。
   if (kind === "divider") {
@@ -6215,7 +6449,7 @@ function TaskBlock({
         )}
       >
         <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
-        <span className="h-px w-full shrink-0 bg-current opacity-40" />
+        <span role="separator" className="h-px w-full shrink-0 bg-current opacity-40" />
       </div>
     );
   }
@@ -6251,6 +6485,19 @@ function TaskBlock({
             {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
           </button>
         )}
+        {cfg.code && (
+          <select
+            data-code-lang
+            aria-label="コードの言語"
+            value={task.codeLang || ""}
+            onClick={(e) => e.stopPropagation()}
+            onChange={(e) => { e.stopPropagation(); patchTask?.({ id: task.id, codeLang: e.target.value }); }}
+            className="mt-0.5 shrink-0 rounded border border-white/10 bg-black/30 px-1 py-px text-[9px] text-neutral-400 outline-none"
+          >
+            <option value="">言語</option>
+            {CODE_LANGS.map((l) => <option key={l} value={l}>{l}</option>)}
+          </select>
+        )}
         {cfg.marker && <span className="mt-0.5 shrink-0 text-[11px] leading-none">{cfg.marker}</span>}
         {cfg.numbered && <span className="mt-0.5 shrink-0 text-[11px] leading-none tabular-nums opacity-60">{listNumber ?? 1}.</span>}
         {cfg.checkbox && leading?.(b)}
@@ -6284,7 +6531,7 @@ function TaskBlock({
                 className={textareaClassName?.(b)}
                 style={cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight } : undefined}
               />
-              {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} />}
+              {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} onHover={b.hoverSlash} />}
             </div>
           ) : (
             <div className="flex min-w-0 items-start gap-1 group/title">
@@ -6455,6 +6702,78 @@ function toggleInlineMark(text, start, end, mark) {
     start: start + m.length,
     end: end + m.length,
   };
+}
+
+// Cmd+P / Cmd+Shift+P で開く、ページと行の早見。
+function QuickFind({ pages, tasks, onClose, onPick }) {
+  const [q, setQ] = useState("");
+  const [index, setIndex] = useState(0);
+
+  const hits = useMemo(() => {
+    const needle = kana(q).trim();
+    const pageRows = pages.map((p) => ({ kind: "page", id: p.id, icon: p.icon, label: p.title, sub: "ページ" }));
+    const blockRows = tasks
+      .filter((t) => t.pageId && !t.archived && t.title.trim())
+      .map((t) => ({
+        kind: "block",
+        id: t.id,
+        pageId: t.pageId,
+        icon: "·",
+        label: t.title,
+        sub: pages.find((p) => p.id === t.pageId)?.title || "",
+      }));
+    const all = [...pageRows, ...blockRows];
+    if (!needle) return all.slice(0, 40);
+    return all.filter((r) => kana(`${r.label} ${r.sub}`).includes(needle)).slice(0, 40);
+  }, [q, pages, tasks]);
+
+  useEffect(() => { setIndex(0); }, [q]);
+
+  function onKeyDown(e) {
+    e.stopPropagation();
+    if (e.key === "Escape") { e.preventDefault(); onClose(); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => Math.min(i + 1, hits.length - 1)); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); setIndex((i) => Math.max(i - 1, 0)); return; }
+    if (e.key === "Enter") { e.preventDefault(); if (hits[index]) onPick(hits[index]); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 pt-[12vh]" onMouseDown={onClose}>
+      <div
+        data-quick-find
+        onMouseDown={(e) => e.stopPropagation()}
+        className="w-[min(560px,92vw)] overflow-hidden rounded-xl border border-white/15 ts-surface shadow-2xl"
+      >
+        <input
+          autoFocus
+          aria-label="さがす"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="ページや行をさがす"
+          className="w-full border-b border-white/10 bg-transparent px-3 py-2.5 text-[13px] ts-text outline-none placeholder:text-neutral-600"
+        />
+        <div className="max-h-[52vh] overflow-y-auto p-1">
+          {hits.length === 0 && <div className="px-3 py-4 text-center text-[11.5px] text-neutral-600">見つかりません</div>}
+          {hits.map((r, i) => (
+            <button
+              key={`${r.kind}-${r.id}`}
+              onMouseEnter={() => setIndex(i)}
+              onMouseDown={(e) => { e.preventDefault(); onPick(r); }}
+              className={classNames(
+                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] transition",
+                i === index ? "bg-white/15 ts-text" : "text-neutral-300 hover:bg-white/[0.07]",
+              )}
+            >
+              <span className="w-4 shrink-0 text-center text-[11px] opacity-70">{r.icon}</span>
+              <span className="min-w-0 flex-1 truncate">{r.label}</span>
+              <span className="shrink-0 text-[10px] text-neutral-500">{r.sub}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 // 文字を選んでいるあいだ、その上に浮く装飾バー。Notion の要。
