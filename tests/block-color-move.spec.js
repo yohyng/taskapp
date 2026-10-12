@@ -111,3 +111,71 @@ test.describe("7days と下のブロックを行き来する", () => {
     expect(all.filter((t) => t.pageId === BOARD)).toHaveLength(2);
   });
 });
+
+test.describe("好きな色を選ぶ", () => {
+  const heading = { tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2" })] };
+
+  test("色コードを入れると、その色になる", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+
+    await row(page, "みだし").getByLabel("色コード").fill("#1f9d55");
+    await row(page, "みだし").getByLabel("色コード").press("Enter");
+
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#1f9d55");
+    const color = await row(page, "みだし").evaluate((r) =>
+      getComputedStyle(r.querySelector('div[style*="font-size"]')).color);
+    expect(color).toBe("rgb(31, 157, 85)");
+  });
+
+  test("# なしや3桁でも受け取る", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+    await row(page, "みだし").getByLabel("色コード").fill("f0a");
+    await row(page, "みだし").getByLabel("色コード").press("Enter");
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#ff00aa");
+  });
+
+  test("おかしな値は無視して、何も変えない", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+    await row(page, "みだし").getByLabel("色コード").fill("みどり");
+    await row(page, "みだし").getByLabel("色コード").press("Enter");
+
+    await expect(row(page, "みだし").getByLabel("色コード")).toBeVisible(); // 閉じない
+    expect((await storedTask(page, "h")).style?.color).toBeFalsy();
+  });
+
+  test("一度使った色は見本として残る", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+    await row(page, "みだし").getByLabel("色コード").fill("#1f9d55");
+    await row(page, "みだし").getByLabel("色コード").press("Enter");
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#1f9d55");
+
+    await openMenu(page, "みだし");
+    await expect(row(page, "みだし").getByTitle("#1f9d55")).toBeVisible();
+    await expect.poll(async () => page.evaluate(() =>
+      JSON.parse(localStorage.getItem("taskspace-recent-colors") || "[]"))).toEqual(["#1f9d55"]);
+  });
+
+  test("端末の色みほんからも選べる", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+
+    // OSのダイアログは開けないので、入力そのものに値を入れて確かめる
+    const input = row(page, "みだし").getByLabel("好きな色");
+    // React は value の setter を差し替えているので、素の setter で入れてから通知する
+    await input.evaluate((el) => {
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+      set.call(el, "#123456");
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#123456");
+  });
+});

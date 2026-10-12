@@ -5731,6 +5731,15 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
     [types],
   );
 
+  // 決め打ちの7色だけだと足りないので、好きな色も選べるようにする。
+  // 使った色は見本として残しておく（毎回つまみ直さなくていいように）。
+  const [recentColors, setRecentColors] = useState(readRecentColors);
+  const current = task.style?.color || "";
+  function pickColor(color) {
+    slashCtx.setStyle(task, { color });
+    setRecentColors(rememberColor(color));
+  }
+
   return (
     <div className={classNames("relative flex shrink-0 items-center self-start pt-0.5", compact ? "w-[14px]" : "w-[26px]")}>
       {/* 薄く出すのはアイコンだけ。メニューまで透けると下の文字と重なって読めない。 */}
@@ -5795,6 +5804,55 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
                   : { backgroundImage: "linear-gradient(135deg, transparent 45%, rgba(255,255,255,.45) 45%, rgba(255,255,255,.45) 55%, transparent 55%)" }}
               />
             ))}
+
+            {/* 自分で選んだ色の控え */}
+            {recentColors.map((c) => (
+              <button
+                key={c}
+                onMouseDown={(e) => { e.preventDefault(); pickColor(c); setMenu(false); }}
+                title={c}
+                className={classNames(
+                  "h-4 w-4 rounded-full border transition hover:scale-110",
+                  current.toLowerCase() === c.toLowerCase() ? "border-white/70" : "border-white/15 hover:border-white/40",
+                )}
+                style={{ backgroundColor: c }}
+              />
+            ))}
+
+            {/* 好きな色。丸を押すと端末の色みほんが開く */}
+            <label
+              title="好きな色を選ぶ"
+              className="relative h-4 w-4 shrink-0 cursor-pointer overflow-hidden rounded-full border border-white/25 transition hover:scale-110"
+              style={{ backgroundImage: "conic-gradient(#f87171,#fbbf24,#34d399,#60a5fa,#a78bfa,#f472b6,#f87171)" }}
+            >
+              <input
+                type="color"
+                aria-label="好きな色"
+                value={isHexColor(current) ? current : "#60a5fa"}
+                onChange={(e) => pickColor(e.target.value)}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              />
+            </label>
+          </div>
+
+          {/* 値で指し示したいとき用。#abc でも abc123 でも受け取る */}
+          <div className="px-2 pb-1.5">
+            <input
+              aria-label="色コード"
+              defaultValue={isHexColor(current) ? current : ""}
+              placeholder="#60a5fa"
+              spellCheck={false}
+              onMouseDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                if (e.key !== "Enter") return;
+                const hex = normalizeHex(e.currentTarget.value);
+                if (!hex) return;
+                pickColor(hex);
+                setMenu(false);
+              }}
+              className="w-full rounded border border-white/10 bg-black/25 px-1.5 py-1 text-[10px] ts-text outline-none placeholder:text-neutral-600 focus:border-white/25"
+            />
           </div>
           {groups.map(([name, cmds]) => (
             <div key={name}>
@@ -6023,6 +6081,30 @@ function relativeLuminance(hex) {
     return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
   });
   return 0.2126 * ch[0] + 0.7152 * ch[1] + 0.0722 * ch[2];
+}
+
+// 自分で選んだ色の控え。見本として並べ直せるように端末内に持つ。
+const RECENT_COLORS_KEY = "taskspace-recent-colors";
+function readRecentColors() {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) || "[]");
+    return Array.isArray(v) ? v.filter(isHexColor) : [];
+  } catch { return []; }
+}
+function rememberColor(color) {
+  if (!isHexColor(color)) return readRecentColors();
+  const next = [color, ...readRecentColors().filter((c) => c !== color)].slice(0, 8);
+  try { localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(next)); } catch { /* quota */ }
+  return next;
+}
+function isHexColor(v) {
+  return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
+}
+// #abc や abc123 のような書き方も受け取る
+function normalizeHex(v) {
+  let s = String(v || "").trim().replace(/^#/, "");
+  if (/^[0-9a-fA-F]{3}$/.test(s)) s = s.split("").map((c) => c + c).join("");
+  return /^[0-9a-fA-F]{6}$/.test(s) ? `#${s.toLowerCase()}` : null;
 }
 
 // タスク個別の見た目（色・太さ）を style 属性に落とす
