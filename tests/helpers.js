@@ -96,7 +96,8 @@ export const test = base.extend({
         [STORAGE_KEY, data]
       );
       await page.reload();
-      await page.waitForSelector("[data-task-id]");
+      // ページ本文だけを置くこともあるので、タスク行ではなくヘッダーの出現で待つ
+      await page.waitForSelector('button[title="ページ表示"]');
     });
   },
 });

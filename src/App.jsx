@@ -1159,7 +1159,7 @@ function App() {
       if (collectDescendantIds(src.id).includes(dst.id)) return;
       if (taskDepth(dst.id) >= MAX_DEPTH) { setToast("これ以上深い階層は作れません"); return; }
       // 親の category/project を継承し、子として紐付け。scheduledDate はクリア（親配下に表示）
-      upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project, scheduledDate: "", today: false, thisWeek: false });
+      upsertTask({ id: src.id, parentId: dst.id, category: target.category, project: target.project, scheduledDate: "", today: false, thisWeek: false, ...OUT_OF_PAGE });
       setToast(`親子化：「${target.title}」の子タスクにしました`);
       return;
     }
@@ -1169,7 +1169,8 @@ function App() {
     // 曜日カラムにドロップ → プロジェクトから外してプレーンタスクとして配置。
     if (src.type === "task" && dst.type === "day-column") {
       const tKey = toDateKey(new Date());
-      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "" });
+      // 本文から持ってきた場合は、本文の持ち物（ページ・段組み）を外す
+      upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "", ...OUT_OF_PAGE });
       setToast(dst.date === tKey ? "今日に配置しました" : `${dst.label}に配置しました`);
       return;
     }
@@ -1184,6 +1185,18 @@ function App() {
       } else {
         movePageBlock(src.id, dst.id, isBottomHalf());
       }
+      return;
+    }
+
+    // 本文の余白に落とす: そのページの末尾へ移す
+    if (src.type === "task" && dst.type === "page-zone") {
+      const moved = taskMap.get(src.id);
+      if (!moved || moved.pageId === dst.pageId) return;
+      commitTasks((prev) => [
+        ...prev.filter((t) => t.id !== src.id),
+        { ...moved, ...intoPage(moved, dst.pageId), parentId: null, rowKey: null, col: 0, colWidth: null },
+      ]);
+      setToast("ブロックに移しました");
       return;
     }
 
@@ -2461,6 +2474,24 @@ function App() {
   // 選択分をまとめて STOCK へ。プロジェクト所属はそのまま、日付だけ外す。
   // TRAY 行はタスク化してから入れる（カテゴリなしのまま）。
   // ページ内でブロックを並べ替える。配列順がそのまま表示順。
+  // 7days や TRAY からブロック本文に引っぱってきたときの持ち替え。
+  // 日付のまま本文に置くと 7days にも残って二重に見えるので、予定は外す。
+  function intoPage(task, pageId) {
+    if (task.pageId === pageId) return {};
+    return {
+      pageId,
+      plain: true,
+      scheduledDate: "",
+      today: false,
+      thisWeek: false,
+      stock: false,
+      stockViewId: null,
+    };
+  }
+
+  // 本文から 7days などへ出すときは、本文の持ち物をすべて外す
+  const OUT_OF_PAGE = { pageId: null, rowKey: null, col: 0, colWidth: null };
+
   function movePageBlock(id, targetId, after) {
     commitTasks((prev) => {
       const from = prev.findIndex((t) => t.id === id);
@@ -2475,6 +2506,7 @@ function App() {
       const next = [...rest];
       next.splice(after ? to + 1 : to, 0, {
         ...moved,
+        ...intoPage(moved, target.pageId),
         parentId: target.parentId ?? null,
         rowKey: target.rowKey ?? null,
         col: target.col ?? 0,
@@ -2496,6 +2528,7 @@ function App() {
       const base = target.rowKey ? (target.col ?? 0) : 0;
       const placed = {
         ...moved,
+        ...intoPage(moved, target.pageId),
         parentId: null,
         rowKey,
         col: base + dir,
@@ -5258,11 +5291,26 @@ function BlockArea({
         ))}
       </div>
 
-      {/* 本文の下の空き。クリックで末尾にブロックを足す（Notion と同じ） */}
-      <div onClick={addBlockAtEnd} className={tailClass}>
+      {/* 本文の下の空き。クリックで末尾にブロックを足す（Notion と同じ）。
+          ここは 7days からブロックを引っぱってくる受け皿でもある。 */}
+      <BlockTailZone pageId={pageId} onClick={addBlockAtEnd} className={tailClass}>
         {blocks.length === 0 && placeholder}
-      </div>
+      </BlockTailZone>
     </>
+  );
+}
+
+// 本文の末尾の空き。落とすとそのページの末尾に移る。
+function BlockTailZone({ pageId, onClick, className, children }) {
+  const { setNodeRef, isOver } = useDroppable({ id: `page-zone-${pageId}`, data: { type: "page-zone", pageId } });
+  return (
+    <div
+      ref={setNodeRef}
+      onClick={onClick}
+      className={classNames(className, isOver && "rounded bg-sky-400/[0.07] ring-1 ring-inset ring-sky-400/30")}
+    >
+      {children}
+    </div>
   );
 }
 
@@ -5665,15 +5713,23 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
     return () => window.removeEventListener("pointerdown", close, { capture: true });
   }, [menu]);
 
+  // 色は一覧の末尾に文字で並べても見つからないので、見本の丸を上に出す。
+  // 見出しの色を変えるのが、いちばんよく使う操作なので。
   const groups = useMemo(() => {
     const by = new Map();
     for (const cmd of allSlashCommands(types)) {
       const g = cmd.group || "その他";
+      if (cmd.key.startsWith("color-")) continue;
       if (!by.has(g)) by.set(g, []);
       by.get(g).push(cmd);
     }
     return [...by.entries()];
   }, [types]);
+
+  const colorCommands = useMemo(
+    () => allSlashCommands(types).filter((c) => c.key.startsWith("color-")),
+    [types],
+  );
 
   return (
     <div className={classNames("relative flex shrink-0 items-center self-start pt-0.5", compact ? "w-[14px]" : "w-[26px]")}>
@@ -5720,6 +5776,26 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
           >
             <Copy className="h-3 w-3 shrink-0" /> 複製
           </button>
+
+          <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">色</div>
+          <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
+            {colorCommands.map((cmd) => (
+              <button
+                key={cmd.key}
+                onMouseDown={(e) => { e.preventDefault(); cmd.run({ task, ctx: slashCtx }); setMenu(false); }}
+                title={cmd.label}
+                className={classNames(
+                  "h-4 w-4 rounded-full border transition hover:scale-110",
+                  (task.style?.color || "") === (cmd.swatch || "")
+                    ? "border-white/70"
+                    : "border-white/15 hover:border-white/40",
+                )}
+                style={cmd.swatch
+                  ? { backgroundColor: cmd.swatch }
+                  : { backgroundImage: "linear-gradient(135deg, transparent 45%, rgba(255,255,255,.45) 45%, rgba(255,255,255,.45) 55%, transparent 55%)" }}
+              />
+            ))}
+          </div>
           {groups.map(([name, cmds]) => (
             <div key={name}>
               <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">{name}</div>
