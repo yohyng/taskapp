@@ -5735,9 +5735,27 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
   // 使った色は見本として残しておく（毎回つまみ直さなくていいように）。
   const [recentColors, setRecentColors] = useState(readRecentColors);
   const current = task.style?.color || "";
+
+  // 見本や色コードは「これ」と決めた1回なので、そのまま控える
   function pickColor(color) {
     slashCtx.setStyle(task, { color });
     setRecentColors(rememberColor(color));
+  }
+
+  // 端末の色みほんは、つまみを動かしているあいだずっと通知してくる。
+  // 素直に受けると通った色を全部控えて取り消し履歴も埋まるので、
+  // 見た目だけ先に追いかけ、控えるのは手が止まってから。
+  const colorTimers = useRef({ apply: null, keep: null });
+  useEffect(() => () => {
+    clearTimeout(colorTimers.current.apply);
+    clearTimeout(colorTimers.current.keep);
+  }, []);
+  function dragColor(color) {
+    const t = colorTimers.current;
+    clearTimeout(t.apply);
+    clearTimeout(t.keep);
+    t.apply = setTimeout(() => slashCtx.setStyle(task, { color }), 120);
+    t.keep = setTimeout(() => setRecentColors(rememberColor(color)), 700);
   }
 
   return (
@@ -5829,7 +5847,8 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
                 type="color"
                 aria-label="好きな色"
                 value={isHexColor(current) ? current : "#60a5fa"}
-                onChange={(e) => pickColor(e.target.value)}
+                onChange={(e) => dragColor(e.target.value)}
+                onBlur={(e) => pickColor(e.target.value)}
                 className="absolute inset-0 cursor-pointer opacity-0"
               />
             </label>
@@ -6085,6 +6104,9 @@ function relativeLuminance(hex) {
 
 // 自分で選んだ色の控え。見本として並べ直せるように端末内に持つ。
 const RECENT_COLORS_KEY = "taskspace-recent-colors";
+const PRESET_COLOR_KEYS = new Set(
+  TASK_TEXT_COLORS.map((c) => c.key).filter(Boolean).map((c) => c.toLowerCase()),
+);
 function readRecentColors() {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_COLORS_KEY) || "[]");
@@ -6092,8 +6114,9 @@ function readRecentColors() {
   } catch { return []; }
 }
 function rememberColor(color) {
-  if (!isHexColor(color)) return readRecentColors();
-  const next = [color, ...readRecentColors().filter((c) => c !== color)].slice(0, 8);
+  // 見本に元からある色は控えない（同じ丸が2つ並ぶだけなので）
+  if (!isHexColor(color) || PRESET_COLOR_KEYS.has(color.toLowerCase())) return readRecentColors();
+  const next = [color, ...readRecentColors().filter((c) => c.toLowerCase() !== color.toLowerCase())].slice(0, 8);
   try { localStorage.setItem(RECENT_COLORS_KEY, JSON.stringify(next)); } catch { /* quota */ }
   return next;
 }

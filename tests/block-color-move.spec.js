@@ -179,3 +179,64 @@ test.describe("好きな色を選ぶ", () => {
     await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#123456");
   });
 });
+
+test.describe("色みほんをつまんでも控えが溢れない", () => {
+  const heading = { tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2" })] };
+  // つまみを動かしているときの連続通知を真似る
+  const sweep = (input, values) => input.evaluate((el, vs) => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+    for (const v of vs) {
+      set.call(el, v);
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+  }, values);
+  const recents = (page) => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("taskspace-recent-colors") || "[]"));
+
+  test("通った色は控えず、止まったところだけ残る", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+
+    const input = row(page, "みだし").getByLabel("好きな色");
+    await sweep(input, ["#111111", "#222222", "#333333", "#444444", "#555555", "#123456"]);
+
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#123456");
+    await expect.poll(() => recents(page)).toEqual(["#123456"]);
+  });
+
+  test("控えは8色まで", async ({ page, seed }) => {
+    await seed(heading);
+    await page.evaluate(() => localStorage.setItem("taskspace-recent-colors",
+      JSON.stringify(["#a1a1a1", "#a2a2a2", "#a3a3a3", "#a4a4a4", "#a5a5a5", "#a6a6a6", "#a7a7a7", "#a8a8a8"])));
+    await toPages(page);
+    await openMenu(page, "みだし");
+
+    await row(page, "みだし").getByLabel("色コード").fill("#bbbbbb");
+    await row(page, "みだし").getByLabel("色コード").press("Enter");
+
+    await expect.poll(() => recents(page)).toEqual(
+      ["#bbbbbb", "#a1a1a1", "#a2a2a2", "#a3a3a3", "#a4a4a4", "#a5a5a5", "#a6a6a6", "#a7a7a7"]);
+  });
+
+  test("同じ色を選び直しても増えない", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    for (const v of ["#123456", "#123456", "#123456"]) {
+      await openMenu(page, "みだし");
+      await row(page, "みだし").getByLabel("色コード").fill(v);
+      await row(page, "みだし").getByLabel("色コード").press("Enter");
+    }
+    await expect.poll(() => recents(page)).toEqual(["#123456"]);
+  });
+
+  test("元からある見本の色は控えに入らない", async ({ page, seed }) => {
+    await seed(heading);
+    await toPages(page);
+    await openMenu(page, "みだし");
+    await row(page, "みだし").getByTitle("色: 青").click();
+
+    await expect.poll(async () => (await storedTask(page, "h")).style?.color).toBe("#60a5fa");
+    expect(await recents(page)).toEqual([]);
+  });
+});
