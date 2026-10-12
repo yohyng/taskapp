@@ -46,6 +46,8 @@ import {
   Focus,
   Airplay,
   LayoutGrid,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 
 // 削除済みIDをlocalStorageに保存し、Supabaseからのリロードで復活するのを防ぐ
@@ -1625,6 +1627,38 @@ function App() {
     return newTask;
   }
 
+  // テンプレートをまとめて流し込む。ブロックごとに addTask を呼ぶと更新が何十回も走るので、
+  // ここで木を平らにしてから一度だけ書く。
+  function addBlocks(pageId, rows) {
+    const made = [];
+    const walk = (list, parentId, rowKey, col) => {
+      for (const s of list) {
+        const style = s.color || s.bold ? { color: s.color || "", bold: !!s.bold } : null;
+        const block = normalizeTask({
+          id: uid(),
+          title: s.text || "",
+          category: "",
+          project: "",
+          status: "未着手",
+          plain: true,
+          parentId,
+          pageId,
+          blockType: s.type || "task",
+          style,
+          rowKey,
+          col,
+        });
+        made.push(block);
+        if (s.children?.length) walk(s.children, block.id, rowKey, col);
+      }
+    };
+    for (const row of rows) {
+      const rowKey = row.length > 1 ? `row-${uid()}` : null;
+      row.forEach((col, i) => walk(col, null, rowKey, i));
+    }
+    if (made.length) commitTasks((prev) => [...prev, ...made]);
+  }
+
   function addQuickMemo() {
     const task = addTask({ title: quickMemo, category: quickCategory, project: quickProject });
     if (task) setQuickMemo("");
@@ -2122,13 +2156,16 @@ function App() {
   }
 
   function childrenOf(parentId) {
+    // sortOrder が無い子は、配列の並び（＝足した順）のまま。
+    // 以前は題名順にしていたが、書いた順に並ばないのは本文として使えない。
+    const order = new Map(tasks.map((t, i) => [t.id, i]));
     return filteredTasks
       .filter((task) => task.parentId === parentId)
       .sort((a, b) => {
         const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
         const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
         if (ao !== bo) return ao - bo;
-        return a.title.localeCompare(b.title, "ja");
+        return (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0);
       });
   }
 
@@ -3049,6 +3086,7 @@ function App() {
             setSelectedTaskId={setSelectedTaskId}
             childrenOf={childrenOf}
             addTask={addTask}
+            addBlocks={addBlocks}
             onReorder={swapTaskOrder}
             onMergeBlocks={mergeBlockInto}
           />
@@ -4854,7 +4892,83 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 
 // ドキュメント型のページ。左にページ一覧、右に本文。
 // 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, onReorder, onMergeBlocks }) {
+// ダッシュボードのひな形。上段に曜日、下段にプロジェクト。
+// 中身は書き換える前提の例なので、構造だけ合っていればいい。
+const H = (text, color) => ({ type: "heading3", text, color, bold: true });
+const T = (text, children) => ({ type: "task", text, children });
+const G = (text, children) => ({ type: "toggle", text, children });
+
+function dashboardTemplate() {
+  const week = [
+    [H("Mon."), T("")],
+    [
+      H("Tue."),
+      T("ナポリ予約→なつみメアド"),
+      T("京都経費精算", [T("タクシー代"), T("ホテル代")]),
+      T("結婚指輪刻印をティファニーに送る"),
+      T("須藤さん返信"),
+    ],
+    [H("Wed."), T("")],
+    [H("Thu."), T("")],
+    [H("Fri."), T("")],
+    [H("Sat.", "#60a5fa"), T(""), H("Sun.", "#f87171"), T("")],
+  ];
+
+  const projects = [
+    [
+      H("NOMLAB PJ", "#60a5fa"),
+      G("空間デザイン試論", [T("全体スケジュール")]),
+      G("現象", [T("植物アプローチ資料作成")]),
+      G("Shiki", [T("新プリンターでテスト"), T("複雑な形状テストで作ってみる")]),
+      G("torinome", [T("HPを空間系に変更"), T("AND対応→")]),
+      G("空間シンクタンク", [T("DSAのSHOPリスト作成")]),
+      G("空間ゆらぎ/AI", [T("DSAの画像全部ダウンロード"), T("空間の動画解析可能かやってみる")]),
+      G("選書企画・コラム", []),
+    ],
+    [
+      H("NOMURA PJ", "#a78bfa"),
+      G("DESIGNART2026", [
+        T("次回定例に向けてプロト作成", [T("スタッコとワイヤーと下地"), T("３Dプリントでオスメス作っておく")]),
+        T("会場選定"),
+      ]),
+      G("歓びと感動学", [
+        T("芝浦工大トーク関連", [
+          T("かずさん人事連絡待ち"),
+          T("人事と連携したノムラのプレゼンにもなるような立て付けにする"),
+        ]),
+        T("感動学資料まとめ"),
+        T("訂正シール確認→確認後酒井さん連絡"),
+      ]),
+      G("学校空間リサーチ", [
+        T("なんとなくひきこもりと空間フォロー"),
+        T("ノムラの空間、竣工実績ベースに読み解いて、それを教育空間にパラフレーズするなら、のシステムというか資料作成しておくといいかも"),
+      ]),
+    ],
+    [
+      H("PRIVATE PJ", "#f87171"),
+      G("結婚回り", [T("婚姻届け7月19日提出に向けて調整")]),
+      T("ゲンロンγ9月に提出", [T("社外活動申請")]),
+      G("京都西陣関連", [T("6月6日の落散前とあと予定検討する")]),
+      G("GEA", [T("6月4日定例に向けて資料作る"), T("SCOOP受け取りしたい")]),
+      G("被覆空間研究", []),
+      G("Other", []),
+    ],
+    [
+      H("Weekly Task", "#fb923c"),
+      T("クリーニング受け取り"),
+      T("経費精算", [T("会議交際費申請"), T("風HDMI無線登録"), T("タクシー登録"), T("AVPレンズ登録")]),
+      T("ニンジャマスク買うといいかも"),
+      T("SIC訪問の件→いったん未来創研メンバーとミラノメンバーに聞く。先着10名でスケジューリングする→それ次第候補日作成で、須藤さん連絡"),
+      T("ゲンロン編集部配本？"),
+      T(""),
+    ],
+  ];
+
+  // 段と段のあいだに空行を1つ挟む（Notion でもそうやって離す）
+  return [week, [[{ type: "text", text: "" }]], projects];
+}
+
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, onReorder, onMergeBlocks }) {
   const { markForEdit } = useBlockEdit();
   const { customTypes, saveCustomTypes } = useBlockTypes();
   const [typeEditor, setTypeEditor] = useState(false);
@@ -4957,10 +5071,11 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
     },
   }), [addTask, upsertTask, removeTask, markForEdit, onReorder, onMergeBlocks]);
 
-  function addPage() {
-    const page = { id: `page-${uid()}`, title: "無題のページ", icon: PAGE_ICONS[pages.length % PAGE_ICONS.length] };
+  function addPage({ title = "無題のページ", icon, rows, fullWidth = false } = {}) {
+    const page = { id: `page-${uid()}`, title, icon: icon || PAGE_ICONS[pages.length % PAGE_ICONS.length], fullWidth };
     onPagesChange([...pages, page]);
     setActiveId(page.id);
+    if (rows) addBlocks(page.id, rows);
   }
 
   function removePage(id) {
@@ -5009,10 +5124,17 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
           </div>
         ))}
         <button
-          onClick={addPage}
+          onClick={() => addPage()}
           className="mt-1 flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
           <Plus className="h-3 w-3" /> 新規ページ
+        </button>
+        <button
+          onClick={() => addPage({ title: "Task", icon: "⚡", rows: dashboardTemplate(), fullWidth: true })}
+          title="曜日とプロジェクトの段組みが入った状態で作る"
+          className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          <LayoutGrid className="h-3 w-3" /> ダッシュボード
         </button>
 
         <div className="my-2 border-t border-white/10" />
@@ -5035,7 +5157,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
 
       {/* 本文 */}
       <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-6 sm:px-6">
-        <div className="mx-auto max-w-2xl">
+        <div className={classNames("mx-auto", active.fullWidth ? "max-w-none" : "max-w-2xl")}>
           <div className="mb-4 flex items-start gap-2">
             <div className="relative">
               <button onClick={() => setIconOpen((v) => !v)} title="アイコンを変える" className="text-3xl leading-none transition hover:opacity-70">
@@ -5059,6 +5181,13 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
               placeholder="無題"
               className="min-w-0 flex-1 bg-transparent text-3xl font-bold tracking-tight ts-text outline-none placeholder:text-neutral-700"
             />
+            <button
+              onClick={() => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, fullWidth: !p.fullWidth } : p))}
+              title={active.fullWidth ? "幅を元に戻す" : "幅いっぱいに広げる"}
+              className="mt-2 shrink-0 rounded p-1 text-neutral-600 transition hover:bg-white/[0.06] hover:text-neutral-300"
+            >
+              {active.fullWidth ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            </button>
           </div>
 
           <div className="flex flex-col">
