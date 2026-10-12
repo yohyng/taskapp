@@ -156,12 +156,14 @@ const BASE_BLOCK_TYPES = {
   divider:   { label: "区切り線", text: false, md: ["--- "], reading: "くぎりせん divider せん しきり" },
   toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
   image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
+  day:       { label: "その日の予定", text: false, reading: "よてい day かれんだー 曜日 ようび 7days いちにち" },
 };
 
 // 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
 const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
+const BOARD_NAME_KEY = "taskspace-board-name";
 
 const CUSTOM_TYPE_PREFIX = "custom:";
 const DEFAULT_CUSTOM_TYPES = [];
@@ -620,6 +622,8 @@ function normalizeTask(task) {
     col: 0,
     colWidth: null,
     codeLang: "",
+    // 日付ブロックが見ている日（7days と同じ scheduledDate を指す）
+    dayDate: "",
     ...task,
   };
 }
@@ -2948,9 +2952,51 @@ function App() {
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
+  const [boardName, setBoardName] = useState(() => {
+    try { return localStorage.getItem(BOARD_NAME_KEY) ?? "ボード"; } catch { return "ボード"; }
+  });
+
+  // 月〜日の日付ブロックを、横一列の段組みとして一気に置く
+  function addWeekRow() {
+    const base = getWeekDays(new Date());
+    const rowKey = `row-${uid()}`;
+    const made = base.map((d, i) => normalizeTask({
+      id: uid(), title: "", category: "", project: "", status: "未着手", plain: true,
+      pageId: BOARD_PAGE_ID, blockType: "day", dayDate: toDateKey(d),
+      rowKey, col: i,
+    }));
+    addRawBlocks(made);
+    setToast("一週間ぶんの日付ブロックを並べました");
+  }
+
+  // 日付ブロックが 7days と同じ実体を触るのに要るもの
+  const dayDeps = {
+    tasks: filteredTasks, projectRules, childrenOf, toggleDone, removeTask,
+    categoryTone, setSelectedTaskId, selectedTaskId, setSelectedProject, addTask,
+  };
+
   // 7days の下の自由ブロック。ページ本文と同じものを、固定の持ち主で置いている。
   const boardBlocks = (
-    <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 sm:px-5">
+    <div data-board className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 sm:px-5">
+      <div className="mb-2 flex items-center gap-2">
+        <input
+          aria-label="この場所の名前"
+          value={boardName}
+          onChange={(e) => {
+            setBoardName(e.target.value);
+            try { localStorage.setItem(BOARD_NAME_KEY, e.target.value); } catch { /* quota */ }
+          }}
+          placeholder="名前をつける"
+          className="min-w-0 flex-1 bg-transparent text-sm font-semibold tracking-tight ts-text outline-none placeholder:text-neutral-700"
+        />
+        <button
+          onClick={addWeekRow}
+          title="月〜日の日付ブロックを横一列に並べる"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          + 一週間
+        </button>
+      </div>
       <BlockArea
         pageId={BOARD_PAGE_ID}
         tasks={tasks}
@@ -2963,7 +3009,8 @@ function App() {
         mapTasks={mapTasks}
         onReorder={swapTaskOrder}
         onMergeBlocks={mergeBlockInto}
-        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/右に列を足す で段組み。"
+        dayDeps={dayDeps}
+        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/よてい でその日の予定。"
         tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
       />
     </div>
@@ -3344,6 +3391,7 @@ function App() {
             addBlocks={addBlocks}
             addRawBlocks={addRawBlocks}
             mapTasks={mapTasks}
+            dayDeps={dayDeps}
             onReorder={swapTaskOrder}
             onMergeBlocks={mergeBlockInto}
           />
@@ -5229,6 +5277,74 @@ const CODE_LANGS = ["js", "ts", "jsx", "tsx", "html", "css", "json", "sql", "pyt
 
 const HEADING_DEPTH = { heading1: 0, heading2: 1, heading3: 2 };
 
+// 日付ブロック。7days の1日ぶんを、そのままブロックとして置けるようにしたもの。
+// 中身は 7days と同じ実体なので、どちらで触っても同じところが変わる。
+function DayBlock({ task, upsertTask, deps }) {
+  const { tasks, projectRules, childrenOf, toggleDone, removeTask, categoryTone,
+    setSelectedTaskId, selectedTaskId, setSelectedProject, addTask } = deps || {};
+  const [draft, setDraft] = useState("");
+
+  const dateKey = task.dayDate || toDateKey(new Date());
+  const date = useMemo(() => {
+    const [y, m, d] = dateKey.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, d || 1);
+  }, [dateKey]);
+  const todayK = toDateKey(new Date());
+  const dow = date.getDay();               // 0=日
+  const labelIndex = (dow + 6) % 7;        // DAY_LABELS は月はじまり
+
+  const shown = useMemo(
+    () => rootTasksForDay({ tasks: tasks || [], projectRules: projectRules || {}, dateKey, date, todayKey: todayK }),
+    [tasks, projectRules, dateKey, date, todayK],
+  );
+
+  function shiftDay(n) {
+    const next = new Date(date);
+    next.setDate(next.getDate() + n);
+    upsertTask?.({ id: task.id, dayDate: toDateKey(next) });
+  }
+
+  return (
+    <div className="min-w-0">
+      {/* どの日を見ているかを変えられる。既定は作った日。 */}
+      <div className="mb-0.5 flex items-center gap-1 text-[10px] text-neutral-600">
+        <button onClick={(e) => { e.stopPropagation(); shiftDay(-1); }} title="前の日" className="rounded px-1 py-0.5 transition hover:bg-white/10 hover:text-neutral-200">‹</button>
+        <button onClick={(e) => { e.stopPropagation(); upsertTask?.({ id: task.id, dayDate: todayK }); }} title="今日にする" className="rounded px-1 py-0.5 transition hover:bg-white/10 hover:text-neutral-200">今日</button>
+        <button onClick={(e) => { e.stopPropagation(); shiftDay(1); }} title="次の日" className="rounded px-1 py-0.5 transition hover:bg-white/10 hover:text-neutral-200">›</button>
+      </div>
+      <DayColumn
+        dateKey={dateKey}
+        label={DAY_LABELS[labelIndex]}
+        date={date}
+        isToday={dateKey === todayK}
+        isSat={dow === 6}
+        isSun={dow === 0}
+        stacked
+        tasks={shown}
+        allTasks={tasks || []}
+        childrenOf={childrenOf}
+        newTitle={draft}
+        setNewTitle={setDraft}
+        onAdd={(title) => {
+          const clean = (title ?? draft).trim();
+          if (!clean) return;
+          addTask?.({ title: clean, category: "", project: "", plain: true, scheduledDate: dateKey, silent: true });
+          setDraft("");
+        }}
+        toggleDone={toggleDone}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        categoryTone={categoryTone}
+        setSelectedTaskId={setSelectedTaskId}
+        selectedTaskId={selectedTaskId}
+        projectRules={projectRules}
+        flatView
+        setSelectedProject={setSelectedProject}
+      />
+    </div>
+  );
+}
+
 // 目次。本文の見出しを拾って並べ、押すとそこへ飛ぶ。
 function TableOfContents({ blocks }) {
   const heads = (blocks || []).filter((t) => HEADING_DEPTH[t.blockType] !== undefined && t.title.trim());
@@ -5255,7 +5371,7 @@ function TableOfContents({ blocks }) {
   );
 }
 
-function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse }) {
+function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse, dayDeps }) {
   const children = childrenOf?.(task.id) || [];
   // トグルは閉じている間、子を隠す
   const isCollapsed = task.blockType === "toggle" && collapsedSet?.has(task.id);
@@ -5274,7 +5390,11 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         setSelectedTaskId={setSelectedTaskId}
         notionMode
         collapsed={isCollapsed}
-        bodySlot={task.blockType === "toc" ? () => <TableOfContents blocks={siblings} /> : undefined}
+        bodySlot={
+          task.blockType === "toc" ? () => <TableOfContents blocks={siblings} />
+          : task.blockType === "day" ? () => <DayBlock task={task} upsertTask={upsertTask} deps={dayDeps} />
+          : undefined
+        }
         onToggleCollapse={onToggleCollapse}
         onEnterBlock={(t, before, after) => ops.enterBlock(t, before, after)}
         onMergeBack={(t, draft) => ops.mergeBack(t, draft, siblings, idx)}
@@ -5426,6 +5546,8 @@ function BlockArea({
   pageId, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf,
   addTask, mapTasks, onReorder, onMergeBlocks, placeholder = "クリックして書き始める。/ でコマンド。",
   tailClass = "mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700",
+  // 日付ブロックが 7days と同じ実体を触るのに要るもの
+  dayDeps,
 }) {
   const { markForEdit } = useBlockEdit();
   // トグルの開閉は見た目の設定なので端末内だけに持つ
@@ -5645,6 +5767,7 @@ function BlockArea({
                       ops={ops}
                       collapsedSet={collapsed}
                       onToggleCollapse={toggleCollapse}
+                      dayDeps={dayDeps}
                     />
                   ))}
                 </div>
@@ -5729,7 +5852,7 @@ function ColumnBar({ first, last, width, onMove, onWidth }) {
   );
 }
 
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, addRawBlocks, mapTasks, onReorder, onMergeBlocks }) {
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, addRawBlocks, mapTasks, onReorder, onMergeBlocks, dayDeps }) {
   const { customTypes, saveCustomTypes } = useBlockTypes();
   const [typeEditor, setTypeEditor] = useState(false);
   const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
@@ -5930,6 +6053,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             mapTasks={mapTasks}
             onReorder={onReorder}
             onMergeBlocks={onMergeBlocks}
+            dayDeps={dayDeps}
           />
         </div>
       </div>
@@ -6106,6 +6230,7 @@ function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTask
               leading={() => (
                 <button
                   onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+                  aria-label={task.status === "完了" ? "未完了に戻す" : "完了にする"}
                   className={classNames("mt-0.5 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
                 >
                   {task.status === "完了" ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
@@ -7530,7 +7655,11 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
             <CheckSquare className={classNames("h-3 w-3", b.isSelected && "text-sky-400")} />
           </button>
         ) : (
-          <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}>
+          <button
+            onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+            aria-label={isDone ? "未完了に戻す" : "完了にする"}
+            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+          >
             {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
           </button>
         )}
@@ -7618,6 +7747,7 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
         leading={() => (
           <button
             onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
+            aria-label={isDone ? "未完了に戻す" : "完了にする"}
             className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
           >
             {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
