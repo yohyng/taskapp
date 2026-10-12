@@ -138,7 +138,7 @@ const TASK_TEXT_COLORS = [
 //   marker   … 行頭に出す記号
 //   size/weight … 見出しの強さ
 // 既定は task（＝ToDo）。既存データは全部これなので、見え方は変わらない。
-const BLOCK_TYPES = {
+const BASE_BLOCK_TYPES = {
   task:      { label: "ToDo", checkbox: true,  md: ["[] "] },
   text:      { label: "テキスト" },
   heading1:  { label: "見出し1", size: 17, weight: 700, md: ["# "] },
@@ -153,31 +153,75 @@ const BLOCK_TYPES = {
   divider:   { label: "区切り線", text: false, md: ["--- "] },
 };
 
-function blockTypeOf(task) {
-  return BLOCK_TYPES[task?.blockType] ? task.blockType : "task";
+// 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
+const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
+const CUSTOM_TYPE_PREFIX = "custom:";
+const DEFAULT_CUSTOM_TYPES = [];
+// 面の出し方（枠や帯）の選択肢
+const BLOCK_PANELS = {
+  none:   { label: "なし" },
+  tint:   { label: "うすい帯", cls: "rounded bg-current/[0.06] px-1.5" },
+  left:   { label: "左に線", cls: "border-l-2 border-l-current/40 pl-2" },
+  boxed:  { label: "枠で囲む", cls: "rounded border border-current/20 px-1.5 py-0.5" },
+};
+
+// 保存した定義を、描画が使う形に起こす
+function customTypeToConfig(def) {
+  return {
+    label: def.label || "カスタム",
+    custom: true,
+    marker: def.marker || undefined,
+    size: def.size || undefined,
+    weight: def.weight || undefined,
+    color: def.color || undefined,
+    panelCls: BLOCK_PANELS[def.panel]?.cls,
+    checkbox: !!def.checkbox,
+    md: def.md ? [def.md] : undefined,
+  };
+}
+
+function buildBlockTypes(customTypes) {
+  const out = { ...BASE_BLOCK_TYPES };
+  for (const def of customTypes || []) {
+    out[CUSTOM_TYPE_PREFIX + def.id] = customTypeToConfig(def);
+  }
+  return out;
+}
+
+// 既定は組み込みだけ。Provider の下では自分で作った分も含む。
+const BlockTypesContext = React.createContext({ types: BASE_BLOCK_TYPES, customTypes: [] });
+function useBlockTypes() {
+  return React.useContext(BlockTypesContext);
+}
+
+function blockTypeOf(task, types = BASE_BLOCK_TYPES) {
+  return types[task?.blockType] ? task.blockType : "task";
 }
 function isTaskBlockType(task) {
   return blockTypeOf(task) === "task";
 }
 
-// 行頭のマークダウン記法を種別に変換する（"# " で見出し1 など）
-const MARKDOWN_PREFIXES = Object.entries(BLOCK_TYPES)
-  .filter(([, cfg]) => cfg.md)
-  .flatMap(([key, cfg]) => cfg.md.map((prefix) => [prefix, key]))
-  .sort((a, b) => b[0].length - a[0].length); // "## " を "# " より先に見る
+// 行頭のマークダウン記法を種別に変換する（"# " で見出し1 など）。
+// 自分で作った種別も記法を持てるので、種別一覧から毎回組む。
+function markdownPrefixes(types) {
+  return Object.entries(types)
+    .filter(([, cfg]) => cfg.md)
+    .flatMap(([key, cfg]) => cfg.md.map((prefix) => [prefix, key]))
+    .sort((a, b) => b[0].length - a[0].length); // "## " を "# " より先に見る
+}
 
 // 同じ並びの中で、直前まで連続している numbered ブロックの数から番号を出す。
 // 別種が挟まると 1 に戻る（Notion と同じ）。CSS カウンタだと行のラッパーで
 // スコープが切れて全部 1 になるため、ここで数える。
 function numberedIndex(list, idx) {
-  if (blockTypeOf(list[idx]) !== "numbered") return undefined;
+  if (list[idx]?.blockType !== "numbered") return undefined;
   let n = 1;
-  for (let i = idx - 1; i >= 0 && blockTypeOf(list[i]) === "numbered"; i--) n++;
+  for (let i = idx - 1; i >= 0 && list[i]?.blockType === "numbered"; i--) n++;
   return n;
 }
 
-function matchMarkdownPrefix(value) {
-  for (const [prefix, key] of MARKDOWN_PREFIXES) {
+function matchMarkdownPrefix(value, types = BASE_BLOCK_TYPES) {
+  for (const [prefix, key] of markdownPrefixes(types)) {
     if (value === prefix) return { key, rest: "" };
   }
   return null;
@@ -231,15 +275,6 @@ const SLASH_COMMANDS = [
     key: "color-reset", group: "書式", label: "色: 既定", hint: "文字色を戻す", keywords: "color reset iro 色 既定",
     run: ({ task, ctx }) => ctx.setStyle(task, { color: "" }),
   },
-  // --- ブロックの種類（Notion の基本ブロック） ---
-  ...Object.entries(BLOCK_TYPES).map(([key, cfg]) => ({
-    key: `type-${key}`,
-    label: cfg.label,
-    hint: cfg.md ? cfg.md[0].trim() : "種類を変える",
-    keywords: `${cfg.label} ${key} block type`,
-    group: "種類",
-    run: ({ task, ctx }) => ctx.setBlockType(task, key),
-  })),
   {
     key: "delete", group: "操作", label: "削除", hint: "このブロックを消す", keywords: "delete remove sakujo 削除",
     danger: true,
@@ -248,10 +283,27 @@ const SLASH_COMMANDS = [
 ];
 
 // "/" 以降の文字でコマンドを絞る
-function matchSlashCommands(query) {
+// 種類の変更コマンドは、そのとき使える種別から組む（自分で作った分も入る）
+function typeCommands(types) {
+  return Object.entries(types).map(([key, cfg]) => ({
+    key: `type-${key}`,
+    label: cfg.label,
+    hint: cfg.md ? cfg.md[0].trim() : "種類を変える",
+    keywords: `${cfg.label} ${key} block type`,
+    group: "種類",
+    run: ({ task, ctx }) => ctx.setBlockType(task, key),
+  }));
+}
+
+function allSlashCommands(types) {
+  return [...typeCommands(types), ...SLASH_COMMANDS];
+}
+
+function matchSlashCommands(query, commands) {
+  const list = commands || SLASH_COMMANDS;
   const q = (query || "").trim().toLowerCase();
-  if (!q) return SLASH_COMMANDS;
-  return SLASH_COMMANDS.filter(
+  if (!q) return list;
+  return list.filter(
     (c) => c.label.toLowerCase().includes(q) || c.keywords.toLowerCase().includes(q)
   );
 }
@@ -569,9 +621,9 @@ function isSlashTrigger(ch) {
 
 // コマンドの検出とメニュー操作。ブロックのエディタでも、列の「追加…」欄でも使う。
 // onPick には選ばれたコマンドと、"/query" を取り除いた残りの文字列を渡す。
-function useSlashQuery({ enabled = true, onPick }) {
+function useSlashQuery({ enabled = true, onPick, commands }) {
   const [slash, setSlash] = useState(null); // { from, query, index }
-  const matches = slash ? matchSlashCommands(slash.query) : [];
+  const matches = slash ? matchSlashCommands(slash.query, commands) : [];
 
   // 入力のたびに開始位置と絞り込み語を追う
   function detect(value, caret) {
@@ -682,6 +734,25 @@ function App() {
     try { localStorage.setItem("taskspace-app-theme", JSON.stringify(next)); } catch { /* quota */ }
     dbSaveSetting(APP_THEME_SETTING_KEY, JSON.stringify(next));
   }, []);
+
+  const [customBlockTypes, setCustomBlockTypes] = useState(() => {
+    try {
+      const raw = localStorage.getItem("taskspace-custom-block-types");
+      const parsed = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(parsed)) return parsed;
+    } catch { /* 壊れていたら既定 */ }
+    return DEFAULT_CUSTOM_TYPES;
+  });
+  const persistCustomTypes = useCallback((next) => {
+    setCustomBlockTypes(next);
+    try { localStorage.setItem("taskspace-custom-block-types", JSON.stringify(next)); } catch { /* quota */ }
+    dbSaveSetting(CUSTOM_TYPES_SETTING_KEY, JSON.stringify(next));
+  }, []);
+  const blockTypesValue = useMemo(() => ({
+    types: buildBlockTypes(customBlockTypes),
+    customTypes: customBlockTypes,
+    saveCustomTypes: persistCustomTypes,
+  }), [customBlockTypes, persistCustomTypes]);
 
   const [pages, setPages] = useState(() => {
     try {
@@ -1181,6 +1252,16 @@ function App() {
           if (parsed?.bg && parsed?.text) {
             setAppTheme(parsed);
             localStorage.setItem("taskspace-app-theme", JSON.stringify(parsed));
+          }
+        } catch { /* 壊れていたらローカルのまま */ }
+      }
+      const remoteCustom = settings?.[CUSTOM_TYPES_SETTING_KEY];
+      if (remoteCustom) {
+        try {
+          const parsed = typeof remoteCustom === "string" ? JSON.parse(remoteCustom) : remoteCustom;
+          if (Array.isArray(parsed)) {
+            setCustomBlockTypes(parsed);
+            localStorage.setItem("taskspace-custom-block-types", JSON.stringify(parsed));
           }
         } catch { /* 壊れていたらローカルのまま */ }
       }
@@ -2548,6 +2629,7 @@ function App() {
   }), [selectedIds]);
 
   return (
+    <BlockTypesContext.Provider value={blockTypesValue}>
     <SelectionContext.Provider value={selectionValue}>
     <SlashContext.Provider value={slashValue}>
     <BlockEditContext.Provider value={blockEditValue}>
@@ -3341,6 +3423,7 @@ function App() {
     </BlockEditContext.Provider>
     </SlashContext.Provider>
     </SelectionContext.Provider>
+    </BlockTypesContext.Provider>
   );
 }
 
@@ -4092,10 +4175,13 @@ function useTaskBlock({
   const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
   const { selectedIds, toggleTask } = useSelection();
   const slashCtx = useSlash();
+  const { types } = useBlockTypes();
+  const commands = useMemo(() => allSlashCommands(types), [types]);
 
   // "/" で開くコマンドメニュー
   const sq = useSlashQuery({
     enabled: !!slashCtx,
+    commands,
     onPick: (cmd, rest) => {
       setEditing(false);
       // タイトルが残っていれば先に確定してからコマンドを走らせる
@@ -4257,7 +4343,7 @@ function useTaskBlock({
       e.preventDefault();
       if (notionMode) {
         // 空のリスト項目で Enter → リストを抜けてテキストに戻る
-        const kind = blockTypeOf(task);
+        const kind = blockTypeOf(task, types);
         if (!normalizeBlockText(draft) && kind !== "text" && kind !== "task") {
           slashCtx?.setBlockType?.(task, "text");
           return;
@@ -4294,7 +4380,7 @@ function useTaskBlock({
     }
     if (e.key === "Backspace" || e.key === "Delete") {
       if (notionMode && e.key === "Backspace" && atStart) {
-        const kind = blockTypeOf(task);
+        const kind = blockTypeOf(task, types);
         // まず種類をテキストに戻し、それから前のブロックに繋げる
         if (kind !== "text" && kind !== "task") {
           e.preventDefault();
@@ -4361,7 +4447,7 @@ function useTaskBlock({
     onChange: (e) => {
       const v = e.target.value;
       // 行頭の "# " や "- " はその場で種別に変える（Notion と同じ）
-      const md = slashCtx && matchMarkdownPrefix(v);
+      const md = slashCtx && matchMarkdownPrefix(v, types);
       if (md) {
         setDraft("");
         slashCtx.setBlockType(task, md.key);
@@ -4442,8 +4528,11 @@ function SlashMenu({ slash, matches, onPick }) {
 // 「書きながら仕分ける」流れをブロックの中と揃える。
 function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inputRef }) {
   const slashCtx = useSlash();
+  const { types } = useBlockTypes();
+  const commands = useMemo(() => allSlashCommands(types), [types]);
   const sq = useSlashQuery({
     enabled: !!slashCtx,
+    commands,
     onPick: (cmd, rest) => {
       // 残りの文字列でタスクを作ってから、そのタスクにコマンドを当てる
       const created = onSubmit(rest || "新規タスク");
@@ -4474,11 +4563,173 @@ function AddBlockInput({ value, onChange, onSubmit, placeholder, className, inpu
   );
 }
 
+// 自分でブロック種別を作る画面。見た目の設定だけを持たせて、
+// あとは組み込みの種別と同じ扱いにする（/ メニューにも ⠿ メニューにも並ぶ）。
+function BlockTypeEditor({ customTypes, onSave, onClose }) {
+  const [draft, setDraft] = useState(customTypes);
+  const sizes = [null, 12, 13, 14, 15, 17, 20];
+
+  function update(id, patch) {
+    setDraft((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }
+  function add() {
+    setDraft((prev) => [...prev, {
+      id: uid(), label: `じぶんのブロック${prev.length + 1}`,
+      marker: "", size: null, weight: null, color: "", panel: "none", checkbox: false, md: "",
+    }]);
+  }
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/70 p-4" onClick={onClose}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className="max-h-[80vh] w-full max-w-lg overflow-y-auto rounded-xl border border-white/15 ts-surface p-4 shadow-2xl"
+      >
+        <div className="mb-3 flex items-center justify-between">
+          <div>
+            <div className="text-sm font-semibold ts-text">ブロックを作る</div>
+            <div className="text-[10px] text-neutral-500">作った種別は / メニューと ⠿ メニューに並びます</div>
+          </div>
+          <button onClick={onClose} className="rounded-full border border-white/10 p-1.5 text-neutral-400 hover:bg-white/10"><X className="h-3.5 w-3.5" /></button>
+        </div>
+
+        {draft.length === 0 && (
+          <div className="rounded-lg border border-dashed border-white/15 p-4 text-center text-[11px] text-neutral-500">
+            まだありません。下の「追加」から作れます。
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3">
+          {draft.map((d) => (
+            <div key={d.id} className="rounded-lg border border-white/10 p-2.5">
+              <div className="mb-2 flex items-center gap-2">
+                <input
+                  value={d.label}
+                  onChange={(e) => update(d.id, { label: e.target.value })}
+                  placeholder="名前"
+                  className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1 text-xs ts-text outline-none"
+                />
+                <button
+                  onClick={() => setDraft((prev) => prev.filter((x) => x.id !== d.id))}
+                  title="この種別を消す"
+                  className="shrink-0 rounded p-1 text-neutral-600 hover:text-red-300"
+                ><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-[10px] text-neutral-500">
+                <label className="flex items-center gap-1.5">
+                  行頭の記号
+                  <input
+                    value={d.marker || ""}
+                    onChange={(e) => update(d.id, { marker: e.target.value.slice(0, 2) })}
+                    placeholder="例: ▸"
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1.5 py-1 text-center text-xs ts-text outline-none"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5">
+                  記法
+                  <input
+                    value={d.md || ""}
+                    onChange={(e) => update(d.id, { md: e.target.value })}
+                    placeholder="例: !! "
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1.5 py-1 text-xs ts-text outline-none"
+                  />
+                </label>
+                <label className="flex items-center gap-1.5">
+                  文字サイズ
+                  <select
+                    value={d.size || ""}
+                    onChange={(e) => update(d.id, { size: e.target.value ? Number(e.target.value) : null })}
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1 py-1 text-xs ts-text outline-none"
+                  >
+                    {sizes.map((v) => <option key={v || "base"} value={v || ""}>{v ? `${v}px` : "既定"}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  太さ
+                  <select
+                    value={d.weight || ""}
+                    onChange={(e) => update(d.id, { weight: e.target.value ? Number(e.target.value) : null })}
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1 py-1 text-xs ts-text outline-none"
+                  >
+                    <option value="">既定</option>
+                    <option value="500">やや太い</option>
+                    <option value="700">太い</option>
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  面
+                  <select
+                    value={d.panel || "none"}
+                    onChange={(e) => update(d.id, { panel: e.target.value })}
+                    className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1 py-1 text-xs ts-text outline-none"
+                  >
+                    {Object.entries(BLOCK_PANELS).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-1.5">
+                  チェック
+                  <input
+                    type="checkbox"
+                    checked={!!d.checkbox}
+                    onChange={(e) => update(d.id, { checkbox: e.target.checked })}
+                    className="h-3.5 w-3.5"
+                  />
+                </label>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] text-neutral-500">文字色</span>
+                {TASK_TEXT_COLORS.map((c) => (
+                  <button
+                    key={c.key || "default"}
+                    onClick={() => update(d.id, { color: c.key })}
+                    title={c.label}
+                    className={classNames(
+                      "h-4 w-4 rounded-full border transition",
+                      (d.color || "") === c.key ? "border-white ring-1 ring-white/60" : "border-white/20 hover:border-white/50",
+                    )}
+                    style={c.key ? { backgroundColor: c.key } : undefined}
+                  >{!c.key && <span className="text-[8px] leading-none text-neutral-400">×</span>}</button>
+                ))}
+              </div>
+
+              {/* 作りながら見た目を確かめられるように */}
+              <div className="mt-2 rounded border border-white/5 bg-black/20 p-2">
+                <div className="mb-1 text-[9px] text-neutral-600">見え方</div>
+                <div className={classNames("flex items-start gap-1.5", BLOCK_PANELS[d.panel || "none"]?.cls)}>
+                  {d.checkbox && <Circle className="mt-1 h-3 w-3 shrink-0 text-neutral-600" />}
+                  {d.marker && <span className="mt-0.5 shrink-0 text-[11px] leading-none">{d.marker}</span>}
+                  <span style={{ fontSize: d.size || 14, fontWeight: d.weight || undefined, color: d.color || undefined }}>
+                    {d.label || "サンプル"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex items-center gap-2">
+          <button onClick={add} className="flex items-center gap-1 rounded border border-white/10 px-2.5 py-1.5 text-xs text-neutral-300 hover:bg-white/[0.07]">
+            <Plus className="h-3 w-3" /> 追加
+          </button>
+          <div className="flex-1" />
+          <button onClick={onClose} className="rounded px-2.5 py-1.5 text-xs text-neutral-500 hover:text-neutral-300">やめる</button>
+          <button
+            onClick={() => { onSave(draft); onClose(); }}
+            className="rounded bg-white px-3 py-1.5 text-xs font-medium text-neutral-950"
+          >保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ページ本文の1ブロック。Notion の本文行に合わせて、列ビューより少し大きめ。
 function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask, toggleDone, setSelectedTaskId, siblings, idx, ops, collapsedSet, onToggleCollapse }) {
   const children = childrenOf?.(task.id) || [];
   // トグルは閉じている間、子を隠す
-  const isCollapsed = blockTypeOf(task) === "toggle" && collapsedSet?.has(task.id);
+  const isCollapsed = task.blockType === "toggle" && collapsedSet?.has(task.id);
   return (
     <div style={depth > 0 ? { marginLeft: depth * 24 } : undefined}>
       <TaskBlock
@@ -4556,6 +4807,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 // 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
 function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, onReorder, onMergeBlocks }) {
   const { markForEdit } = useBlockEdit();
+  const { customTypes, saveCustomTypes } = useBlockTypes();
+  const [typeEditor, setTypeEditor] = useState(false);
   // トグルの開閉は見た目の設定なので端末内だけに持つ
   const [collapsed, setCollapsed] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("taskspace-page-collapsed") || "[]")); }
@@ -4589,7 +4842,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
   const ops = useMemo(() => ({
     // Enter: 直下に同じ種類のブロックを作って、そのまま書き続けられるようにする
     enterBlock: (task) => {
-      const kind = blockTypeOf(task);
+      const kind = task.blockType || "task";
       const created = addTask({
         title: "",
         allowEmpty: true,
@@ -4616,7 +4869,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
         plain: true,
         pageId: task.pageId,
         parentId: task.parentId || null,
-        blockType: blockTypeOf(task),
+        blockType: task.blockType || "task",
         afterId: task.id,
         silent: true,
       });
@@ -4689,7 +4942,24 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
         >
           <Plus className="h-3 w-3" /> 新規ページ
         </button>
+
+        <div className="my-2 border-t border-white/10" />
+        <button
+          onClick={() => setTypeEditor(true)}
+          className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          <Settings2 className="h-3 w-3" /> ブロックを作る
+          {customTypes.length > 0 && <span className="ml-auto text-[9px] text-neutral-600">{customTypes.length}</span>}
+        </button>
       </aside>
+
+      {typeEditor && (
+        <BlockTypeEditor
+          customTypes={customTypes}
+          onSave={saveCustomTypes}
+          onClose={() => setTypeEditor(false)}
+        />
+      )}
 
       {/* 本文 */}
       <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-6 py-6">
@@ -4940,6 +5210,7 @@ function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTask
 // 場所は常に確保しておく。出入りで幅が変わると行がガタつくため。
 function BlockGutter({ block, compact, task, onDuplicate }) {
   const slashCtx = useSlash();
+  const { types } = useBlockTypes();
   const [menu, setMenu] = useState(false);
   const grabbed = useRef(false);
 
@@ -4959,13 +5230,13 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
 
   const groups = useMemo(() => {
     const by = new Map();
-    for (const cmd of SLASH_COMMANDS) {
+    for (const cmd of allSlashCommands(types)) {
       const g = cmd.group || "その他";
       if (!by.has(g)) by.set(g, []);
       by.get(g).push(cmd);
     }
     return [...by.entries()];
-  }, []);
+  }, [types]);
 
   return (
     <div className={classNames("relative flex shrink-0 items-center self-start pt-0.5", compact ? "w-[14px]" : "w-[26px]")}>
@@ -5063,10 +5334,11 @@ function TaskBlock({
 }) {
   const b = useTaskBlock(blockOptions);
   const task = blockOptions.task;
-  const kind = blockTypeOf(task);
+  const { types } = useBlockTypes();
+  const kind = blockTypeOf(task, types);
+  const cfg = types[kind];
   // Notion はフォーカス中の空ブロックにだけヒントを出す
   const draftPlaceholder = b.draft ? "" : (b.notionMode ? "「/」でコマンド" : "コマンドは / または ；");
-  const cfg = BLOCK_TYPES[kind];
 
   // 区切り線は本文を持たない。選択とドラッグはできるので行そのものは残す。
   if (kind === "divider") {
@@ -5097,6 +5369,7 @@ function TaskBlock({
         cfg.callout && "border-l-2 border-l-amber-300/50 bg-amber-300/[0.05]",
         cfg.quote && "border-l-2 border-l-current/30 pl-2 opacity-80",
         cfg.code && "rounded border border-white/10 bg-black/30 font-mono",
+        cfg.panelCls,
       )}
     >
       <div className="flex w-full min-w-0 items-start gap-1.5">
@@ -5139,7 +5412,11 @@ function TaskBlock({
                   {...b.titleProps}
                   {...titleAttrs?.(b)}
                   className={titleClassName?.(b)}
-                  style={{ ...b.titleProps.style, ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null) }}
+                  style={{
+                    ...b.titleProps.style,
+                    ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null),
+                    ...(cfg.color ? { color: cfg.color } : null),
+                  }}
                 >
                   {task.title
                     ? (b.notionMode ? renderBlockText(task.title) : task.title)
