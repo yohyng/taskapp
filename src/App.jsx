@@ -157,6 +157,9 @@ const BASE_BLOCK_TYPES = {
 
 // 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
 const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
+// 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
+const BOARD_PAGE_ID = "board-7days";
+
 const CUSTOM_TYPE_PREFIX = "custom:";
 const DEFAULT_CUSTOM_TYPES = [];
 // 面の出し方（枠や帯）の選択肢
@@ -604,9 +607,11 @@ function normalizeTask(task) {
     canvasX: null,
     canvasY: null,
     pageId: null,
-    // 段組み: 同じ rowKey を持つブロックが横に並び、col が左からの位置
+    // 段組み: 同じ rowKey を持つブロックが横に並び、col が左からの位置。
+    // colWidth はその列の取り分（既定 1）。列の全ブロックが同じ値を持つ。
     rowKey: null,
     col: 0,
+    colWidth: null,
     ...task,
   };
 }
@@ -1502,6 +1507,12 @@ function App() {
 
   function commitTasks(updater) {
     commitState((current) => ({ ...current, tasks: typeof updater === "function" ? updater(current.tasks) : updater }));
+  }
+
+  // まとめて書き換える。列の入れ替えや幅の変更は何十個も同時に動くので、
+  // 1個ずつ upsert すると取り消し履歴がその数だけ積まれてしまう。
+  function mapTasks(fn) {
+    commitTasks((prev) => prev.map(fn));
   }
 
   // 起動時に1回だけ: タスクが存在しない孤立 projectRules を永続削除
@@ -2714,6 +2725,27 @@ function App() {
     toggleTask: onToggleSelect,
   }), [selectedIds]);
 
+  // 7days の下の自由ブロック。ページ本文と同じものを、固定の持ち主で置いている。
+  const boardBlocks = (
+    <div className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 sm:px-5">
+      <BlockArea
+        pageId={BOARD_PAGE_ID}
+        tasks={tasks}
+        upsertTask={upsertTask}
+        removeTask={removeTask}
+        toggleDone={toggleDone}
+        setSelectedTaskId={setSelectedTaskId}
+        childrenOf={childrenOf}
+        addTask={addTask}
+        mapTasks={mapTasks}
+        onReorder={swapTaskOrder}
+        onMergeBlocks={mergeBlockInto}
+        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/右に列を足す で段組み。"
+        tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
+      />
+    </div>
+  );
+
   return (
     <BlockTypesContext.Provider value={blockTypesValue}>
     <SelectionContext.Provider value={selectionValue}>
@@ -3087,6 +3119,7 @@ function App() {
             childrenOf={childrenOf}
             addTask={addTask}
             addBlocks={addBlocks}
+            mapTasks={mapTasks}
             onReorder={swapTaskOrder}
             onMergeBlocks={mergeBlockInto}
           />
@@ -3108,6 +3141,7 @@ function App() {
           {(
             <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
               <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
+              {boardBlocks}
             </div>
           )}
           <div
@@ -3360,6 +3394,7 @@ function App() {
               if (key === "7days") return (
                 <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
                   <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
+              {boardBlocks}
                 </div>
               );
               if (key === "calendar") return (
@@ -4968,10 +5003,14 @@ function dashboardTemplate() {
   return [week, [[{ type: "text", text: "" }]], projects];
 }
 
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, onReorder, onMergeBlocks }) {
+// ブロック本文。ページでも 7days の下でも同じものを使う。
+// pageId で持ち主が決まるだけで、中の操作感は Notion のページと同じ。
+function BlockArea({
+  pageId, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf,
+  addTask, mapTasks, onReorder, onMergeBlocks, placeholder = "クリックして書き始める。/ でコマンド。",
+  tailClass = "mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700",
+}) {
   const { markForEdit } = useBlockEdit();
-  const { customTypes, saveCustomTypes } = useBlockTypes();
-  const [typeEditor, setTypeEditor] = useState(false);
   // トグルの開閉は見た目の設定なので端末内だけに持つ
   const [collapsed, setCollapsed] = useState(() => {
     try { return new Set(JSON.parse(localStorage.getItem("taskspace-page-collapsed") || "[]")); }
@@ -4985,21 +5024,13 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       return next;
     });
   }, []);
-  const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
-  const active = pages.find((p) => p.id === activeId) || pages[0];
-  const [iconOpen, setIconOpen] = useState(false);
-
-  useEffect(() => {
-    if (active) localStorage.setItem("taskspace-active-page", active.id);
-  }, [active]);
 
   const blocks = useMemo(() => {
-    if (!active) return [];
     const order = new Map(tasks.map((t, i) => [t.id, i]));
     return tasks
-      .filter((t) => t.pageId === active.id && !t.archived && !t.parentId)
+      .filter((t) => t.pageId === pageId && !t.archived && !t.parentId)
       .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-  }, [tasks, active]);
+  }, [tasks, pageId]);
 
   // 本文を「行 → 列 → ブロック」に組み直す。
   // rowKey を持たないブロックは、それ単独で1行（＝いままで通りの縦並び）。
@@ -5016,10 +5047,12 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       if (!current.byCol.has(c)) current.byCol.set(c, []);
       current.byCol.get(c).push(b);
     }
-    // 列は番号順に並べる
+    // 列は番号順に並べる。番号は飛んでいることがあるので、位置そのものも覚えておく。
     for (const r of out) {
       if (r.single) continue;
-      r.cols = [...r.byCol.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+      const entries = [...r.byCol.entries()].sort((a, b) => a[0] - b[0]);
+      r.colNums = entries.map(([n]) => n);
+      r.cols = entries.map(([, v]) => v);
     }
     return out;
   }, [blocks]);
@@ -5069,7 +5102,154 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       if (!target) return;
       onReorder(task.id, target.id, title);
     },
-  }), [addTask, upsertTask, removeTask, markForEdit, onReorder, onMergeBlocks]);
+  }), [addTask, markForEdit, onReorder, onMergeBlocks]);
+
+  // 列をまるごと左右に差し替える。col の値を2つの列のあいだで入れ替えるだけ。
+  const swapColumns = useCallback((rowKey, a, b) => {
+    mapTasks((t) => {
+      if (t.rowKey !== rowKey) return t;
+      const c = t.col ?? 0;
+      if (c === a) return { ...t, col: b };
+      if (c === b) return { ...t, col: a };
+      return t;
+    });
+  }, [mapTasks]);
+
+  // 列の取り分を変える。列の全ブロックに同じ値を書く。
+  const setColumnWidth = useCallback((rowKey, col, width) => {
+    const w = Math.max(0.3, Math.min(4, width));
+    mapTasks((t) => (t.rowKey === rowKey && (t.col ?? 0) === col ? { ...t, colWidth: w } : t));
+  }, [mapTasks]);
+
+  function addBlockAtEnd() {
+    const last = blocks[blocks.length - 1];
+    if (last && !last.title.trim()) return; // 末尾が空なら増やさない
+    const created = addTask({ title: "", allowEmpty: true, plain: true, pageId, silent: true, afterId: last?.id });
+    if (created) markForEdit?.(created.id);
+  }
+
+  return (
+    <>
+      <div className="flex flex-col">
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            // 段組みは広い画面だけ。狭い画面では縦に積む。
+            className={row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-1 sm:flex-row sm:items-start"}
+          >
+            {row.cols.map((colBlocks, ci) => {
+              const colNum = row.single ? 0 : row.colNums[ci];
+              const width = colBlocks.find((b) => b.colWidth)?.colWidth || 1;
+              return (
+                <div
+                  key={ci}
+                  className="min-w-0"
+                  style={row.single ? undefined : { flexGrow: width, flexBasis: 0, flexShrink: 1 }}
+                >
+                  {!row.single && (
+                    <ColumnBar
+                      first={ci === 0}
+                      last={ci === row.cols.length - 1}
+                      width={width}
+                      onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
+                      onWidth={(w) => setColumnWidth(row.key, colNum, w)}
+                    />
+                  )}
+                  {colBlocks.map((task, i) => (
+                    <PageBlock
+                      key={task.id}
+                      task={task}
+                      depth={0}
+                      idx={blocks.indexOf(task)}
+                      siblings={blocks}
+                      listNumber={numberedIndex(colBlocks, i)}
+                      childrenOf={childrenOf}
+                      upsertTask={upsertTask}
+                      removeTask={removeTask}
+                      toggleDone={toggleDone}
+                      setSelectedTaskId={setSelectedTaskId}
+                      ops={ops}
+                      collapsedSet={collapsed}
+                      onToggleCollapse={toggleCollapse}
+                    />
+                  ))}
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+
+      {/* 本文の下の空き。クリックで末尾にブロックを足す（Notion と同じ） */}
+      <div onClick={addBlockAtEnd} className={tailClass}>
+        {blocks.length === 0 && placeholder}
+      </div>
+    </>
+  );
+}
+
+// 列の頭に出る操作帯。ふだんは見えず、行にさわると現れる。
+function ColumnBar({ first, last, width, onMove, onWidth }) {
+  const drag = useRef(null);
+
+  function onPointerDown(e) {
+    if (e.button !== 0) return;
+    const row = e.currentTarget.closest("[data-col]")?.parentElement;
+    drag.current = { id: e.pointerId, x: e.clientX, w: width, span: row?.getBoundingClientRect().width || 600 };
+    e.currentTarget.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  }
+  function onPointerMove(e) {
+    const d = drag.current;
+    if (!d || d.id !== e.pointerId) return;
+    // 行全体の幅に対する割合で動かす。取り分はおおよそ 0.1 刻みにまるめる。
+    const delta = ((e.clientX - d.x) / d.span) * 4;
+    onWidth(Math.round((d.w + delta) * 10) / 10);
+  }
+  function onPointerUp() { drag.current = null; }
+
+  return (
+    <div data-col className="hidden h-4 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 sm:flex">
+      <button
+        disabled={first}
+        onClick={() => onMove(-1)}
+        title="この列を左へ"
+        className="rounded p-0.5 text-neutral-600 transition hover:bg-white/10 hover:text-neutral-200 disabled:invisible"
+      >
+        <ChevronLeft className="h-3 w-3" />
+      </button>
+      <button
+        disabled={last}
+        onClick={() => onMove(1)}
+        title="この列を右へ"
+        className="rounded p-0.5 text-neutral-600 transition hover:bg-white/10 hover:text-neutral-200 disabled:invisible"
+      >
+        <ChevronRight className="h-3 w-3" />
+      </button>
+      <span
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onDoubleClick={() => onWidth(1)}
+        title="ドラッグで幅を変える／ダブルクリックで戻す"
+        className="ml-auto cursor-col-resize select-none px-1 text-[9px] leading-none text-neutral-700 transition hover:text-neutral-300"
+      >
+        {width === 1 ? "⇔" : `⇔ ${width}`}
+      </span>
+    </div>
+  );
+}
+
+function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, mapTasks, onReorder, onMergeBlocks }) {
+  const { customTypes, saveCustomTypes } = useBlockTypes();
+  const [typeEditor, setTypeEditor] = useState(false);
+  const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
+  const active = pages.find((p) => p.id === activeId) || pages[0];
+  const [iconOpen, setIconOpen] = useState(false);
+
+  useEffect(() => {
+    if (active) localStorage.setItem("taskspace-active-page", active.id);
+  }, [active]);
 
   function addPage({ title = "無題のページ", icon, rows, fullWidth = false } = {}) {
     const page = { id: `page-${uid()}`, title, icon: icon || PAGE_ICONS[pages.length % PAGE_ICONS.length], fullWidth };
@@ -5084,13 +5264,6 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
     tasks.filter((t) => t.pageId === id).forEach((t) => removeTask(t.id));
     onPagesChange(pages.filter((p) => p.id !== id));
     if (activeId === id) setActiveId(pages.find((p) => p.id !== id).id);
-  }
-
-  function addBlockAtEnd() {
-    const last = blocks[blocks.length - 1];
-    if (last && !last.title.trim()) return; // 末尾が空なら増やさない
-    const created = addTask({ title: "", allowEmpty: true, plain: true, pageId: active.id, silent: true, afterId: last?.id });
-    if (created) markForEdit?.(created.id);
   }
 
   if (!active) return null;
@@ -5190,46 +5363,19 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             </button>
           </div>
 
-          <div className="flex flex-col">
-            {rows.map((row) => (
-              <div
-                key={row.key}
-                // 段組みは広い画面だけ。狭い画面では縦に積む。
-                className={row.single ? undefined : "flex flex-col gap-x-5 gap-y-1 sm:flex-row sm:items-start"}
-              >
-                {row.cols.map((colBlocks, ci) => (
-                  <div key={ci} className="min-w-0 flex-1">
-                    {colBlocks.map((task, i) => (
-                      <PageBlock
-                        key={task.id}
-                        task={task}
-                        depth={0}
-                        idx={blocks.indexOf(task)}
-                        siblings={blocks}
-                        listNumber={numberedIndex(colBlocks, i)}
-                        childrenOf={childrenOf}
-                        upsertTask={upsertTask}
-                        removeTask={removeTask}
-                        toggleDone={toggleDone}
-                        setSelectedTaskId={setSelectedTaskId}
-                        ops={ops}
-                        collapsedSet={collapsed}
-                        onToggleCollapse={toggleCollapse}
-                      />
-                    ))}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-
-          {/* 本文の下の空き。クリックで末尾にブロックを足す（Notion と同じ） */}
-          <div
-            onClick={addBlockAtEnd}
-            className="mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700"
-          >
-            {blocks.length === 0 && "クリックして書き始める。/ でコマンド。"}
-          </div>
+          <BlockArea
+            pageId={active.id}
+            tasks={tasks}
+            upsertTask={upsertTask}
+            removeTask={removeTask}
+            toggleDone={toggleDone}
+            setSelectedTaskId={setSelectedTaskId}
+            childrenOf={childrenOf}
+            addTask={addTask}
+            mapTasks={mapTasks}
+            onReorder={onReorder}
+            onMergeBlocks={onMergeBlocks}
+          />
         </div>
       </div>
     </div>

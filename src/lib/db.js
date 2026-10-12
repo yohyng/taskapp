@@ -14,6 +14,7 @@ const OPTIONAL_TASK_COLUMNS = {
   page_id: { note: 'どのページに書かれたブロックか' },
   row_key: { note: '段組みの行' },
   col_index: { note: '段組みの列位置' },
+  col_width: { note: '段組みの列幅（取り分）' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -52,6 +53,7 @@ function taskToRow(t) {
   if (optionalColumnSupported.page_id) row.page_id = t.pageId ?? null
   if (optionalColumnSupported.row_key) row.row_key = t.rowKey ?? null
   if (optionalColumnSupported.col_index) row.col_index = t.col ?? 0
+  if (optionalColumnSupported.col_width) row.col_width = t.colWidth ?? null
   return {
     ...row,
     id: t.id,
@@ -106,6 +108,7 @@ export function rowToTask(r) {
     pageId: r.page_id ?? null,
     rowKey: r.row_key ?? null,
     col: r.col_index ?? 0,
+    colWidth: r.col_width ?? null,
   }
 }
 

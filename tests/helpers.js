@@ -82,6 +82,23 @@ export const test = base.extend({
     // どのテストでも未捕捉の例外は失敗扱いにする
     expect(errors, "コンソールに未捕捉の例外").toEqual([]);
   },
+
+  // 既定の seedData ではなく、そのテスト専用の状態から始めたいとき。
+  // page フィクスチャの初期スクリプトは読み込みのたびに走るので、
+  // そのあとに走るスクリプトを足して上書きしてから読み直す。
+  seed: async ({ page }, use) => {
+    await use(async (data) => {
+      await page.addInitScript(
+        ([key, d]) => {
+          const raw = JSON.parse(localStorage.getItem(key) || "{}");
+          localStorage.setItem(key, JSON.stringify({ ...raw, ...d }));
+        },
+        [STORAGE_KEY, data]
+      );
+      await page.reload();
+      await page.waitForSelector("[data-task-id]");
+    });
+  },
 });
 
 export { expect };
