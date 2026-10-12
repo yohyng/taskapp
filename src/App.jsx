@@ -910,8 +910,10 @@ function App() {
   const [selectedTrayIds, setSelectedTrayIds] = useState(new Set());
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 6 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 150, tolerance: 8 } });
-  const sensors = useSensors(mouseSensor, ...(selectMode ? [touchSensor] : []));
+  // 指でも動かせるようにする。長押ししてから運ぶ形にしないと、
+  // 画面を縦にスクロールするつもりがブロックを掴んでしまう。
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 260, tolerance: 10 } });
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   function handleDragStart({ active }) {
     setActiveDrag(active.data.current || null);
@@ -2978,11 +2980,11 @@ function App() {
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">⚡ Task Space</h1>
-            <span className="text-[11px] text-neutral-500">v{__APP_VERSION__}</span>
+            <h1 className="text-base font-semibold tracking-tight sm:text-xl">⚡ Task Space</h1>
+            <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
           </div>
 
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="flex w-full flex-wrap items-center justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             {quickAddOpen ? (
               <form onSubmit={(e) => {
                 e.preventDefault();
@@ -4948,6 +4950,7 @@ function useTaskBlock({
       autoResize(e.target);
       sq.detect(v, e.target.selectionStart);
     },
+    "data-block-input": true,
     onKeyDown: onTextareaKeyDown,
     onSelect: syncMarkBar,
     onClick: (e) => { e.stopPropagation(); syncMarkBar(); },
@@ -5798,9 +5801,11 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
     <div className="flex flex-col gap-3 sm:flex-row" style={{ minHeight: "calc(100vh - 150px)" }}>
       {/* ページ一覧。狭い画面では本文の上に横並びで畳む */}
       <aside className="w-full shrink-0 rounded-lg border border-white/10 bg-white/[0.02] p-2 sm:w-48">
-        <div className="mb-1 px-1 text-[10px] font-semibold text-neutral-500">ページ</div>
+        <div className="mb-1 hidden px-1 text-[10px] font-semibold text-neutral-500 sm:block">ページ</div>
+        {/* 狭い画面では横一列に流す。縦に積むと、本文にたどり着く前に画面が埋まる。 */}
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:block sm:overflow-visible sm:pb-0">
         {pages.map((p) => (
-          <div key={p.id} className="group/pg flex items-center gap-1">
+          <div key={p.id} className="group/pg flex shrink-0 items-center gap-1 sm:shrink">
             <button
               onClick={() => setActiveId(p.id)}
               className={classNames(
@@ -5814,7 +5819,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             <button
               onClick={() => movePage(p.id, -1)}
               title="上へ"
-              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 disabled:invisible"
+              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block disabled:invisible"
               disabled={pages[0]?.id === p.id}
             >
               <ChevronUp className="h-3 w-3" />
@@ -5822,7 +5827,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             <button
               onClick={() => movePage(p.id, 1)}
               title="下へ"
-              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 disabled:invisible"
+              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block disabled:invisible"
               disabled={pages[pages.length - 1]?.id === p.id}
             >
               <ChevronDown className="h-3 w-3" />
@@ -5830,7 +5835,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
             <button
               onClick={() => duplicatePage(p.id)}
               title="このページを複製"
-              className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100"
+              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block"
             >
               <Copy className="h-3 w-3" />
             </button>
@@ -5838,7 +5843,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
               <button
                 onClick={() => removePage(p.id)}
                 title="このページを削除（中身も消えます）"
-                className="shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-red-300 group-hover/pg:opacity-100"
+                className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-red-300 group-hover/pg:opacity-100 sm:block"
               >
                 <Trash2 className="h-3 w-3" />
               </button>
@@ -5847,26 +5852,27 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
         ))}
         <button
           onClick={() => addPage()}
-          className="mt-1 flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+          className="mt-0 flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:mt-1 sm:w-full"
         >
           <Plus className="h-3 w-3" /> 新規ページ
         </button>
         <button
           onClick={() => addPage({ title: "Task", icon: "⚡", rows: dashboardTemplate(), fullWidth: true })}
           title="曜日とプロジェクトの段組みが入った状態で作る"
-          className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:w-full"
         >
           <LayoutGrid className="h-3 w-3" /> ダッシュボード
         </button>
 
-        <div className="my-2 border-t border-white/10" />
+        <div className="my-2 hidden border-t border-white/10 sm:block" />
         <button
           onClick={() => setTypeEditor(true)}
-          className="flex w-full items-center gap-1 rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:w-full"
         >
           <Settings2 className="h-3 w-3" /> ブロックを作る
           {customTypes.length > 0 && <span className="ml-auto text-[9px] text-neutral-600">{customTypes.length}</span>}
         </button>
+        </div>
       </aside>
 
       {typeEditor && (
@@ -5901,7 +5907,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
               value={active.title}
               onChange={(e) => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, title: e.target.value } : p))}
               placeholder="無題"
-              className="min-w-0 flex-1 bg-transparent text-3xl font-bold tracking-tight ts-text outline-none placeholder:text-neutral-700"
+              className="min-w-0 flex-1 bg-transparent text-2xl font-bold tracking-tight ts-text outline-none placeholder:text-neutral-700 sm:text-3xl"
             />
             <button
               onClick={() => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, fullWidth: !p.fullWidth } : p))}
@@ -6197,7 +6203,7 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
       {/* 薄く出すのはアイコンだけ。メニューまで透けると下の文字と重なって読めない。 */}
       <div
         className={classNames(
-          "flex items-center transition group-hover/block:opacity-60 focus-within:opacity-60",
+          "ts-gutter flex items-center transition group-hover/block:opacity-60 focus-within:opacity-60",
           menu ? "opacity-60" : "opacity-0",
         )}
       >
@@ -7762,7 +7768,9 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       ref={setNodeRef}
       className={classNames(
         "flex flex-col rounded-md p-1 transition",
-        stacked ? "min-h-[120px] md:min-h-[200px]" : "min-h-[160px] md:min-h-[420px]",
+        // 狭い画面では空の曜日に高さを取らせない。縦に積むので、
+        // 1日あたり160pxもあると何も無い日を延々とスクロールすることになる。
+        stacked ? "min-h-0 sm:min-h-[120px] md:min-h-[200px]" : "min-h-0 sm:min-h-[160px] md:min-h-[420px]",
         isOver ? "bg-white/[0.06]" : "bg-transparent",
       )}
     >

@@ -66,3 +66,34 @@ body {
   color: var(--ts-text);
 }
 
+
+/* ── 指で触る機械むけ ──────────────────────────────
+   マウスが無い＝ホバーが無いので、ホバー前提の作りがそのままだと
+   触れないものになる。ここでまとめて面倒を見る。 */
+
+/* 上の帯のボタン。小さいと狙えない（Apple の目安は44pt） */
+@media (pointer: coarse) {
+  header button {
+    min-height: 40px;
+    min-width: 40px;
+  }
+  /* ページの帯も指で押す。文字だけの行は薄くて狙いにくい。 */
+  aside button {
+    min-height: 36px;
+  }
+}
+
+/* 本文の編集欄。16px を下回ると iOS Safari が勝手に拡大する */
+@media (pointer: coarse) {
+  textarea[data-block-input] {
+    font-size: 16px;
+  }
+}
+
+/* ⠿ と + はホバーで出していたので、触る機械では一生出てこない。
+   薄く出しっぱなしにする。 */
+@media (hover: none) {
+  .ts-gutter {
+    opacity: 0.45 !important;
+  }
+}
