@@ -979,6 +979,19 @@ function App() {
       return pointerY > midY;
     }
 
+    // 落とした相手の左端／右端なら、そこに新しい列を起こす（Notion と同じ）。
+    // 真ん中なら 0 を返して、ふつうの並べ替えに任せる。
+    function dropSide() {
+      if (!over.rect) return 0;
+      const r = over.rect;
+      const d = active.rect?.current?.translated;
+      const x = d ? d.left + d.width / 2 : r.left + r.width / 2;
+      const edge = Math.min(r.width * 0.3, 140);
+      if (x < r.left + edge) return -1;
+      if (x > r.right - edge) return 1;
+      return 0;
+    }
+
     // Column header reorder
     if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
       moveColumn(src.key, dst.key);
@@ -1164,7 +1177,13 @@ function App() {
     // Tray item dropped into tray drop zone
     // ページ内のブロック並べ替え。落とした相手の上半分なら前、下半分なら後ろ。
     if (src.type === "task" && dst.type === "page-block" && src.id !== dst.id) {
-      movePageBlock(src.id, dst.id, isBottomHalf());
+      const side = dropSide();
+      if (side) {
+        movePageBlockToNewColumn(src.id, dst.id, side);
+        setToast(side < 0 ? "左に列を作りました" : "右に列を作りました");
+      } else {
+        movePageBlock(src.id, dst.id, isBottomHalf());
+      }
       return;
     }
 
@@ -1595,7 +1614,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false, rowKey = null, col = 0 }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false, rowKey = null, col = 0, colWidth = null }) {
     const clean = normalizeTitle(title);
     // ページ本文は空のブロックも成立する（Notion と同じ）
     if (!clean && !allowEmpty) return null;
@@ -1621,6 +1640,7 @@ function App() {
       blockType,
       rowKey,
       col,
+      colWidth,
     });
     commitTasks((prev) => {
       if (afterId) {
@@ -2449,9 +2469,53 @@ function App() {
       const rest = prev.filter((t) => t.id !== id);
       const to = rest.findIndex((t) => t.id === targetId);
       if (to < 0) return prev;
-      // 落とした相手と同じ階層に揃える
+      // 落とした相手と同じ階層・同じ列に揃える。
+      // 列を引き継がないと、相手の列に入ったつもりで段組みから外れる。
+      const target = rest[to];
       const next = [...rest];
-      next.splice(after ? to + 1 : to, 0, { ...moved, parentId: rest[to].parentId ?? null });
+      next.splice(after ? to + 1 : to, 0, {
+        ...moved,
+        parentId: target.parentId ?? null,
+        rowKey: target.rowKey ?? null,
+        col: target.col ?? 0,
+        colWidth: target.colWidth ?? null,
+      });
+      return next;
+    });
+  }
+
+  // ブロックを相手の左右に落として、新しい列を起こす。
+  // 相手がまだ単独の行なら、そこを起点に段組みを始める。
+  function movePageBlockToNewColumn(id, targetId, dir) {
+    commitTasks((prev) => {
+      const moved = prev.find((t) => t.id === id);
+      const target = prev.find((t) => t.id === targetId);
+      if (!moved || !target || id === targetId) return prev;
+
+      const rowKey = target.rowKey || `row-${uid()}`;
+      const base = target.rowKey ? (target.col ?? 0) : 0;
+      const placed = {
+        ...moved,
+        parentId: null,
+        rowKey,
+        col: base + dir,
+        colWidth: null,
+      };
+
+      const rest = prev.filter((t) => t.id !== id).map((t) => {
+        if (t.id === targetId) return { ...t, rowKey, col: base };
+        if (t.rowKey !== rowKey) return t;
+        // 割り込む側に合わせて、既存の列に番号を空ける。
+        // 相手と同じ列（c === base）は動かさない。動かすと相手だけ取り残される。
+        const c = t.col ?? 0;
+        if (dir < 0 && c < base) return { ...t, col: c - 1 };
+        if (dir > 0 && c > base) return { ...t, col: c + 1 };
+        return t;
+      });
+
+      const to = rest.findIndex((t) => t.id === targetId);
+      const next = [...rest];
+      next.splice(dir < 0 ? to : to + 1, 0, placed);
       return next;
     });
   }
@@ -2674,10 +2738,11 @@ function App() {
       commitTasks((prev) => prev.map((t) => {
         if (t.id === task.id) return { ...t, rowKey, col: base };
         if (created && t.id === created.id) return { ...t, rowKey, col: base + dir };
-        // 同じ行の既存の列は、割り込む側に合わせてずらす
+        // 同じ行の既存の列は、割り込む側に合わせてずらす。
+        // 起点と同じ列（c === base）は動かさない。動かすと起点だけ取り残される。
         if (t.rowKey === rowKey && t.id !== task.id) {
           const c = t.col ?? 0;
-          if (dir < 0 && c <= base) return { ...t, col: c - 1 };
+          if (dir < 0 && c < base) return { ...t, col: c - 1 };
           if (dir > 0 && c > base) return { ...t, col: c + 1 };
         }
         return t;
@@ -4886,7 +4951,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           b.focusRingClass,
           b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
           b.isDragging && "opacity-30",
-          b.isOver && "ring-1 ring-inset ring-white/20",
+          // 左右の端に細い印を出して「端に落とすと列になる」と分かるようにする
+          b.isOver && "ring-1 ring-inset ring-white/20 [box-shadow:inset_3px_0_0_rgba(96,165,250,.55),inset_-3px_0_0_rgba(96,165,250,.55)]",
         )}
         textareaClassName={() => "w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
@@ -5035,12 +5101,16 @@ function BlockArea({
   // 本文を「行 → 列 → ブロック」に組み直す。
   // rowKey を持たないブロックは、それ単独で1行（＝いままで通りの縦並び）。
   const rows = useMemo(() => {
+    // 同じ rowKey は、配列の上で離れていてもひとつの行に束ねる。
+    // 並べ替えで間に別のブロックが入っても段組みが割れないように。
     const out = [];
-    let current = null;
+    const byKey = new Map();
     for (const b of blocks) {
-      if (!b.rowKey) { out.push({ key: b.id, single: true, cols: [[b]] }); current = null; continue; }
-      if (!current || current.key !== b.rowKey) {
+      if (!b.rowKey) { out.push({ key: b.id, single: true, cols: [[b]] }); continue; }
+      let current = byKey.get(b.rowKey);
+      if (!current) {
         current = { key: b.rowKey, single: false, byCol: new Map() };
+        byKey.set(b.rowKey, current);
         out.push(current);
       }
       const c = b.col ?? 0;
@@ -5071,6 +5141,11 @@ function BlockArea({
         blockType: kind === "heading1" || kind === "heading2" || kind === "heading3" || kind === "callout" || kind === "quote" ? "text" : kind,
         afterId: task.id,
         silent: true,
+        // 段組みの中で改行したら、同じ列に留まる。
+        // ここを落とすと行から外れ、段組みが割れる。
+        rowKey: task.rowKey || null,
+        col: task.col ?? 0,
+        colWidth: task.colWidth ?? null,
       });
       if (created) markForEdit?.(created.id);
     },
@@ -5091,6 +5166,9 @@ function BlockArea({
         blockType: task.blockType || "task",
         afterId: task.id,
         silent: true,
+        rowKey: task.rowKey || null,
+        col: task.col ?? 0,
+        colWidth: task.colWidth ?? null,
       });
       // 複製は編集状態で開かない。開くと空のドラフトが自動保存で
       // 複製した中身を上書きしてしまう（Notion も開かない）。
