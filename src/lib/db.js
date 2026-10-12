@@ -12,6 +12,8 @@ const OPTIONAL_TASK_COLUMNS = {
   canvas_x: { note: 'キャンバス上の位置' },
   canvas_y: { note: 'キャンバス上の位置' },
   page_id: { note: 'どのページに書かれたブロックか' },
+  row_key: { note: '段組みの行' },
+  col_index: { note: '段組みの列位置' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -48,6 +50,8 @@ function taskToRow(t) {
   if (optionalColumnSupported.canvas_x) row.canvas_x = t.canvasX ?? null
   if (optionalColumnSupported.canvas_y) row.canvas_y = t.canvasY ?? null
   if (optionalColumnSupported.page_id) row.page_id = t.pageId ?? null
+  if (optionalColumnSupported.row_key) row.row_key = t.rowKey ?? null
+  if (optionalColumnSupported.col_index) row.col_index = t.col ?? 0
   return {
     ...row,
     id: t.id,
@@ -100,6 +104,8 @@ export function rowToTask(r) {
     canvasX: r.canvas_x ?? null,
     canvasY: r.canvas_y ?? null,
     pageId: r.page_id ?? null,
+    rowKey: r.row_key ?? null,
+    col: r.col_index ?? 0,
   }
 }
 

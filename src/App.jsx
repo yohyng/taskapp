@@ -251,6 +251,18 @@ const SLASH_COMMANDS = [
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
   },
   {
+    key: "col-right", group: "段組み", label: "右に列を足す", hint: "横に並べる", keywords: "column 段組み 列 横 right",
+    run: ({ task, ctx }) => ctx.addColumn(task, 1),
+  },
+  {
+    key: "col-left", group: "段組み", label: "左に列を足す", hint: "横に並べる", keywords: "column 段組み 列 横 left",
+    run: ({ task, ctx }) => ctx.addColumn(task, -1),
+  },
+  {
+    key: "col-clear", group: "段組み", label: "段組みをやめる", hint: "縦に戻す", keywords: "column 段組み 解除 縦",
+    run: ({ task, ctx }) => ctx.clearColumns(task),
+  },
+  {
     key: "to-canvas", group: "予定", label: "キャンバスへ", hint: "自由配置に置く", keywords: "canvas キャンバス 配置",
     run: ({ task, ctx }) => ctx.placeOnCanvas(task),
   },
@@ -590,6 +602,9 @@ function normalizeTask(task) {
     canvasX: null,
     canvasY: null,
     pageId: null,
+    // 段組み: 同じ rowKey を持つブロックが横に並び、col が左からの位置
+    rowKey: null,
+    col: 0,
     ...task,
   };
 }
@@ -1567,7 +1582,7 @@ function App() {
     commitTasks((prev) => prev.map((task) => (task.id === resolved.id ? normalizeTask({ ...task, ...resolved }) : task)));
   }
 
-  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false }) {
+  function addTask({ title, category, project, parentId = null, thisWeek = false, today = false, dueDate = "", plain = false, select = false, scheduledDate = "", afterId = null, silent = false, canvasX = null, canvasY = null, pageId = null, blockType = "task", allowEmpty = false, rowKey = null, col = 0 }) {
     const clean = normalizeTitle(title);
     // ページ本文は空のブロックも成立する（Notion と同じ）
     if (!clean && !allowEmpty) return null;
@@ -1591,6 +1606,8 @@ function App() {
       canvasY,
       pageId,
       blockType,
+      rowKey,
+      col,
     });
     commitTasks((prev) => {
       if (afterId) {
@@ -2596,6 +2613,36 @@ function App() {
     removeTask,
     toggleDone,
     defaultStockViewId: stockViews[0]?.id,
+    // 段組み: このブロックの横に新しい列を作る。
+    // 行は rowKey で束ねるので、まだ単独ならこのブロックを起点に行を起こす。
+    addColumn: (task, dir) => {
+      const rowKey = task.rowKey || `row-${uid()}`;
+      const base = task.rowKey ? (task.col ?? 0) : 0;
+      const created = addTask({
+        title: "", allowEmpty: true, plain: true, silent: true,
+        pageId: task.pageId, blockType: "text",
+        afterId: task.id,
+      });
+      commitTasks((prev) => prev.map((t) => {
+        if (t.id === task.id) return { ...t, rowKey, col: base };
+        if (created && t.id === created.id) return { ...t, rowKey, col: base + dir };
+        // 同じ行の既存の列は、割り込む側に合わせてずらす
+        if (t.rowKey === rowKey && t.id !== task.id) {
+          const c = t.col ?? 0;
+          if (dir < 0 && c <= base) return { ...t, col: c - 1 };
+          if (dir > 0 && c > base) return { ...t, col: c + 1 };
+        }
+        return t;
+      }));
+      // 足した列にそのまま書けるようにする
+      if (created) setPendingEditId(created.id);
+    },
+    clearColumns: (task) => {
+      if (!task.rowKey) return;
+      commitTasks((prev) => prev.map((t) =>
+        t.rowKey === task.rowKey ? { ...t, rowKey: null, col: 0 } : t));
+    },
+
     // キャンバスに置く。重ならないよう、既にある分だけ少しずらす。
     placeOnCanvas: (task) => {
       const n = tasks.filter((t) => t.canvasX != null).length;
@@ -2618,6 +2665,8 @@ function App() {
     removeTask: (...a) => slashHandlers.current.removeTask(...a),
     toggleDone: (...a) => slashHandlers.current.toggleDone(...a),
     setBlockType: (...a) => slashHandlers.current.setBlockType(...a),
+    addColumn: (...a) => slashHandlers.current.addColumn(...a),
+    clearColumns: (...a) => slashHandlers.current.clearColumns(...a),
     placeOnCanvas: (...a) => slashHandlers.current.placeOnCanvas(...a),
     setStyle: (...a) => slashHandlers.current.setStyle(...a),
     get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
@@ -4838,6 +4887,29 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
   }, [tasks, active]);
 
+  // 本文を「行 → 列 → ブロック」に組み直す。
+  // rowKey を持たないブロックは、それ単独で1行（＝いままで通りの縦並び）。
+  const rows = useMemo(() => {
+    const out = [];
+    let current = null;
+    for (const b of blocks) {
+      if (!b.rowKey) { out.push({ key: b.id, single: true, cols: [[b]] }); current = null; continue; }
+      if (!current || current.key !== b.rowKey) {
+        current = { key: b.rowKey, single: false, byCol: new Map() };
+        out.push(current);
+      }
+      const c = b.col ?? 0;
+      if (!current.byCol.has(c)) current.byCol.set(c, []);
+      current.byCol.get(c).push(b);
+    }
+    // 列は番号順に並べる
+    for (const r of out) {
+      if (r.single) continue;
+      r.cols = [...r.byCol.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+    }
+    return out;
+  }, [blocks]);
+
   // Notion のブロック操作。並びは tasks の配列順なので、入れ替えもそこを動かす。
   const ops = useMemo(() => ({
     // Enter: 直下に同じ種類のブロックを作って、そのまま書き続けられるようにする
@@ -4909,9 +4981,9 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
   if (!active) return null;
 
   return (
-    <div className="flex gap-3" style={{ minHeight: "calc(100vh - 150px)" }}>
-      {/* ページ一覧 */}
-      <aside className="w-48 shrink-0 rounded-lg border border-white/10 bg-white/[0.02] p-2">
+    <div className="flex flex-col gap-3 sm:flex-row" style={{ minHeight: "calc(100vh - 150px)" }}>
+      {/* ページ一覧。狭い画面では本文の上に横並びで畳む */}
+      <aside className="w-full shrink-0 rounded-lg border border-white/10 bg-white/[0.02] p-2 sm:w-48">
         <div className="mb-1 px-1 text-[10px] font-semibold text-neutral-500">ページ</div>
         {pages.map((p) => (
           <div key={p.id} className="group/pg flex items-center gap-1">
@@ -4962,7 +5034,7 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
       )}
 
       {/* 本文 */}
-      <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-6 py-6">
+      <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-6 sm:px-6">
         <div className="mx-auto max-w-2xl">
           <div className="mb-4 flex items-start gap-2">
             <div className="relative">
@@ -4990,23 +5062,35 @@ function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggle
           </div>
 
           <div className="flex flex-col">
-            {blocks.map((task, i) => (
-              <PageBlock
-                key={task.id}
-                task={task}
-                depth={0}
-                idx={i}
-                siblings={blocks}
-                listNumber={numberedIndex(blocks, i)}
-                childrenOf={childrenOf}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                setSelectedTaskId={setSelectedTaskId}
-                ops={ops}
-                collapsedSet={collapsed}
-                onToggleCollapse={toggleCollapse}
-              />
+            {rows.map((row) => (
+              <div
+                key={row.key}
+                // 段組みは広い画面だけ。狭い画面では縦に積む。
+                className={row.single ? undefined : "flex flex-col gap-x-5 gap-y-1 sm:flex-row sm:items-start"}
+              >
+                {row.cols.map((colBlocks, ci) => (
+                  <div key={ci} className="min-w-0 flex-1">
+                    {colBlocks.map((task, i) => (
+                      <PageBlock
+                        key={task.id}
+                        task={task}
+                        depth={0}
+                        idx={blocks.indexOf(task)}
+                        siblings={blocks}
+                        listNumber={numberedIndex(colBlocks, i)}
+                        childrenOf={childrenOf}
+                        upsertTask={upsertTask}
+                        removeTask={removeTask}
+                        toggleDone={toggleDone}
+                        setSelectedTaskId={setSelectedTaskId}
+                        ops={ops}
+                        collapsedSet={collapsed}
+                        onToggleCollapse={toggleCollapse}
+                      />
+                    ))}
+                  </div>
+                ))}
+              </div>
             ))}
           </div>
 
