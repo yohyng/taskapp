@@ -624,13 +624,13 @@ function useFocusMode() {
 
 // 選択状態。7days は SevenDayView→DayColumn→DayProjectGroup→DayTask と深いので
 // props ではなく Context で配る。
-const SelectionContext = React.createContext({ selectedIds: null, toggleTask: null });
+const SelectionContext = React.createContext({ selectedIds: null, toggleTask: null, selectRange: null, noteAnchor: null, selectMany: null });
 function useSelection() {
   return React.useContext(SelectionContext);
 }
 
 // Notion 風のブロック入力。Enter で下に新規ブロック、その直後に編集状態へ入る。
-const BlockEditContext = React.createContext({ addBlockBelow: null, markForEdit: null, pendingEditId: null, claimPendingEdit: null });
+const BlockEditContext = React.createContext({ addBlockBelow: null, markForEdit: null, pendingEditId: null, claimPendingEdit: null, pendingKeepsText: null });
 function useBlockEdit() {
   return React.useContext(BlockEditContext);
 }
@@ -699,6 +699,16 @@ function useSlash() {
 }
 
 // DOM 順で前後のブロックへフォーカスを移す（全ビュー共通で data-task-id を持つ）
+// 画面に並んでいる順で隣のブロックを探す。段組みがあるので、
+// 配列の順ではなく DOM の順で見るのが正しい。
+function adjacentBlockId(fromEl, dir) {
+  if (!fromEl) return null;
+  const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
+  const i = all.indexOf(fromEl);
+  if (i === -1) return null;
+  return all[i + dir]?.getAttribute("data-task-id") || null;
+}
+
 function focusAdjacentBlock(fromEl, dir) {
   const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
   const i = all.indexOf(fromEl);
@@ -2339,13 +2349,31 @@ function App() {
     setShowMovePanel(false);
   }
 
+  // Shift+クリックの起点。最後にひとりで選んだところから数える。
+  const selectAnchorRef = useRef(null);
+
   function onToggleSelect(id) {
+    selectAnchorRef.current = id;
     setSelectedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
       return next;
     });
+  }
+
+  // Shift+クリック: 起点からここまでをまとめて選ぶ。
+  // 段組みがあるので、並び順は配列ではなく画面の並びで見る。
+  function onSelectRange(id) {
+    const anchor = selectAnchorRef.current;
+    if (!anchor || anchor === id) { onToggleSelect(id); return; }
+    const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"))
+      .map((el) => el.getAttribute("data-task-id"));
+    const a = all.indexOf(anchor);
+    const z = all.indexOf(id);
+    if (a < 0 || z < 0) { onToggleSelect(id); return; }
+    const [from, to] = a < z ? [a, z] : [z, a];
+    setSelectedIds(new Set(all.slice(from, to + 1)));
   }
 
   function onToggleTraySelect(id) {
@@ -2718,10 +2746,18 @@ function App() {
   // 7days と TRAY の両方に出る）、新規ブロックの編集は先に名乗った1つだけに渡す。
   // 2つ開くと、片方が blur したときに「空なので削除」が走ってブロックごと消える。
   const pendingClaimRef = useRef(null);
+  const pendingKeepTextRef = useRef(false);
   const blockEditValue = useMemo(() => ({
     addBlockBelow,
     // 自分で作ったブロックを編集状態で開きたいとき（ページの末尾追加など）
-    markForEdit: (id) => { pendingClaimRef.current = null; setPendingEditId(id); },
+    // keepText: すでに中身のあるブロックを開くとき（↑↓ で移ってきたときなど）。
+    // 既定は空で開く＝Enter で作ったばかりの空ブロック向け。
+    markForEdit: (id, keepText = false) => {
+      pendingClaimRef.current = null;
+      pendingKeepTextRef.current = !!keepText;
+      setPendingEditId(id);
+    },
+    pendingKeepsText: () => pendingKeepTextRef.current,
     pendingEditId,
     claimPendingEdit: (id) => {
       if (pendingEditId !== id || pendingClaimRef.current === id) return false;
@@ -2821,6 +2857,10 @@ function App() {
   const selectionValue = useMemo(() => ({
     selectedIds,
     toggleTask: onToggleSelect,
+    selectRange: onSelectRange,
+    // 書いているところを Shift+クリックの起点として覚えておく
+    noteAnchor: (id) => { selectAnchorRef.current = id; },
+    selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
   // 7days の下の自由ブロック。ページ本文と同じものを、固定の持ち主で置いている。
@@ -4392,8 +4432,8 @@ function useTaskBlock({
   onDuplicate,    // Cmd+D: ブロックを複製する
 }) {
   const { focusPickMode, pickTask } = useFocusMode();
-  const { addBlockBelow, pendingEditId, claimPendingEdit } = useBlockEdit();
-  const { selectedIds, toggleTask } = useSelection();
+  const { addBlockBelow, markForEdit, pendingEditId, claimPendingEdit, pendingKeepsText } = useBlockEdit();
+  const { selectedIds, toggleTask, selectRange, noteAnchor, selectMany } = useSelection();
   const slashCtx = useSlash();
   const { types } = useBlockTypes();
   const commands = useMemo(() => allSlashCommands(types), [types]);
@@ -4448,7 +4488,9 @@ function useTaskBlock({
     if (pendingEditId !== task.id) return;
     if (!claimPendingEdit?.(task.id)) return;
     setEditing(true);
-    setDraft("");
+    // 既定は空（Enter で作ったばかりのブロック）。中身のあるブロックを
+    // 開くときだけ保つ。無条件に空にすると自動保存が中身を消す。
+    setDraft(pendingKeepsText?.() ? (task.title || "") : "");
   }, [pendingEditId, task.id]);
 
   useEffect(() => {
@@ -4506,7 +4548,15 @@ function useTaskBlock({
     }
     if (e.key === "ArrowUp" || e.key === "ArrowDown") {
       e.preventDefault();
-      focusAdjacentBlock(e.currentTarget, e.key === "ArrowUp" ? -1 : 1);
+      const dir = e.key === "ArrowUp" ? -1 : 1;
+      const next = focusAdjacentBlock(e.currentTarget, dir);
+      // 選んだ状態のまま動かすときは、選択も一緒に連れていく（Notion と同じ）。
+      // Shift を押していれば、通ったところを足していく。
+      if (next && isSelected) {
+        const nextId = next.getAttribute("data-task-id");
+        if (!e.shiftKey) toggleTask?.(task.id);
+        if (!selectedIds?.has(nextId)) toggleTask?.(nextId);
+      }
       return;
     }
     // 印字可能文字でそのまま編集開始。
@@ -4544,6 +4594,22 @@ function useTaskBlock({
       const next = draft.slice(0, a) + mark + draft.slice(a, z) + mark + draft.slice(z);
       setDraft(next);
       setTimeout(() => { el2.setSelectionRange(a + mark.length, z + mark.length); }, 0);
+      return;
+    }
+    // Cmd/Ctrl+A は段階的に広がる（Notion と同じ）。
+    // 1回目は本文を全選択、すでに全部選べていたら本文全体のブロック選択へ。
+    if (notionMode && (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "a") {
+      const whole = el.selectionStart === 0 && el.selectionEnd === el.value.length && el.value.length > 0;
+      if (!whole) return; // 1回目はブラウザ任せ
+      const area = cardRef.current?.closest("[data-block-area]");
+      if (!area) return;
+      const ids = Array.from(area.querySelectorAll("[data-task-id][tabindex]"))
+        .map((n) => n.getAttribute("data-task-id"));
+      if (!ids.length) return;
+      e.preventDefault();
+      commit();
+      setEditing(false);
+      selectMany?.(ids);
       return;
     }
     // Cmd/Ctrl+D でブロックを複製する
@@ -4619,19 +4685,20 @@ function useTaskBlock({
         return;
       }
     }
-    // 端で上下キーを押したら隣のブロックへ移る（編集したまま）
+    // 端で上下キーを押したら、隣のブロックの編集に移る（Notion と同じ）。
+    // 以前は Enter の合成イベントを投げていたが、選択中のカードの Enter は
+    // 「下にブロックを足す」なので、移るどころか空行が増えていた。
     if (notionMode && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       const leaving = e.key === "ArrowUp" ? atStart : atEnd;
       if (leaving) {
-        e.preventDefault();
-        commit();
-        const cur = cardRef.current;
-        setEditing(false);
-        setTimeout(() => {
-          const next = focusAdjacentBlock(cur, e.key === "ArrowUp" ? -1 : 1);
-          next?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-        }, 0);
-        return;
+        const nextId = adjacentBlockId(cardRef.current, e.key === "ArrowUp" ? -1 : 1);
+        if (nextId) {
+          e.preventDefault();
+          commit();
+          setEditing(false);
+          markForEdit?.(nextId, true);
+          return;
+        }
       }
     }
     if (e.key === "Tab" && onTab) {
@@ -4646,12 +4713,14 @@ function useTaskBlock({
     "data-task-id": task.id,
     tabIndex: editing ? -1 : 0,
     onKeyDown: onCardKeyDown,
-    onClick: () => {
+    onClick: (e) => {
       if (clickGuard?.()) return;
       if (focusPickMode) { pickTask?.(task.id); return; }
       if (editing) return;
+      // Shift+クリックは、起点からここまでをまとめて選ぶ（Notion と同じ）
+      if (e?.shiftKey) { e.preventDefault(); selectRange?.(task.id); return; }
       // ページ本文はクリックでそのまま書き始められる（選択ではなく編集）
-      if (notionMode) { setEditing(true); return; }
+      if (notionMode) { noteAnchor?.(task.id); setEditing(true); return; }
       toggleTask?.(task.id);
     },
     ...(dragOff ? {} : attributes),
@@ -5241,7 +5310,7 @@ function BlockArea({
 
   return (
     <>
-      <div className="flex flex-col">
+      <div data-block-area className="flex flex-col">
         {rows.map((row) => (
           <div
             key={row.key}
