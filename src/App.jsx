@@ -914,7 +914,11 @@ function App() {
   const [confirmUnproject, setConfirmUnproject] = useState(false);
   function moveProjectTasksToTray() {
     const targets = tasks.filter((t) => !t.archived && (t.category || t.project));
-    if (!targets.length) { setToast("PJ に入っているタスクはありません"); return; }
+    // 中身が空でも、箱（プロジェクトの定義）が残っていれば片付ける。
+    // ここで止めると、空の箱だけが消せなくなる。
+    const boxes = Object.keys(projectOrder || {}).reduce((n, k) => n + (projectOrder[k]?.length || 0), 0)
+      + Object.keys(projectRules || {}).length;
+    if (!targets.length && !boxes) { setToast("片付けるものがありません"); return; }
     const ids = new Set(targets.map((t) => t.id));
     commitState((current) => ({
       ...current,
@@ -925,7 +929,9 @@ function App() {
       projectRules: {},
       projectOrder: {},
     }));
-    setToast(`${targets.length}件を TRAY に移し、プロジェクトを空にしました（取り消せます）`);
+    setToast(targets.length
+      ? `${targets.length}件を TRAY に移し、プロジェクトを消しました（取り消せます）`
+      : "空のプロジェクトを消しました（取り消せます）");
     setConfirmUnproject(false);
   }
 
@@ -3434,8 +3440,11 @@ function App() {
                       )}
                     >
                       {confirmUnproject
-                        ? `もう一度押すと実行：${tasks.filter((t) => !t.archived && (t.category || t.project)).length}件を TRAY へ`
-                        : "PJ を空にして、タスクを TRAY に移す"}
+                        ? (() => {
+                            const n = tasks.filter((t) => !t.archived && (t.category || t.project)).length;
+                            return n ? `もう一度押すと実行：${n}件を TRAY へ` : "もう一度押すと実行：空のPJを消す";
+                          })()
+                        : "PJ を消して、タスクを TRAY に移す"}
                     </button>
                     <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
                       Category / Project を外してプロジェクトを空にします。タスクも親子も消えません。取り消しもできます。
