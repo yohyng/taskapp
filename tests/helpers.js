@@ -71,6 +71,9 @@ export const test = base.extend({
         localStorage.setItem(key, JSON.stringify(data));
         localStorage.removeItem(viewsKey);
         localStorage.removeItem(themeKey);
+        // 既定では STOCK などをしまうが、テストは全部出ている前提で書いてある。
+        // しまう動きそのものは panels.spec.js で見る。
+        localStorage.setItem("taskspace-hidden-panels", "[]");
       },
       [STORAGE_KEY, seedData(), STOCK_VIEWS_KEY, THEME_KEY]
     );

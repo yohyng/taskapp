@@ -891,6 +891,38 @@ function App() {
   const [panelOrder, setPanelOrder] = useState(() => {
     try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "board", "calendar"]; } catch { return ["7days", "tray", "board", "calendar"]; }
   });
+  // 下の段のどれを出すか。消すのではなく、しまっておくだけ。
+  // 中のタスクはそのまま残るので、いつでも戻せる。
+  const [hiddenPanels, setHiddenPanels] = useState(() => {
+    // STOCK はボードのブロックから触れるので、下の段では既定でしまっておく
+    try {
+      const raw = localStorage.getItem("taskspace-hidden-panels");
+      return new Set(raw ? JSON.parse(raw) : ["stock"]);
+    } catch { return new Set(["stock"]); }
+  });
+  function togglePanel(key) {
+    setHiddenPanels((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      try { localStorage.setItem("taskspace-hidden-panels", JSON.stringify([...next])); } catch { /* quota */ }
+      return next;
+    });
+  }
+
+  // PJ ボードのタスクを TRAY へ移す。消すのではなく、Category / Project を
+  // 外して「どこにも属さないタスク」にするだけ。親子も中身もそのまま。
+  const [confirmUnproject, setConfirmUnproject] = useState(false);
+  function moveProjectTasksToTray() {
+    const targets = tasks.filter((t) => !t.archived && (t.category || t.project));
+    if (!targets.length) { setToast("PJ に入っているタスクはありません"); return; }
+    const ids = new Set(targets.map((t) => t.id));
+    commitTasks((prev) => prev.map((t) => (
+      ids.has(t.id) ? { ...t, category: "", project: "", plain: true, stock: false, stockViewId: null } : t
+    )));
+    setToast(`${targets.length}件を TRAY に移しました（取り消しできます）`);
+    setConfirmUnproject(false);
+  }
+
   const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", board: "Project", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
     try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
@@ -3385,6 +3417,55 @@ function App() {
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">片付け</div>
+                    <button
+                      onClick={() => (confirmUnproject ? moveProjectTasksToTray() : setConfirmUnproject(true))}
+                      onBlur={() => setConfirmUnproject(false)}
+                      className={classNames(
+                        "mb-1 w-full rounded border px-2 py-1.5 text-left text-xs transition",
+                        confirmUnproject
+                          ? "border-amber-400/40 bg-amber-400/10 text-amber-200"
+                          : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
+                      )}
+                    >
+                      {confirmUnproject
+                        ? `もう一度押すと実行：${tasks.filter((t) => !t.archived && (t.category || t.project)).length}件を TRAY へ`
+                        : "PJ のタスクを全部 TRAY に移す"}
+                    </button>
+                    <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                      Category / Project を外すだけで、タスクも親子も消えません。取り消しもできます。
+                    </div>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">しまう／出す</div>
+                    <div className="mb-1 text-[10px] leading-relaxed text-neutral-600">
+                      しまっても中身は消えません。いつでも戻せます。
+                    </div>
+                    {[
+                      ["stock", "STOCK"],
+                      ["tray", "TRAY"],
+                      ["7days", "7days"],
+                      ["board", "PJボード"],
+                      ["calendar", "カレンダー"],
+                    ].map(([key, label]) => (
+                      <button
+                        key={key}
+                        onClick={() => togglePanel(key)}
+                        className={classNames(
+                          "mb-1 flex w-full items-center justify-between rounded border px-2 py-1.5 text-left text-xs transition",
+                          hiddenPanels.has(key)
+                            ? "border-white/10 bg-white/[0.03] text-neutral-500 hover:bg-white/[0.07]"
+                            : "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+                        )}
+                      >
+                        <span>{label}</span>
+                        <span className="text-[10px]">{hiddenPanels.has(key) ? "しまってある" : "出ている"}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">セクション順序</div>
                     <div className="flex flex-col gap-1">
                       {panelOrder.map((key, idx) => {
@@ -3608,7 +3689,8 @@ function App() {
             style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
             className={classNames("grid gap-2 items-start pb-2", (selectedTask || selectedProject) && "md:pr-[384px]")}
           >
-            {/* TRAY column */}
+            {/* TRAY column。しまってあるときは出さない（中身はそのまま） */}
+            {!hiddenPanels.has("tray") && (
             <div className="min-w-0">
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
                 <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
@@ -3665,8 +3747,9 @@ function App() {
                 </div>
               </div>
             </div>
-            {/* STOCK views */}
-            {stockViews.map((view) => (
+            )}
+            {/* STOCK views。しまっているときは丸ごと出さない */}
+            {!hiddenPanels.has("stock") && stockViews.map((view) => (
               <div key={view.id} className="min-w-0">
                 <StockColumn
                   view={view}
@@ -3686,15 +3769,17 @@ function App() {
                 />
               </div>
             ))}
-            <div className="min-w-0">
-              <button
-                onClick={addStockView}
-                className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-3 text-xs text-neutral-500 transition hover:border-white/30 hover:bg-white/[0.04] hover:text-neutral-300"
-              >
-                <Plus className="h-3.5 w-3.5" />
-                STOCKビューを追加
-              </button>
-            </div>
+            {!hiddenPanels.has("stock") && (
+              <div className="min-w-0">
+                <button
+                  onClick={addStockView}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-3 text-xs text-neutral-500 transition hover:border-white/30 hover:bg-white/[0.04] hover:text-neutral-300"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  STOCKビューを追加
+                </button>
+              </div>
+            )}
             {/* Board category columns */}
             {categories.map((cat) => (
               <div key={cat.key} className="min-w-0">
@@ -3716,6 +3801,8 @@ function App() {
             const BOARD_KEYS = new Set(["tray", "today", "weekly", "board"]);
             const chunks = [];
             for (const key of panelOrder) {
+              // しまってある段は組み立てない（中身はそのまま残る）
+              if (hiddenPanels.has(key)) continue;
               if (BOARD_KEYS.has(key)) {
                 if (chunks.length && chunks[chunks.length - 1].type === "board-group") {
                   chunks[chunks.length - 1].keys.push(key);
