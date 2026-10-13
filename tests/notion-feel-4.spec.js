@@ -262,3 +262,18 @@ test.describe("ブロックメニュー", () => {
     await expect(page.locator("[data-block-menu]").getByText("リンクをコピー")).toBeVisible();
   });
 });
+
+test.describe("字の大きさの土台", () => {
+  test("見出しは、本文の一律の大きさに潰されない", async ({ page, seed }) => {
+    await seed({
+      tasks: [b("h", "みだし", "heading1"), b("p", "ほんぶん", "text")],
+    });
+    await toPages(page);
+    const size = (text) => page.locator("[data-task-id]").filter({ hasText: text }).first()
+      .evaluate((r, want) => {
+        const els = [...r.querySelectorAll("div")].filter((d) => d.textContent.trim() === want);
+        return parseFloat(getComputedStyle(els[els.length - 1]).fontSize);
+      }, text);
+    expect(await size("みだし")).toBeGreaterThan(await size("ほんぶん"));
+  });
+});

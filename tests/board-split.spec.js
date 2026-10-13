@@ -175,3 +175,48 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
     await expect(framedBox(page, "WORK")).toHaveCount(0);
   });
 });
+
+test.describe("縦列は保存される", () => {
+  test("読み直しても、列の分かれ方と枠が残る", async ({ page, seed }) => {
+    await seed(THREE);
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
+
+    // フィクスチャは読み直すたびに種を蒔き直すので、それが走らない
+    // 新しいタブを同じブラウザで開いて、保存されたものだけを見る。
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("[data-board]");
+
+    expect((await byTitle(page, "DESIGNART")).col).toBe(0);
+    expect((await byTitle(page, "WORK")).col).toBe(1);
+    expect((await byTitle(page, "結婚式関連")).col).toBe(2);
+    expect((await byTitle(page, "WORK")).style?.framed).toBe(true);
+    expect(new Set((await tops(page)).map((x) => x.rowKey)).size).toBe(1);
+
+    // 開き直した画面でも横並びのまま
+    const box = async (s) =>
+      fresh.locator("[data-board] [data-task-id]").filter({ hasText: s }).first().boundingBox();
+    const [d, w] = [await box("DESIGNART"), await box("WORK")];
+    expect(Math.abs(d.y - w.y)).toBeLessThan(12);
+    expect(d.x).toBeLessThan(w.x);
+    await fresh.close();
+  });
+
+  test("列の幅も読み直しで残る", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        t("g1", "ひろい", { rowKey: "r1", col: 0, colWidth: 3, style: { framed: true } }),
+        t("g2", "せまい", { rowKey: "r1", col: 1 }),
+      ],
+    });
+    await page.reload();
+    await page.waitForSelector("[data-board]");
+
+    expect((await byTitle(page, "ひろい")).colWidth).toBe(3);
+    const w = async (s) =>
+      (await page.locator("[data-board] [data-task-id]").filter({ hasText: s }).first()
+        .locator("xpath=..").boundingBox()).width;
+    expect(await w("ひろい")).toBeGreaterThan((await w("せまい")) * 2);
+  });
+});

@@ -519,6 +519,11 @@ function uid() {
   return `id-${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+// 指で触る機械か（マウスのホバーが無い画面）
+function isCoarsePointer() {
+  try { return window.matchMedia("(pointer: coarse)").matches; } catch { return false; }
+}
+
 function classNames(...items) {
   return items.filter(Boolean).join(" ");
 }
@@ -975,6 +980,12 @@ function App() {
     } else if (dst.type === "project") {
       patch = { category: dst.category, project: dst.project, parentId: null, stock: false };
       label = `${dst.category} / ${dst.project}`;
+    } else if (dst.type === "page-zone" || dst.type === "page-block") {
+      // ブロック本文へは、親子をそのまま連れて移す
+      const target = dst.type === "page-block" ? taskMap.get(dst.id) : null;
+      const pageId = dst.type === "page-zone" ? dst.pageId : target?.pageId;
+      if (!pageId || (target && ids.includes(target.id))) return false;
+      return moveSubtreesIntoPage(ids, pageId, target);
     } else if (dst.type === "task" || dst.type === "task-in-day" || dst.type === "task-in-today" || dst.type === "task-in-weekly") {
       // タスクの上に落とした場合は「そのタスクと同じ場所」へ揃える（親子化はしない）
       const target = taskMap.get(dst.id);
@@ -998,6 +1009,50 @@ function App() {
     const idSet = new Set(ids);
     commitTasks((prev) => prev.map((t) => (idSet.has(t.id) ? { ...t, ...patch } : t)));
     setToast(`${ids.length}件を${label}に移動しました`);
+    return true;
+  }
+
+  // 選んだタスクを、ぶら下がっている子ごとブロック本文へ移す。
+  // 子を置いてくると、親だけ移って中身が TRAY や STOCK に残ってしまう。
+  function moveSubtreesIntoPage(ids, pageId, target) {
+    const moved = new Set();
+    for (const id of ids) {
+      if (!taskMap.has(id)) continue;
+      moved.add(id);
+      collectDescendantIds(id).forEach((d) => moved.add(d));
+    }
+    if (!moved.size) return false;
+
+    const shape = {
+      rowKey: target?.rowKey ?? null,
+      col: target?.col ?? 0,
+      colWidth: target?.colWidth ?? null,
+    };
+
+    commitTasks((prev) => {
+      const order = new Map(prev.map((t, i) => [t.id, i]));
+      const picked = prev
+        .filter((t) => moved.has(t.id))
+        .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0))
+        .map((t) => {
+          // 選んだ塊の外に親がいるものだけ、根として切り離す。
+          // 塊の中の親子はそのまま保つ。
+          const isRoot = !t.parentId || !moved.has(t.parentId);
+          return {
+            ...t,
+            ...intoPage(t, pageId),
+            ...shape,
+            parentId: isRoot ? (target?.parentId ?? null) : t.parentId,
+          };
+        });
+
+      const rest = prev.filter((t) => !moved.has(t.id));
+      const at = target ? rest.findIndex((t) => t.id === target.id) : -1;
+      const next = [...rest];
+      next.splice(at < 0 ? next.length : at + 1, 0, ...picked);
+      return next;
+    });
+    setToast(`${moved.size}件をブロックに移しました`);
     return true;
   }
 
@@ -1232,6 +1287,12 @@ function App() {
       if (side) {
         movePageBlockToNewColumn(src.id, dst.id, side);
         setToast(side < 0 ? "左に列を作りました" : "右に列を作りました");
+      } else if (
+        collectDescendantIds(src.id).length
+        && taskMap.get(src.id)?.pageId !== taskMap.get(dst.id)?.pageId
+      ) {
+        // 子を持ったまま外から入ってきたときは、木ごと移す
+        moveSubtreesIntoPage([src.id], taskMap.get(dst.id)?.pageId, taskMap.get(dst.id));
       } else {
         movePageBlock(src.id, dst.id, pointerBelowMiddle());
       }
@@ -1242,6 +1303,7 @@ function App() {
     if (src.type === "task" && dst.type === "page-zone") {
       const moved = taskMap.get(src.id);
       if (!moved || moved.pageId === dst.pageId) return;
+      if (collectDescendantIds(src.id).length) { moveSubtreesIntoPage([src.id], dst.pageId, null); return; }
       commitTasks((prev) => [
         ...prev.filter((t) => t.id !== src.id),
         { ...moved, ...intoPage(moved, dst.pageId), parentId: null, rowKey: null, col: 0, colWidth: null },
@@ -2792,12 +2854,16 @@ function App() {
     const v = Math.min(2.0, Math.max(0.5, val));
     setZoom(v);
     localStorage.setItem("taskspace-zoom", String(v));
-    document.documentElement.style.zoom = String(v);
+    applyZoom(v);
   }
 
   function applyFontSize(v) {
     let el = document.getElementById('ts-fontsize-style');
     if (!el) { el = document.createElement('style'); el.id = 'ts-fontsize-style'; document.head.appendChild(el); }
+    // ここで吐く規則は !important なので、CSS 側で字の大きさを決めても勝てない。
+    // 触る機械ぶんの底上げも、同じ場所でやらないと効かない。
+    const px = (base, floorOnTouch) =>
+      Math.max(base * v, isCoarsePointer() ? floorOnTouch : 0);
     el.textContent = [
       `.text-\\[9px\\]  { font-size: ${9  * v}px !important; }`,
       `.text-\\[10px\\] { font-size: ${10 * v}px !important; }`,
@@ -2808,7 +2874,19 @@ function App() {
       `.text-base { font-size: ${Math.round(16 * v)}px !important; }`,
       `.text-xl   { font-size: ${Math.round(20 * v)}px !important; }`,
       `.text-2xl  { font-size: ${Math.round(24 * v)}px !important; }`,
+      // 同じ強さの規則は後ろ勝ちなので、行と本文の大きさは最後に置く。
+      // 先に書くと .text-[12.5px] に上書きされてしまう。
+      // 見出しや自作の種別は大きさを直接持っているので、そこには手を出さない
+      // （!important は直接の指定にも勝ってしまい、全部同じ大きさになる）。
+      `.ts-row-text:not([style*="font-size"])   { font-size: ${px(12.5, 15)}px !important; }`,
+      `.ts-block-text:not([style*="font-size"]) { font-size: ${px(14, 16)}px !important; }`,
     ].join('\n');
+  }
+
+  // 画面の縮小。指で触る機械では1倍より小さくしない。
+  // 縮めると字も一緒に縮んで、読むための大きさが帳消しになる。
+  function applyZoom(v) {
+    document.documentElement.style.zoom = String(isCoarsePointer() ? Math.max(v, 1) : v);
   }
 
   function changeFontSize(val) {
@@ -2820,7 +2898,7 @@ function App() {
 
   // 初期zoom・fontsize適用
   useEffect(() => {
-    document.documentElement.style.zoom = String(zoom);
+    applyZoom(zoom);
     applyFontSize(fontSize);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -5904,19 +5982,10 @@ function BlockArea({
                   key={ci}
                   className={classNames(
                     "min-w-0",
-                    framed && "rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
+                    framed && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
                   )}
                   style={row.single ? undefined : { flexGrow: width, flexBasis: 0, flexShrink: 1 }}
                 >
-                  {!row.single && (
-                    <ColumnBar
-                      first={ci === 0}
-                      last={ci === row.cols.length - 1}
-                      width={width}
-                      onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
-                      onWidth={(w) => setColumnWidth(row.key, colNum, w)}
-                    />
-                  )}
                   {colBlocks.map((task, i) => (
                     <PageBlock
                       key={task.id}
@@ -5940,6 +6009,26 @@ function BlockArea({
                       dayDeps={dayDeps}
                     />
                   ))}
+                  {/* 数と列の操作は、どちらも重ねて置く。行を増やすと見出しが浮くため。
+                      STOCK ビューと同じく、右上に中の数を出す。 */}
+                  {framed && (
+                    <span
+                      data-col-count
+                      className="pointer-events-none absolute right-2 top-1.5 z-10 text-[10px] text-neutral-500 transition group-hover/row:opacity-0"
+                    >
+                      {countInColumn(colBlocks, childrenOf)}
+                    </span>
+                  )}
+                  {!row.single && (
+                    <ColumnBar
+                      floating={framed}
+                      first={ci === 0}
+                      last={ci === row.cols.length - 1}
+                      width={width}
+                      onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
+                      onWidth={(w) => setColumnWidth(row.key, colNum, w)}
+                    />
+                  )}
                 </div>
               );
             })}
@@ -5971,7 +6060,17 @@ function BlockTailZone({ pageId, onClick, className, children }) {
 }
 
 // 列の頭に出る操作帯。ふだんは見えず、行にさわると現れる。
-function ColumnBar({ first, last, width, onMove, onWidth }) {
+// 列の中にあるものの数（ぶら下がっている子も数える）
+function countInColumn(colBlocks, childrenOf) {
+  const walk = (id) => {
+    const kids = childrenOf?.(id) || [];
+    return kids.length + kids.reduce((n, k) => n + walk(k.id), 0);
+  };
+  // 先頭の行は見出しなので数に入れない
+  return colBlocks.slice(1).length + colBlocks.reduce((n, b) => n + walk(b.id), 0);
+}
+
+function ColumnBar({ first, last, width, onMove, onWidth, floating = false }) {
   const drag = useRef(null);
 
   function onPointerDown(e) {
@@ -5991,7 +6090,14 @@ function ColumnBar({ first, last, width, onMove, onWidth }) {
   function onPointerUp() { drag.current = null; }
 
   return (
-    <div data-col className="hidden h-4 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 sm:flex">
+    <div
+      data-col
+      className={classNames(
+        "hidden h-4 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 sm:flex",
+        // 枠つきの列では帯の中に重ねる。行を1本増やすと見出しが浮いてしまう。
+        floating && "absolute right-1.5 top-1 z-20",
+      )}
+    >
       <button
         disabled={first}
         onClick={() => onMove(-1)}

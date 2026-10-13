@@ -98,19 +98,34 @@ test.describe("指での操作", () => {
     expect(size).toBeGreaterThanOrEqual(16);
   });
 
+  // 画面を縮小していると、font-size は大きいまま描かれる字だけ小さくなる。
+  // だから「実際に何px で出ているか」で測る。
+  const drawnSize = (page, sel) => page.locator(sel).first().evaluate((el) => {
+    const css = parseFloat(getComputedStyle(el).fontSize);
+    const scale = el.getBoundingClientRect().width / el.offsetWidth;
+    return css * (Number.isFinite(scale) && scale > 0 ? scale : 1);
+  });
+
   test("タスクの字が、スマホでも読める大きさ", async ({ page }) => {
     await open(page, [t("a", "きょうの用事", "task", { pageId: null, scheduledDate: todayKey() })], "list");
-    const size = await page.locator(".ts-row-text").first()
-      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
     // 手元の画面では 12.5px。スマホだと小さすぎる。
-    expect(size).toBeGreaterThanOrEqual(15);
+    expect(await drawnSize(page, ".ts-row-text")).toBeGreaterThanOrEqual(15);
   });
 
   test("本文のブロックも、スマホでは一段大きい", async ({ page }) => {
     await open(page, [t("a", "ほんぶん")]);
-    const size = await page.locator(".ts-block-text").first()
-      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-    expect(size).toBeGreaterThanOrEqual(16);
+    expect(await drawnSize(page, ".ts-block-text")).toBeGreaterThanOrEqual(16);
+  });
+
+  test("画面を縮小する設定が入っていても、スマホでは小さくならない", async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("taskspace-zoom", "0.8");
+      localStorage.setItem("taskspace-fontsize", "0.7");
+    });
+    await open(page, [t("a", "きょうの用事", "task", { pageId: null, scheduledDate: todayKey() })], "list");
+
+    expect(await page.evaluate(() => document.documentElement.style.zoom)).toBe("1");
+    expect(await drawnSize(page, ".ts-row-text")).toBeGreaterThanOrEqual(15);
   });
 
   test("書いているときと読んでいるときで、字の大きさが変わらない", async ({ page }) => {

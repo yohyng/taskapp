@@ -98,18 +98,12 @@ body {
   }
 }
 
-/* 指で触る機械では、字を大きくする。
-   12.5px は手元の画面では足りても、スマホでは小さすぎて読めない。
-   編集中と表示中で大きさが変わらないよう、入力欄にも同じ値を当てる。 */
+/* 指で触る機械むけの間隔。
+   字の大きさ自体は applyFontSize が !important で出すので、そちらで決める
+   （ここで書いても勝てない）。行間と余白だけこちらで持つ。 */
 @media (pointer: coarse) {
-  .ts-row-text {
-    font-size: 15px;
-    line-height: 1.6;
-  }
-  .ts-block-text {
-    font-size: 16px;
-    line-height: 1.7;
-  }
+  .ts-row-text { line-height: 1.6; }
+  .ts-block-text { line-height: 1.7; }
   /* 行そのものも少し高くする。詰まっていると指で狙えない。 */
   [data-task-id] {
     padding-top: 3px;
