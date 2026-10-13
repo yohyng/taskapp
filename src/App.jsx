@@ -157,7 +157,6 @@ const BASE_BLOCK_TYPES = {
   toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
   image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
   day:       { label: "その日の予定", text: false, reading: "よてい day かれんだー 曜日 ようび 7days いちにち" },
-  stock:     { label: "STOCK一覧", text: false, reading: "すとっく stock いちらん たな ねかせたもの" },
 };
 
 // 自分で作ったブロック種別。見た目の設定だけを持つ素朴な形にしてある。
@@ -645,8 +644,6 @@ function normalizeTask(task) {
     codeLang: "",
     // 日付ブロックが見ている日（7days と同じ scheduledDate を指す）
     dayDate: "",
-    // STOCK ブロックが見ているビュー
-    viewId: "",
     ...task,
   };
 }
@@ -3107,17 +3104,19 @@ function App() {
     setToast("一週間ぶんの日付ブロックを並べました");
   }
 
-  // STOCK ビューを1本ずつブロックにして、横一列に並べる
-  function addStockRow() {
-    if (!stockViews.length) return;
-    const rowKey = `row-${uid()}`;
-    const made = stockViews.map((v, i) => normalizeTask({
+  // 縦のカテゴリを1本足す。頭の行を作って、そこから書き始められるようにする。
+  function addBoardColumn() {
+    const here = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId);
+    const inRow = here.filter((t) => t.rowKey);
+    const rowKey = inRow[0]?.rowKey || `row-${uid()}`;
+    const nextCol = inRow.length ? Math.max(...inRow.map((t) => t.col ?? 0)) + 1 : 0;
+    const made = normalizeTask({
       id: uid(), title: "", category: "", project: "", status: "未着手", plain: true,
-      pageId: BOARD_PAGE_ID, blockType: "stock", viewId: v.id,
-      rowKey, col: i,
-    }));
-    addRawBlocks(made);
-    setToast(`STOCK を${made.length}本、横に並べました`);
+      pageId: BOARD_PAGE_ID, blockType: "task",
+      rowKey, col: nextCol, style: { framed: true },
+    });
+    addRawBlocks([made]);
+    setPendingEditId(made.id);
   }
 
   // ボードの中身を、親ブロックごとに縦の列へ分ける。
@@ -3207,11 +3206,11 @@ function App() {
           + 一週間
         </button>
         <button
-          onClick={addStockRow}
-          title="STOCK を1本ずつブロックにして横一列に並べる"
+          onClick={addBoardColumn}
+          title="縦のカテゴリを1本足す"
           className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
-          + STOCK
+          + 列
         </button>
         <button
           onClick={() => setBoardColumnMode(!boardColumns)}
@@ -3772,7 +3771,7 @@ function App() {
             {/* Board category columns。しまってあるときは出さない */}
             {!hiddenPanels.has("board") && categories.map((cat) => (
               <div key={cat.key} className="min-w-0">
-                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />
+                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} onDeleteProject={deleteProject} />
               </div>
             ))}
           </div>
@@ -4596,7 +4595,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   );
 }
 
-function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode }) {
+function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode, onDeleteProject }) {
   const tone = toneClasses(category.tone);
   const [newProject, setNewProject] = useState("");
   const [showProjectInput, setShowProjectInput] = useState(false);
@@ -4654,14 +4653,14 @@ function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, t
       )}
       {!isColumnCollapsed && (
         <div className="flex flex-col gap-2">
-          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />)}
+          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} onDeleteProject={onDeleteProject} />)}
         </div>
       )}
     </div>
   );
 }
 
-function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode }) {
+function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode, onDeleteProject }) {
   const [newTitle, setNewTitle] = useState("");
   const key = `${category}:${project}`;
   const isCollapsed = collapsed[key];
@@ -4682,7 +4681,7 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
       ref={(node) => { projDropRef(node); projDragRef(node); }}
       {...projDragAttrs}
       className={classNames(
-        "rounded-md border px-1.5 py-1 transition",
+        "group/proj rounded-md border px-1.5 py-1 transition",
         isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10",
         isProjDragging && "opacity-40"
       )}
@@ -4714,7 +4713,21 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
             {rule?.emoji ? `${rule.emoji} ` : ""}{rule?.recurrence && rule.recurrence !== "none" ? "↺ " : ""}{project}
           </span>
         </div>
-        <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
+        <div className="flex shrink-0 items-center gap-1">
+          <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
+          <button
+            onClick={(event) => {
+              event.stopPropagation();
+              if (window.confirm(`プロジェクト「${project}」を消しますか？\n中のタスクは消えず、TRAY に残ります。`)) {
+                onDeleteProject?.(category, project);
+              }
+            }}
+            title="このプロジェクトを消す（中のタスクは TRAY に残ります）"
+            className="rounded p-0.5 text-neutral-700 opacity-0 transition hover:bg-white/10 hover:text-red-300 group-hover/proj:opacity-100"
+          >
+            <Trash2 className="h-3 w-3" />
+          </button>
+        </div>
       </div>
       {!isCollapsed && (
         <div className="flex flex-col gap-0.5">
@@ -5629,8 +5642,6 @@ function TableOfContents({ blocks }) {
   );
 }
 
-// STOCK ブロック。STOCK ビューの1本を、そのままブロックとして置けるようにしたもの。
-// 中身は STOCK パネルと同じ実体なので、どちらで触っても同じところが変わる。
 function StockBlock({ task, upsertTask, deps }) {
   const { stockViews, stockRootsByView, childrenOf, categoryTone, toggleDone, removeTask,
     setSelectedTaskId, selectedTaskId, updateStockView } = deps || {};
@@ -5701,7 +5712,6 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         bodySlot={
           task.blockType === "toc" ? () => <TableOfContents blocks={siblings} />
           : task.blockType === "day" ? () => <DayBlock task={task} upsertTask={upsertTask} deps={dayDeps} />
-          : task.blockType === "stock" ? () => <StockBlock task={task} upsertTask={upsertTask} deps={dayDeps} />
           : undefined
         }
         onToggleCollapse={onToggleCollapse}
@@ -6463,6 +6473,15 @@ function TaskBlock({
       >
         <BlockGutter block={b} compact={compactGutter} task={task} onDuplicate={onDuplicateBlock} />
         <div className="min-w-0 flex-1">{bodySlot()}</div>
+        {/* 日付や STOCK のブロックは中身が自前の見た目なので、⠿ のメニューに
+            気づきにくい。消す口を直接出しておく。 */}
+        <button
+          onClick={(e) => { e.stopPropagation(); blockOptions.removeTask?.(task.id); }}
+          title="このブロックを消す（中のタスクは消えません）"
+          className="mt-0.5 shrink-0 rounded p-0.5 text-neutral-700 opacity-0 transition hover:bg-white/10 hover:text-red-300 group-hover/block:opacity-100"
+        >
+          <X className="h-3 w-3" />
+        </button>
       </div>
     );
   }

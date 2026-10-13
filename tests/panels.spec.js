@@ -34,16 +34,6 @@ test.describe("下の段をしまう", () => {
       JSON.parse(localStorage.getItem("taskspace-stock-views")).length)).toBe(1);
   });
 
-  test("ボードの STOCK ブロックからは、しまっていても触れる", async ({ page, seed }) => {
-    await withViews(page);
-    await seed({
-      tasks: [
-        t("a", "ねかせたやつ", { stock: true, stockViewId: "stock" }),
-        t("sb", "", { pageId: "board-7days", blockType: "stock", viewId: "stock" }),
-      ],
-    });
-    await expect(page.locator("[data-board]").getByText("ねかせたやつ")).toHaveCount(1);
-  });
 
   test("設定から出し直せる", async ({ page, seed }) => {
     await withViews(page);
@@ -264,4 +254,29 @@ test.describe("消えないケースを潰す", () => {
     // しまっただけなので、タスクは残っている
     expect((await byTitle(page, "PJのタスク")).project).toBe("ALPHA");
   });
+});
+
+test.describe("消す口があるか", () => {
+  const byTitle = async (page, s) => (await storedTasks(page)).find((x) => x.title === s);
+
+  test("プロジェクトの行から直接消せる", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        t("a", "PJの親", { category: "WORK", project: "ALPHA", plain: false }),
+        t("c", "PJの子", { category: "WORK", project: "ALPHA", plain: false, parentId: "a" }),
+      ],
+      categories: [{ key: "WORK", label: "WORK", tone: "sky" }],
+      projectOrder: { WORK: ["ALPHA"] },
+    });
+    page.on("dialog", (d) => d.accept());
+
+    await page.getByText("ALPHA", { exact: true }).first().hover();
+    await page.getByTitle("このプロジェクトを消す（中のタスクは TRAY に残ります）").first().click();
+
+    // 箱は消え、中のタスクは親子のまま残る
+    await expect.poll(async () => (await byTitle(page, "PJの親")).project).toBe("");
+    expect((await byTitle(page, "PJの子")).parentId).toBe("a");
+    expect(await storedTasks(page)).toHaveLength(2);
+  });
+
 });

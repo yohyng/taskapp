@@ -281,3 +281,43 @@ test.describe("縦列モード", () => {
     expect((await byTitle(page, "なかみ")).rowKey).toBe("r1");
   });
 });
+
+test.describe("縦のカテゴリを足す", () => {
+  test("「+ 列」で、右に空の列ができてすぐ書ける", async ({ page, seed }) => {
+    await seed({ tasks: [t("g1", "ひとつめ", { rowKey: "r1", col: 0, style: { framed: true } })] });
+    await page.getByRole("button", { name: "+ 列" }).click();
+
+    await expect(page.locator("textarea")).toHaveCount(1);
+    await page.keyboard.type("ふたつめ");
+    await page.keyboard.press("Escape");
+
+    await expect.poll(async () => (await byTitle(page, "ふたつめ"))?.col).toBe(1);
+    expect((await byTitle(page, "ふたつめ")).rowKey).toBe("r1");      // 同じ行に並ぶ
+    expect((await byTitle(page, "ふたつめ")).style?.framed).toBe(true); // 囲みも付く
+  });
+
+  test("何も無いところからでも1本目を作れる", async ({ page, seed }) => {
+    await seed({ tasks: [] });
+    await page.getByRole("button", { name: "+ 列" }).click();
+    await page.keyboard.type("さいしょの列");
+    await page.keyboard.press("Escape");
+
+    await expect.poll(async () => (await byTitle(page, "さいしょの列"))?.col).toBe(0);
+    expect((await byTitle(page, "さいしょの列")).rowKey).toBeTruthy();
+  });
+
+  test("押すたびに右へ増える", async ({ page, seed }) => {
+    await seed({ tasks: [] });
+    for (const name of ["A", "B", "C"]) {
+      await page.getByRole("button", { name: "+ 列" }).click();
+      await page.keyboard.type(name);
+      await page.keyboard.press("Escape");
+      await expect.poll(async () => (await byTitle(page, name))?.title).toBe(name);
+    }
+    expect([
+      (await byTitle(page, "A")).col,
+      (await byTitle(page, "B")).col,
+      (await byTitle(page, "C")).col,
+    ]).toEqual([0, 1, 2]);
+  });
+});

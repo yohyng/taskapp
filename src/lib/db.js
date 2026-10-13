@@ -17,7 +17,6 @@ const OPTIONAL_TASK_COLUMNS = {
   col_width: { note: '段組みの列幅（取り分）' },
   code_lang: { note: 'コードブロックの言語' },
   day_date: { note: '日付ブロックが見ている日' },
-  view_id: { note: 'STOCKブロックが見ているビュー' },
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])
@@ -59,7 +58,6 @@ function taskToRow(t) {
   if (optionalColumnSupported.col_width) row.col_width = t.colWidth ?? null
   if (optionalColumnSupported.code_lang) row.code_lang = t.codeLang ?? ''
   if (optionalColumnSupported.day_date) row.day_date = t.dayDate ?? ''
-  if (optionalColumnSupported.view_id) row.view_id = t.viewId ?? ''
   return {
     ...row,
     id: t.id,
@@ -117,7 +115,6 @@ export function rowToTask(r) {
     colWidth: r.col_width ?? null,
     codeLang: r.code_lang ?? '',
     dayDate: r.day_date ?? '',
-    viewId: r.view_id ?? '',
   }
 }
 
