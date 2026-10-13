@@ -97,3 +97,26 @@ body {
     opacity: 0.45 !important;
   }
 }
+
+/* 指で触る機械では、字を大きくする。
+   12.5px は手元の画面では足りても、スマホでは小さすぎて読めない。
+   編集中と表示中で大きさが変わらないよう、入力欄にも同じ値を当てる。 */
+@media (pointer: coarse) {
+  .ts-row-text {
+    font-size: 15px;
+    line-height: 1.6;
+  }
+  .ts-block-text {
+    font-size: 16px;
+    line-height: 1.7;
+  }
+  /* 行そのものも少し高くする。詰まっていると指で狙えない。 */
+  [data-task-id] {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+  /* 曜日の見出しと「追加…」も、本文に釣り合う大きさに */
+  [data-daycol-head] {
+    font-size: 15px;
+  }
+}

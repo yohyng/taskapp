@@ -105,3 +105,73 @@ test.describe("ボードを列に分ける", () => {
     expect(day.col).toBe(0); // 題名が空でも、中身のあるブロックとして数える
   });
 });
+
+test.describe("列の枠（STOCKビューのような囲み）", () => {
+  const framedBox = (page, head) =>
+    page.locator("[data-board] div.rounded-lg.border").filter({ hasText: head });
+
+  test("分けると、各列が囲みになる", async ({ page, seed }) => {
+    await seed(THREE);
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
+
+    // 先頭の行に「枠つき」の印が付く
+    for (const name of ["DESIGNART", "WORK", "結婚式関連"]) {
+      expect((await byTitle(page, name)).style?.framed).toBe(true);
+    }
+    // 子の行には付かない（囲みは列ごとに1つ）
+    expect((await byTitle(page, "バナー出力")).style?.framed).toBeFalsy();
+  });
+
+  test("囲みの中に、その列の中身がぜんぶ入る", async ({ page, seed }) => {
+    await seed(THREE);
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
+
+    const box = framedBox(page, "DESIGNART").first();
+    await expect(box).toContainText("バナー出力");
+    await expect(box).toContainText("DM入稿15日");
+    await expect(box).not.toContainText("WORK");
+  });
+
+  test("日付ブロックには枠を付けない（二重にならない）", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        t("d1", "", { blockType: "day", dayDate: "2026-10-13" }),
+        t("g1", "DESIGNART"),
+        t("a1", "バナー出力", { parentId: "g1" }),
+      ],
+    });
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "DESIGNART")).col).toBe(1);
+
+    const day = (await tops(page)).find((x) => x.blockType === "day");
+    expect(day.style?.framed).toBeFalsy();
+    expect((await byTitle(page, "DESIGNART")).style?.framed).toBe(true);
+  });
+
+  test("「まとめる」で枠も外れる", async ({ page, seed }) => {
+    await seed(THREE);
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "WORK")).style?.framed).toBe(true);
+
+    await page.getByRole("button", { name: "まとめる" }).click();
+    await expect.poll(async () => (await tops(page)).every((x) => !x.style?.framed)).toBe(true);
+  });
+
+  test("/枠 で、あとから付け外しできる", async ({ page, seed }) => {
+    await seed(THREE);
+    await page.getByRole("button", { name: "列に分ける" }).click();
+    await expect.poll(async () => (await byTitle(page, "WORK")).style?.framed).toBe(true);
+
+    const row = page.locator("[data-board] [data-task-id]").filter({ hasText: "WORK" }).first();
+    await row.locator("div.cursor-text").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" /枠");
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () => (await byTitle(page, "WORK")).style?.framed).toBeFalsy();
+    // 囲みも消える
+    await expect(framedBox(page, "WORK")).toHaveCount(0);
+  });
+});

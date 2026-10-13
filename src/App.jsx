@@ -270,6 +270,10 @@ const SLASH_COMMANDS = [
     run: ({ task, ctx }) => ctx.addColumn(task, -1),
   },
   {
+    key: "col-frame", group: "段組み", label: "列に枠をつける", hint: "STOCK のような囲みにする", keywords: "frame 枠 かこみ わく box カード",
+    run: ({ task, ctx }) => ctx.setStyle(task, { framed: !task.style?.framed }),
+  },
+  {
     key: "col-clear", group: "段組み", label: "段組みをやめる", hint: "縦に戻す", keywords: "column 段組み 解除 縦",
     run: ({ task, ctx }) => ctx.clearColumns(task),
   },
@@ -3018,7 +3022,27 @@ function App() {
     }
     if (current < 1) { setToast("列に分けるには、中身のある行が2つ以上必要です"); return; }
 
-    mapTasks((t) => (col.has(t.id) ? { ...t, rowKey, col: col.get(t.id) } : t));
+    // 各列の先頭に「枠つき」の印を付ける。日付・STOCK は自前の囲みを
+    // 持っているので、二重になるから付けない。
+    const headId = new Map();
+    for (const b of tops) {
+      const c = col.get(b.id);
+      if (c === undefined || headId.has(c)) continue;
+      headId.set(c, b.id);
+    }
+    const framedIds = new Set(
+      [...headId.values()].filter((id) => {
+        const b = tops.find((x) => x.id === id);
+        return b && b.blockType !== "day" && b.blockType !== "stock";
+      }),
+    );
+
+    mapTasks((t) => {
+      if (!col.has(t.id)) return t;
+      const next = { ...t, rowKey, col: col.get(t.id) };
+      if (framedIds.has(t.id)) next.style = { ...(t.style || {}), framed: true };
+      return next;
+    });
     setToast(`${current + 1}列に分けました`);
   }
 
@@ -3069,7 +3093,12 @@ function App() {
             const ids = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && t.rowKey).map((t) => t.id);
             if (!ids.length) { setToast("分かれている列はありません"); return; }
             const set = new Set(ids);
-            mapTasks((t) => (set.has(t.id) ? { ...t, rowKey: null, col: 0, colWidth: null } : t));
+            mapTasks((t) => {
+              if (!set.has(t.id)) return t;
+              const style = t.style ? { ...t.style } : null;
+              if (style) delete style.framed;
+              return { ...t, rowKey: null, col: 0, colWidth: null, style };
+            });
             setToast("列をまとめました");
           }}
           title="分けた列を1本に戻す"
@@ -4401,12 +4430,12 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
                   event.currentTarget.blur();
                 }
               }}
-              className="w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] text-neutral-200 outline-none focus:border-white/35"
+              className="ts-row-text w-full rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] text-neutral-200 outline-none focus:border-white/35"
             />
           ) : (
             <div
               onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
-              className="block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
+              className="ts-row-text block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
             </div>
@@ -5556,9 +5585,9 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           b.dropHint === "left" && "[box-shadow:inset_3px_0_0_rgb(96,165,250)]",
           b.dropHint === "right" && "[box-shadow:inset_-3px_0_0_rgb(96,165,250)]",
         )}
-        textareaClassName={() => "w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
+        textareaClassName={() => "ts-block-text w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
-          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[14px] leading-relaxed ts-text",
+          "ts-block-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[14px] leading-relaxed ts-text",
           b.focusPickMode ? "cursor-crosshair" : "cursor-text",
           task.status === "完了" && "line-through opacity-40",
         )}
@@ -5867,10 +5896,16 @@ function BlockArea({
             {row.cols.map((colBlocks, ci) => {
               const colNum = row.single ? 0 : row.colNums[ci];
               const width = colBlocks.find((b) => b.colWidth)?.colWidth || 1;
+              // 先頭が「枠つき」の列は、STOCK ビューのような囲みで描く。
+              // 先頭の行が見出しの帯、その下が中身になる。
+              const framed = !row.single && colBlocks[0]?.style?.framed;
               return (
                 <div
                   key={ci}
-                  className="min-w-0"
+                  className={classNames(
+                    "min-w-0",
+                    framed && "rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
+                  )}
                   style={row.single ? undefined : { flexGrow: width, flexBasis: 0, flexShrink: 1 }}
                 >
                   {!row.single && (
@@ -6356,9 +6391,9 @@ function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTask
                 b.focusRingClass,
                 b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
               )}
-              textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
+              textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
               titleClassName={(b) => classNames(
-                "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
+                "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
                 b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
                 task.status === "完了" && "line-through opacity-40",
               )}
@@ -7252,11 +7287,11 @@ function TaskCard({ task, listNumber, taskMap, categoryTone, children = [], chil
           b.isDragging && "opacity-40",
         )}
         textareaClassName={() => classNames(
-          "w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
+          "ts-row-text w-full resize-none overflow-hidden rounded border border-white/15 bg-black/30 px-1 py-0.5 text-[12.5px] font-medium leading-[1.35] outline-none focus:border-white/35",
           task.status === "完了" && "line-through",
         )}
         titleClassName={(b) => classNames(
-          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]",
+          "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]",
           b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
           task.status === "完了" && "line-through",
         )}
@@ -7779,9 +7814,9 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
           b.isDragging && "opacity-30",
           b.isOver && !b.isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
         )}
-        textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
+        textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
         titleClassName={(b) => classNames(
-          "min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
+          "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
           b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
           isDone && "line-through opacity-40",
         )}
@@ -8041,7 +8076,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       )}
     >
       {/* 日付ヘッダー（シンプルな下線のみ） */}
-      <div className={classNames("mb-1 flex items-baseline gap-1.5 border-b px-1 pb-1", headColor)}>
+      <div data-daycol-head className={classNames("mb-1 flex items-baseline gap-1.5 border-b px-1 pb-1", headColor)}>
         <span className="text-sm font-bold">{label}</span>
         <span className="text-[10px] opacity-60">{date.getMonth() + 1}/{date.getDate()}</span>
         {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}

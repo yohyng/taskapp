@@ -98,6 +98,30 @@ test.describe("指での操作", () => {
     expect(size).toBeGreaterThanOrEqual(16);
   });
 
+  test("タスクの字が、スマホでも読める大きさ", async ({ page }) => {
+    await open(page, [t("a", "きょうの用事", "task", { pageId: null, scheduledDate: todayKey() })], "list");
+    const size = await page.locator(".ts-row-text").first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    // 手元の画面では 12.5px。スマホだと小さすぎる。
+    expect(size).toBeGreaterThanOrEqual(15);
+  });
+
+  test("本文のブロックも、スマホでは一段大きい", async ({ page }) => {
+    await open(page, [t("a", "ほんぶん")]);
+    const size = await page.locator(".ts-block-text").first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(size).toBeGreaterThanOrEqual(16);
+  });
+
+  test("書いているときと読んでいるときで、字の大きさが変わらない", async ({ page }) => {
+    await open(page, [t("a", "もじ")]);
+    const read = await page.locator(".ts-block-text").first()
+      .evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    await row(page, "もじ").locator("div.cursor-text").first().tap();
+    const write = await page.locator("textarea").evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+    expect(write).toBe(read);
+  });
+
   test("⠿ がホバー無しでも見えている", async ({ page }) => {
     await open(page, [t("a", "ぎょう")]);
     const op = await page.evaluate(() => {
