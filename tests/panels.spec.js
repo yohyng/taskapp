@@ -270,8 +270,11 @@ test.describe("消す口があるか", () => {
     });
     page.on("dialog", (d) => d.accept());
 
-    await page.getByText("ALPHA", { exact: true }).first().hover();
-    await page.getByTitle("このプロジェクトを消す（中のタスクは TRAY に残ります）").first().click();
+    // ホバーしなくても見えていること（前は薄すぎて見つけられなかった）
+    const del = page.getByTitle("このプロジェクトを消す（中のタスクは TRAY に残ります）").first();
+    await expect(del).toBeVisible();
+    expect(await del.evaluate((e) => parseFloat(getComputedStyle(e).opacity))).toBe(1);
+    await del.click();
 
     // 箱は消え、中のタスクは親子のまま残る
     await expect.poll(async () => (await byTitle(page, "PJの親")).project).toBe("");

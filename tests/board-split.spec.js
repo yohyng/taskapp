@@ -1,4 +1,4 @@
-import { test, expect, storedTasks } from "./helpers.js";
+import { test, expect, storedTasks, dragTo, centerOf } from "./helpers.js";
 
 // ボードの中身を、頭の行とその子で1列ずつに分ける。
 // 画像でいう DESIGNART / WORK / 結婚式関連 の分かれ方。
@@ -319,5 +319,43 @@ test.describe("縦のカテゴリを足す", () => {
       (await byTitle(page, "B")).col,
       (await byTitle(page, "C")).col,
     ]).toEqual([0, 1, 2]);
+  });
+});
+
+test.describe("列に落としても列が壊れない", () => {
+  const seedCol = (page, seed) => seed({
+    tasks: [
+      t("h", "NOMLAB", { rowKey: "r1", col: 0, style: { framed: true } }),
+      t("k", "中の行", { rowKey: "r1", col: 0 }),
+      t("x", "よそから来る行"),
+    ],
+  });
+  const framedBox = (page) => page.locator("[data-board] div.rounded-lg.border").filter({ hasText: "NOMLAB" });
+
+  test("列に落としても、枠が消えない", async ({ page, seed }) => {
+    await seedCol(page, seed);
+    await expect(framedBox(page)).toHaveCount(1);
+
+    const from = page.locator("[data-board] [data-task-id]").filter({ hasText: "よそから来る行" }).first();
+    await from.hover();
+    const head = page.locator("[data-board] [data-task-id]").filter({ hasText: "NOMLAB" }).first();
+    await dragTo(page, await centerOf(from), await centerOf(head));
+
+    await expect.poll(async () => (await byTitle(page, "よそから来る行")).rowKey).toBe("r1");
+    await expect(framedBox(page)).toHaveCount(1);   // 枠は残る
+  });
+
+  test("列の頭は見出しのまま、落としたものは下に入る", async ({ page, seed }) => {
+    await seedCol(page, seed);
+    const from = page.locator("[data-board] [data-task-id]").filter({ hasText: "よそから来る行" }).first();
+    await from.hover();
+    const head = page.locator("[data-board] [data-task-id]").filter({ hasText: "NOMLAB" }).first();
+    // 頭の上半分に落としても、頭より上には入らない
+    const box = await head.boundingBox();
+    await dragTo(page, await centerOf(from), { x: box.x + box.width / 2, y: box.y + 3 });
+
+    await expect.poll(async () => (await byTitle(page, "よそから来る行")).rowKey).toBe("r1");
+    const order = (await tops(page)).filter((b) => b.col === 0).map((b) => b.title);
+    expect(order[0]).toBe("NOMLAB");
   });
 });

@@ -2726,8 +2726,10 @@ function App() {
       // 落とした相手と同じ階層・同じ列に揃える。
       // 列を引き継がないと、相手の列に入ったつもりで段組みから外れる。
       const target = rest[to];
+      // 枠つきの列の頭は見出しなので、その上には入れずに下へ回す。
+      const keepHead = !!target.style?.framed && target.rowKey;
       const next = [...rest];
-      next.splice(after ? to + 1 : to, 0, {
+      next.splice(after || keepHead ? to + 1 : to, 0, {
         ...moved,
         ...intoPage(moved, target.pageId),
         parentId: target.parentId ?? null,
@@ -4723,9 +4725,9 @@ function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed
               }
             }}
             title="このプロジェクトを消す（中のタスクは TRAY に残ります）"
-            className="rounded p-0.5 text-neutral-700 opacity-0 transition hover:bg-white/10 hover:text-red-300 group-hover/proj:opacity-100"
+            className="rounded p-1 text-neutral-500 transition hover:bg-red-400/15 hover:text-red-300"
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       </div>
@@ -6001,7 +6003,9 @@ function BlockArea({
               const width = colBlocks.find((b) => b.colWidth)?.colWidth || 1;
               // 先頭が「枠つき」の列は、STOCK ビューのような囲みで描く。
               // 先頭の行が見出しの帯、その下が中身になる。
-              const framed = !row.single && colBlocks[0]?.style?.framed;
+              // 枠は列のどれかが持っていれば立てる。先頭に何か入っただけで
+              // 枠が消えると、列を作り直したように見えてしまう。
+              const framed = !row.single && colBlocks.some((x) => x.style?.framed);
               return (
                 <div
                   key={ci}
@@ -6478,9 +6482,9 @@ function TaskBlock({
         <button
           onClick={(e) => { e.stopPropagation(); blockOptions.removeTask?.(task.id); }}
           title="このブロックを消す（中のタスクは消えません）"
-          className="mt-0.5 shrink-0 rounded p-0.5 text-neutral-700 opacity-0 transition hover:bg-white/10 hover:text-red-300 group-hover/block:opacity-100"
+          className="mt-0.5 shrink-0 rounded p-1 text-neutral-500 transition hover:bg-red-400/15 hover:text-red-300"
         >
-          <X className="h-3 w-3" />
+          <X className="h-3.5 w-3.5" />
         </button>
       </div>
     );
