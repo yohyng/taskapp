@@ -913,7 +913,9 @@ function App() {
   // 外して「どこにも属さないタスク」にするだけ。親子も中身もそのまま。
   const [confirmUnproject, setConfirmUnproject] = useState(false);
   function moveProjectTasksToTray() {
-    const targets = tasks.filter((t) => !t.archived && (t.category || t.project));
+    // 保管済みも含めて外す。箱はタスクの Category / Project から
+    // 組み立てられるので、1件でも残っていると箱が消えない。
+    const targets = tasks.filter((t) => t.category || t.project);
     // 中身が空でも、箱（プロジェクトの定義）が残っていれば片付ける。
     // ここで止めると、空の箱だけが消せなくなる。
     const boxes = Object.keys(projectOrder || {}).reduce((n, k) => n + (projectOrder[k]?.length || 0), 0)
@@ -3441,7 +3443,7 @@ function App() {
                     >
                       {confirmUnproject
                         ? (() => {
-                            const n = tasks.filter((t) => !t.archived && (t.category || t.project)).length;
+                            const n = tasks.filter((t) => t.category || t.project).length;
                             return n ? `もう一度押すと実行：${n}件を TRAY へ` : "もう一度押すと実行：空のPJを消す";
                           })()
                         : "PJ を消して、タスクを TRAY に移す"}
@@ -3794,8 +3796,8 @@ function App() {
                 </button>
               </div>
             )}
-            {/* Board category columns */}
-            {categories.map((cat) => (
+            {/* Board category columns。しまってあるときは出さない */}
+            {!hiddenPanels.has("board") && categories.map((cat) => (
               <div key={cat.key} className="min-w-0">
                 <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />
               </div>

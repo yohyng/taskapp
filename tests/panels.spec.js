@@ -222,3 +222,46 @@ test.describe("空になったPJの箱を消す", () => {
     await expect(page.getByText("片付けるものがありません", { exact: false })).toBeVisible();
   });
 });
+
+test.describe("消えないケースを潰す", () => {
+  const byTitle = async (page, s) => (await storedTasks(page)).find((x) => x.title === s);
+  const projectBoxes = (page) => page.evaluate(() =>
+    [...document.querySelectorAll("button, span")]
+      .map((e) => e.textContent.trim()).filter((x) => x === "ALPHA").length);
+
+  test("保管済みのタスクが残っていても、PJの箱は消える", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        t("live", "まだ生きてる", { category: "WORK", project: "ALPHA", plain: false }),
+        t("old", "保管済み", { category: "WORK", project: "ALPHA", plain: false, archived: true }),
+      ],
+      categories: [{ key: "WORK", label: "WORK", tone: "sky" }],
+      projectOrder: { WORK: ["ALPHA"] },
+    });
+    await openSettings(page);
+    await page.getByRole("button", { name: "PJ を消して、タスクを TRAY に移す" }).click();
+    await page.getByRole("button", { name: /もう一度押すと実行/ }).click();
+
+    // 箱のもとになる Category / Project が、保管済みからも外れていること
+    await expect.poll(async () => (await byTitle(page, "保管済み")).project).toBe("");
+    expect((await byTitle(page, "まだ生きてる")).project).toBe("");
+    await expect.poll(() => projectBoxes(page)).toBe(0);
+  });
+
+  test("PJボードをしまうと、PJの列も画面から消える", async ({ page, seed }) => {
+    await seed({
+      tasks: [t("a", "PJのタスク", { category: "WORK", project: "ALPHA", plain: false })],
+      categories: [{ key: "WORK", label: "WORK", tone: "sky" }],
+      projectOrder: { WORK: ["ALPHA"] },
+    });
+    await expect.poll(() => projectBoxes(page)).toBeGreaterThan(0);
+
+    await openSettings(page);
+    await page.getByRole("button", { name: /PJボード.*出ている/ }).click();
+    await page.keyboard.press("Escape");
+
+    await expect.poll(() => projectBoxes(page)).toBe(0);
+    // しまっただけなので、タスクは残っている
+    expect((await byTitle(page, "PJのタスク")).project).toBe("ALPHA");
+  });
+});
