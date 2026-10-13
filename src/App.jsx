@@ -261,22 +261,17 @@ const SLASH_COMMANDS = [
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
   },
   {
-    key: "col-right", group: "段組み", label: "右に列を足す", hint: "横に並べる", keywords: "column 段組み 列 横 right",
+    key: "col-right", group: "段組み", label: "列を追加する", hint: "右に新しい列を作る", keywords: "column 段組み 列 横 right れつ ついか たて",
     run: ({ task, ctx }) => ctx.addColumn(task, 1),
   },
   {
-    key: "col-left", group: "段組み", label: "左に列を足す", hint: "横に並べる", keywords: "column 段組み 列 横 left",
+    key: "col-left", group: "段組み", label: "左に列を追加する", hint: "左に新しい列を作る", keywords: "column 段組み 列 横 left れつ ついか ひだり",
     run: ({ task, ctx }) => ctx.addColumn(task, -1),
   },
   {
     key: "week-row", group: "段組み", label: "一週間を並べる", hint: "月〜日の予定を横一列に置く", keywords: "week 一週間 しゅう 曜日 ようび カレンダー",
     standalone: true,
     run: ({ ctx }) => ctx.addWeekRow(),
-  },
-  {
-    key: "col-split", group: "段組み", label: "列に分け直す", hint: "頭の行ごとに縦の列へ", keywords: "split 列 分ける ならべ 整理",
-    standalone: true,
-    run: ({ ctx }) => ctx.splitColumns(),
   },
   {
     key: "col-frame", group: "段組み", label: "列に枠をつける", hint: "STOCK のような囲みにする", keywords: "frame 枠 かこみ わく box カード",
@@ -3065,7 +3060,6 @@ function App() {
       if (created) setPendingEditId(created.id);
     },
     addWeekRow: () => addWeekRow(),
-    splitColumns: () => splitBoardIntoColumns(),
     clearColumns: (task) => {
       if (!task.rowKey) return;
       commitTasks((prev) => prev.map((t) =>
@@ -3097,7 +3091,6 @@ function App() {
     addColumn: (...a) => slashHandlers.current.addColumn(...a),
     clearColumns: (...a) => slashHandlers.current.clearColumns(...a),
     addWeekRow: (...a) => slashHandlers.current.addWeekRow(...a),
-    splitColumns: (...a) => slashHandlers.current.splitColumns(...a),
     placeOnCanvas: (...a) => slashHandlers.current.placeOnCanvas(...a),
     setStyle: (...a) => slashHandlers.current.setStyle(...a),
     get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
@@ -3149,47 +3142,6 @@ function App() {
   // ボードの中身を、親ブロックごとに縦の列へ分ける。
   // 「DESIGNART / WORK / 結婚式関連」のように、頭の行とその子で1列になる。
 
-  function splitBoardIntoColumns({ silent = false } = {}) {
-    const order = new Map(tasks.map((t, i) => [t.id, i]));
-    const tops = tasks
-      .filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId)
-      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
-
-    const rowKey = `row-${uid()}`;
-    const col = new Map();
-    let current = -1;
-    for (const b of tops) {
-      // 中身のある行で新しい列を起こす。空行は直前の列に付ける
-      //（列の末尾で書き足せる場所として残る）。
-      if (b.title.trim() || b.blockType === "day" || b.blockType === "stock") current++;
-      if (current < 0) continue;
-      col.set(b.id, current);
-    }
-    if (current < 0) { if (!silent) setToast("並べ直すものがありません"); return; }
-
-    // 各列の先頭に「枠つき」の印を付ける。日付・STOCK は自前の囲みを
-    // 持っているので、二重になるから付けない。
-    const headId = new Map();
-    for (const b of tops) {
-      const c = col.get(b.id);
-      if (c === undefined || headId.has(c)) continue;
-      headId.set(c, b.id);
-    }
-    const framedIds = new Set(
-      [...headId.values()].filter((id) => {
-        const b = tops.find((x) => x.id === id);
-        return b && b.blockType !== "day" && b.blockType !== "stock";
-      }),
-    );
-
-    mapTasks((t) => {
-      if (!col.has(t.id)) return t;
-      const next = { ...t, rowKey, col: col.get(t.id) };
-      if (framedIds.has(t.id)) next.style = { ...(t.style || {}), framed: true };
-      return next;
-    });
-    if (!silent) setToast(`${current + 1}列に分けました`);
-  }
 
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   const dayDeps = {
@@ -3234,7 +3186,7 @@ function App() {
         onReorder={swapTaskOrder}
         onMergeBlocks={mergeBlockInto}
         dayDeps={dayDeps}
-        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/よてい でその日の予定。"
+        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/列を追加する で縦の列。"
         tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
       />
     </div>
