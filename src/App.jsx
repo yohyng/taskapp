@@ -916,10 +916,16 @@ function App() {
     const targets = tasks.filter((t) => !t.archived && (t.category || t.project));
     if (!targets.length) { setToast("PJ に入っているタスクはありません"); return; }
     const ids = new Set(targets.map((t) => t.id));
-    commitTasks((prev) => prev.map((t) => (
-      ids.has(t.id) ? { ...t, category: "", project: "", plain: true, stock: false, stockViewId: null } : t
-    )));
-    setToast(`${targets.length}件を TRAY に移しました（取り消しできます）`);
+    commitState((current) => ({
+      ...current,
+      tasks: (current.tasks || []).map((t) => (
+        ids.has(t.id) ? { ...t, category: "", project: "", plain: true, stock: false, stockViewId: null } : t
+      )),
+      // プロジェクトの定義も空にする。中身を出したあとの空の箱を残さない。
+      projectRules: {},
+      projectOrder: {},
+    }));
+    setToast(`${targets.length}件を TRAY に移し、プロジェクトを空にしました（取り消せます）`);
     setConfirmUnproject(false);
   }
 
@@ -2121,12 +2127,12 @@ function App() {
 
   function deleteProject(category, project) {
     const key = projectKey(category, project);
-    const targetTasks = tasks.filter((t) => t.category === category && t.project === project);
-    const removeIds = targetTasks.map((t) => t.id);
-    const newItems = targetTasks
-      .filter((t) => !t.parentId)
-      .map((t) => ({ id: uid(), title: t.title, source: "Local Tray", createdAt: toDateKey(new Date()) }));
-    removeIds.forEach((id) => addTombstone(TOMBSTONE_TASKS_KEY, id));
+    // 中のタスクは消さず、所属だけ外して TRAY に残す。
+    // 以前はタスクを削除して題名だけのメモに作り直していたため、
+    // 子タスク・状態・日付がまるごと消えていた。
+    const targetIds = new Set(
+      tasks.filter((t) => t.category === category && t.project === project).map((t) => t.id),
+    );
     commitState((current) => {
       const nextRules = { ...(current.projectRules || {}) };
       delete nextRules[key];
@@ -2134,17 +2140,16 @@ function App() {
       if (nextOrder[category]) nextOrder[category] = nextOrder[category].filter((p) => p !== project);
       return {
         ...current,
-        tasks: (current.tasks || []).filter((t) => !removeIds.includes(t.id)),
-        inboxItems: [...newItems, ...(current.inboxItems || [])],
+        tasks: (current.tasks || []).map((t) => (
+          targetIds.has(t.id) ? { ...t, category: "", project: "", plain: true } : t
+        )),
         projectRules: nextRules,
         projectOrder: nextOrder,
       };
     });
-    removeIds.forEach((id) => dbDeleteTask(id));
-    newItems.forEach((item) => dbUpsertTrayRow(item));
     dbDeleteProjectRule(key);
     setSelectedProject(null);
-    setToast(`プロジェクトを削除し、${newItems.length}件をTRAYに戻しました`);
+    setToast(`プロジェクトを消して、${targetIds.size}件を TRAY に戻しました`);
   }
 
   function removeColumn(key) {
@@ -3430,10 +3435,10 @@ function App() {
                     >
                       {confirmUnproject
                         ? `もう一度押すと実行：${tasks.filter((t) => !t.archived && (t.category || t.project)).length}件を TRAY へ`
-                        : "PJ のタスクを全部 TRAY に移す"}
+                        : "PJ を空にして、タスクを TRAY に移す"}
                     </button>
                     <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
-                      Category / Project を外すだけで、タスクも親子も消えません。取り消しもできます。
+                      Category / Project を外してプロジェクトを空にします。タスクも親子も消えません。取り消しもできます。
                     </div>
                   </div>
 
