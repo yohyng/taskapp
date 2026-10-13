@@ -8,7 +8,8 @@ const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pag
 // 自作のブロック種別をひとつ作る
 async function makeType(page, { label = "メモ帳", marker = "", md = "", size = "", color = false } = {}) {
   await toPages(page);
-  await page.getByRole("button", { name: "ブロックを作る" }).click();
+  await page.locator('button[title*="Settings"], button[title="Columns / Category Settings"]').first().click();
+  await page.getByRole("button", { name: "ブロックの種別を作る" }).click();
   // ヘッダーの「タスクを追加」と紛れるのでダイアログ内に限定する
   const dialog = page.locator("div.fixed.inset-0").filter({ hasText: "ブロックを作る" });
   await dialog.getByRole("button", { name: "追加", exact: true }).click();
@@ -85,7 +86,8 @@ test.describe("自分で作るブロック種別", () => {
         JSON.parse(localStorage.getItem("taskspace-custom-block-types") || "[]").length))
       .toBe(1);
 
-    await page.getByRole("button", { name: "ブロックを作る" }).click();
+    await page.locator('button[title*="Settings"], button[title="Columns / Category Settings"]').first().click();
+    await page.getByRole("button", { name: "ブロックの種別を作る" }).click();
     const dialog = page.locator("div.fixed.inset-0").filter({ hasText: "ブロックを作る" });
     await dialog.locator('button[title="この種別を消す"]').first().click();
     await dialog.getByRole("button", { name: "保存" }).click();

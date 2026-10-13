@@ -269,6 +269,16 @@ const SLASH_COMMANDS = [
     run: ({ task, ctx }) => ctx.addColumn(task, -1),
   },
   {
+    key: "week-row", group: "段組み", label: "一週間を並べる", hint: "月〜日の予定を横一列に置く", keywords: "week 一週間 しゅう 曜日 ようび カレンダー",
+    standalone: true,
+    run: ({ ctx }) => ctx.addWeekRow(),
+  },
+  {
+    key: "col-split", group: "段組み", label: "列に分け直す", hint: "頭の行ごとに縦の列へ", keywords: "split 列 分ける ならべ 整理",
+    standalone: true,
+    run: ({ ctx }) => ctx.splitColumns(),
+  },
+  {
     key: "col-frame", group: "段組み", label: "列に枠をつける", hint: "STOCK のような囲みにする", keywords: "frame 枠 かこみ わく box カード",
     run: ({ task, ctx }) => ctx.setStyle(task, { framed: !task.style?.framed }),
   },
@@ -1132,6 +1142,17 @@ function App() {
     const pointerBelowMiddle = () =>
       pointer && over.rect ? pointer.y > over.rect.top + over.rect.height / 2 : isBottomHalf();
 
+    // トグルの真ん中に落としたら、その中に入れる。
+    // 上下の端に落としたときは、これまで通り前後に並べる。
+    function dropsInsideToggle() {
+      if (!pointer || !over.rect) return false;
+      const target = taskMap.get(dst.id);
+      if (target?.blockType !== "toggle") return false;
+      const r = over.rect;
+      const edge = Math.min(r.height * 0.3, 12);
+      return pointer.y > r.top + edge && pointer.y < r.bottom - edge;
+    }
+
     // Column header reorder
     if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
       moveColumn(src.key, dst.key);
@@ -1318,10 +1339,21 @@ function App() {
     // Tray item dropped into tray drop zone
     // ページ内のブロック並べ替え。落とした相手の上半分なら前、下半分なら後ろ。
     if (src.type === "task" && dst.type === "page-block" && src.id !== dst.id) {
+      // 自分の子孫の上には落とせない。落とすと自分が自分の親になる。
+      if (collectDescendantIds(src.id).includes(dst.id)) return;
       const side = dropSide();
       if (side) {
         movePageBlockToNewColumn(src.id, dst.id, side);
         setToast(side < 0 ? "左に列を作りました" : "右に列を作りました");
+      } else if (dropsInsideToggle()) {
+        const target = taskMap.get(dst.id);
+        if (collectDescendantIds(src.id).includes(dst.id)) return; // 自分の中には入れない
+        commitTasks((prev) => prev.map((t) => (
+          t.id === src.id
+            ? { ...t, ...intoPage(t, target.pageId), parentId: dst.id, rowKey: null, col: 0, colWidth: null }
+            : t
+        )));
+        setToast("トグルの中に入れました");
       } else if (
         collectDescendantIds(src.id).length
         && taskMap.get(src.id)?.pageId !== taskMap.get(dst.id)?.pageId
@@ -3032,6 +3064,8 @@ function App() {
       // 足した列にそのまま書けるようにする
       if (created) setPendingEditId(created.id);
     },
+    addWeekRow: () => addWeekRow(),
+    splitColumns: () => splitBoardIntoColumns(),
     clearColumns: (task) => {
       if (!task.rowKey) return;
       commitTasks((prev) => prev.map((t) =>
@@ -3062,6 +3096,8 @@ function App() {
     setBlockType: (...a) => slashHandlers.current.setBlockType(...a),
     addColumn: (...a) => slashHandlers.current.addColumn(...a),
     clearColumns: (...a) => slashHandlers.current.clearColumns(...a),
+    addWeekRow: (...a) => slashHandlers.current.addWeekRow(...a),
+    splitColumns: (...a) => slashHandlers.current.splitColumns(...a),
     placeOnCanvas: (...a) => slashHandlers.current.placeOnCanvas(...a),
     setStyle: (...a) => slashHandlers.current.setStyle(...a),
     get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
@@ -3075,17 +3111,6 @@ function App() {
     noteAnchor: (id) => { selectAnchorRef.current = id; },
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
-
-  // ボードは縦列で持つ。STOCK ビューのように、頭の行とその中身で1列。
-  const [boardColumns, setBoardColumns] = useState(() => {
-    try { return localStorage.getItem("taskspace-board-columns") !== "false"; } catch { return true; }
-  });
-  function setBoardColumnMode(on) {
-    setBoardColumns(on);
-    try { localStorage.setItem("taskspace-board-columns", String(on)); } catch { /* quota */ }
-    if (on) splitBoardIntoColumns({ silent: true });
-    else mergeBoardColumns({ silent: true });
-  }
 
   const [typeEditor, setTypeEditor] = useState(false);
 
@@ -3123,18 +3148,6 @@ function App() {
 
   // ボードの中身を、親ブロックごとに縦の列へ分ける。
   // 「DESIGNART / WORK / 結婚式関連」のように、頭の行とその子で1列になる。
-  function mergeBoardColumns({ silent = false } = {}) {
-    const ids = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && t.rowKey).map((t) => t.id);
-    if (!ids.length) { if (!silent) setToast("分かれている列はありません"); return; }
-    const set = new Set(ids);
-    mapTasks((t) => {
-      if (!set.has(t.id)) return t;
-      const style = t.style ? { ...t.style } : null;
-      if (style) delete style.framed;
-      return { ...t, rowKey: null, col: 0, colWidth: null, style };
-    });
-    if (!silent) setToast("列をまとめました");
-  }
 
   function splitBoardIntoColumns({ silent = false } = {}) {
     const order = new Map(tasks.map((t, i) => [t.id, i]));
@@ -3200,46 +3213,6 @@ function App() {
           placeholder="名前をつける"
           className="min-w-[8rem] flex-1 bg-transparent text-sm font-semibold tracking-tight ts-text outline-none placeholder:text-neutral-700"
         />
-        <button
-          onClick={addWeekRow}
-          title="月〜日の日付ブロックを横一列に並べる"
-          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
-        >
-          + 一週間
-        </button>
-        <button
-          onClick={addBoardColumn}
-          title="縦のカテゴリを1本足す"
-          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
-        >
-          + 列
-        </button>
-        <button
-          onClick={() => setBoardColumnMode(!boardColumns)}
-          title={boardColumns ? "縦に積む書き方に戻す" : "頭の行とその中身で1列ずつに分ける"}
-          className={classNames(
-            "shrink-0 rounded border px-1.5 py-1 text-[10px] transition",
-            boardColumns
-              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
-              : "border-white/10 text-neutral-500 hover:bg-white/[0.06] hover:text-neutral-300",
-          )}
-        >
-          縦列
-        </button>
-        <button
-          onClick={() => splitBoardIntoColumns()}
-          title="いまの中身を、頭の行ごとに並べ直す"
-          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
-        >
-          並べ直す
-        </button>
-        <button
-          onClick={() => setTypeEditor(true)}
-          title="ブロックの種別を自分で作る"
-          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
-        >
-          ブロックを作る
-        </button>
       </div>
       {typeEditor && (
         <BlockTypeEditor
@@ -3261,7 +3234,6 @@ function App() {
         onReorder={swapTaskOrder}
         onMergeBlocks={mergeBlockInto}
         dayDeps={dayDeps}
-        columnMode={boardColumns}
         placeholder="ここは自由。クリックして書き始める。/ でコマンド、/よてい でその日の予定。"
         tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
       />
@@ -3432,6 +3404,16 @@ function App() {
                     >
                       {FONT_OPTIONS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
                     </select>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">ブロック</div>
+                    <button
+                      onClick={() => { setTypeEditor(true); setShowSettingsPanel(false); }}
+                      className="mb-1 flex w-full items-center gap-1 rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left text-xs text-neutral-400 transition hover:bg-white/[0.07]"
+                    >
+                      <Settings2 className="h-3 w-3" /> ブロックの種別を作る
+                    </button>
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
@@ -3689,7 +3671,10 @@ function App() {
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
                   {(() => {
-                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId && !t.parentId);
+                    // TRAY は「まだどこにも置いていないもの」だけ。
+                    // 日付が付いていれば 7days に、pageId があればボードに出ているので、
+                    // ここに重ねて出すと同じものが2か所に見える。
+                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId && !t.scheduledDate && !t.parentId);
                     return rootTrayTasks.map((task, idx) => (
                       <TrayTask
                         key={task.id}
@@ -4879,8 +4864,11 @@ function useTaskBlock({
       setEditing(false);
       // タイトルが残っていれば先に確定してからコマンドを走らせる
       if (rest && rest !== task.title) upsertTask?.({ id: task.id, title: rest });
-      else if (!rest && !task.title) { removeTask?.(task.id); return; }
+      // 空の行から呼んだときも、コマンドは必ず走らせる。
+      // 先に消して打ち切ると、打ったのに何も起きないように見える。
       cmd.run({ task, ctx: slashCtx });
+      // 行そのものを使わないコマンドは、空の行を残さない
+      if (!rest && !task.title && cmd.standalone) removeTask?.(task.id);
     },
   });
 
@@ -4911,11 +4899,16 @@ function useTaskBlock({
       const edge = Math.min(r.width * 0.3, 140);
       if (ev.clientX < r.left + edge) return setDropHint("left");
       if (ev.clientX > r.right - edge) return setDropHint("right");
+      // トグルは真ん中に落とすと中に入る
+      if (task.blockType === "toggle") {
+        const band = Math.min(r.height * 0.3, 12);
+        if (ev.clientY > r.top + band && ev.clientY < r.bottom - band) return setDropHint("inside");
+      }
       setDropHint(ev.clientY > r.top + r.height / 2 ? "bottom" : "top");
     }
     window.addEventListener("pointermove", onMove);
     return () => window.removeEventListener("pointermove", onMove);
-  }, [isOver, notionMode]);
+  }, [isOver, notionMode, task.blockType]);
 
   const setRefs = (el) => {
     dragRef(el);
@@ -5741,6 +5734,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
           b.dropHint && "relative",
           b.dropHint === "left" && "[box-shadow:inset_3px_0_0_rgb(96,165,250)]",
           b.dropHint === "right" && "[box-shadow:inset_-3px_0_0_rgb(96,165,250)]",
+          // 中に入る合図は、字下げの位置に縦線を出す
+          b.dropHint === "inside" && "[box-shadow:inset_16px_0_0_-13px_rgb(52,211,153)] bg-emerald-400/[0.07]",
         )}
         textareaClassName={() => "ts-block-text w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
@@ -5797,8 +5792,6 @@ function BlockArea({
   tailClass = "mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700",
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   dayDeps,
-  // 縦列で持つか（ボード）。末尾に足すときの行き先が変わる。
-  columnMode = false,
 }) {
   const { markForEdit } = useBlockEdit();
   // トグルの開閉は見た目の設定なので端末内だけに持つ
@@ -5967,23 +5960,6 @@ function BlockArea({
   function addBlockAtEnd() {
     const last = blocks[blocks.length - 1];
     if (last && !last.title.trim()) return; // 末尾が空なら増やさない
-
-    // 縦列で持っているときは、下に足すのではなく右に列を起こす
-    //（STOCK ビューを1本増やすのと同じ感じ）。
-    if (columnMode) {
-      const inRow = blocks.filter((b) => b.rowKey);
-      const rowKey = inRow[0]?.rowKey || `row-${uid()}`;
-      const nextCol = inRow.length ? Math.max(...inRow.map((b) => b.col ?? 0)) + 1 : 0;
-      const made = addTask({
-        title: "", allowEmpty: true, plain: true, pageId, silent: true,
-        afterId: last?.id, rowKey, col: nextCol,
-      });
-      if (made) {
-        upsertTask({ id: made.id, style: { framed: true } });
-        markForEdit?.(made.id);
-      }
-      return;
-    }
 
     const created = addTask({ title: "", allowEmpty: true, plain: true, pageId, silent: true, afterId: last?.id });
     if (created) markForEdit?.(created.id);
@@ -7690,9 +7666,9 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
           b.isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
           b.isDragging && "opacity-30",
         )}
-        textareaClassName={() => "w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"}
+        textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"}
         titleClassName={(b) => classNames(
-          "break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text",
+          "ts-row-text break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text",
           b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
           isDone && "line-through opacity-40",
         )}

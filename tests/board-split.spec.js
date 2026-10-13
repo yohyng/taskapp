@@ -22,6 +22,18 @@ const THREE = {
     t("c1", "会社の結婚のやつ", { parentId: "g3" }),
   ],
 };
+// ボードの先頭の行から / コマンドを呼ぶ
+async function runCommand(page, label) {
+  // 日付ブロックなどは文字を持たないので、書ける行を選ぶ
+  const writable = page.locator("[data-board] [data-task-id] div.cursor-text");
+  if (await writable.count()) await writable.first().click();
+  else await page.locator("[data-board] [data-block-tail]").click();
+  await page.waitForSelector("textarea");
+  await page.keyboard.press("End");
+  await page.keyboard.type(` /${label}`);
+  await page.keyboard.press("Enter");
+}
+
 const tops = async (page) =>
   (await storedTasks(page)).filter((x) => x.pageId === BOARD && !x.parentId);
 const byTitle = async (page, s) => (await storedTasks(page)).find((x) => x.title === s);
@@ -29,7 +41,7 @@ const byTitle = async (page, s) => (await storedTasks(page)).find((x) => x.title
 test.describe("ボードを列に分ける", () => {
   test("頭の行ごとに1列ずつになる", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
 
     await expect.poll(async () => (await byTitle(page, "DESIGNART")).col).toBe(0);
     expect((await byTitle(page, "WORK")).col).toBe(1);
@@ -41,7 +53,7 @@ test.describe("ボードを列に分ける", () => {
 
   test("子はその列の中に残る（列に散らばらない）", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
     // 子は親の下にぶら下がったまま＝列を持たない
@@ -52,7 +64,7 @@ test.describe("ボードを列に分ける", () => {
 
   test("画面でも横に並び、子は頭の行の下に付く", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
     const box = async (s) =>
@@ -66,7 +78,7 @@ test.describe("ボードを列に分ける", () => {
 
   test("空行は新しい列を起こさず、直前の列の末尾に残る", async ({ page, seed }) => {
     await seed({ tasks: [...THREE.tasks, t("e1", "")] });
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
 
     await expect.poll(async () => (await byTitle(page, "結婚式関連")).col).toBe(2);
     const empty = (await tops(page)).find((x) => !x.title);
@@ -75,16 +87,21 @@ test.describe("ボードを列に分ける", () => {
 
   test("縦列をやめると1本に戻る", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
-    await page.getByRole("button", { name: "縦列" }).click();   // 縦列をやめる
-    await expect.poll(async () => (await tops(page)).every((x) => !x.rowKey)).toBe(true);
+    // 列をまとめ直すときは、段組みをやめるコマンドで戻す
+    const head = page.locator("[data-board] [data-task-id]").filter({ hasText: "DESIGNART" }).first();
+    await head.locator("div.cursor-text").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" /段組みをやめる");
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await byTitle(page, "DESIGNART")).rowKey).toBeFalsy();
   });
 
   test("1つしかなくても、1列として並ぶ", async ({ page, seed }) => {
     await seed({ tasks: [t("g1", "ひとつだけ"), t("e1", "")] });
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
 
     await expect.poll(async () => (await byTitle(page, "ひとつだけ")).col).toBe(0);
     expect((await byTitle(page, "ひとつだけ")).rowKey).toBeTruthy();
@@ -98,7 +115,7 @@ test.describe("ボードを列に分ける", () => {
         t("a1", "バナー出力", { parentId: "g1" }),
       ],
     });
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
 
     await expect.poll(async () => (await byTitle(page, "DESIGNART")).col).toBe(1);
     const day = (await tops(page)).find((x) => x.blockType === "day");
@@ -112,7 +129,7 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
 
   test("分けると、各列が囲みになる", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
     // 先頭の行に「枠つき」の印が付く
@@ -125,7 +142,7 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
 
   test("囲みの中に、その列の中身がぜんぶ入る", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
     const box = framedBox(page, "DESIGNART").first();
@@ -142,7 +159,7 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
         t("a1", "バナー出力", { parentId: "g1" }),
       ],
     });
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "DESIGNART")).col).toBe(1);
 
     const day = (await tops(page)).find((x) => x.blockType === "day");
@@ -152,16 +169,20 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
 
   test("縦列をやめると枠も外れる", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).style?.framed).toBe(true);
 
-    await page.getByRole("button", { name: "縦列" }).click();   // 縦列をやめる
-    await expect.poll(async () => (await tops(page)).every((x) => !x.style?.framed)).toBe(true);
+    const head2 = page.locator("[data-board] [data-task-id]").filter({ hasText: "DESIGNART" }).first();
+    await head2.locator("div.cursor-text").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.type(" /枠");
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => (await byTitle(page, "DESIGNART")).style?.framed).toBeFalsy();
   });
 
   test("/枠 で、あとから付け外しできる", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).style?.framed).toBe(true);
 
     const row = page.locator("[data-board] [data-task-id]").filter({ hasText: "WORK" }).first();
@@ -179,7 +200,7 @@ test.describe("列の枠（STOCKビューのような囲み）", () => {
 test.describe("縦列は保存される", () => {
   test("読み直しても、列の分かれ方と枠が残る", async ({ page, seed }) => {
     await seed(THREE);
-    await page.getByRole("button", { name: "並べ直す" }).click();
+    await runCommand(page, "列に分け直す");
     await expect.poll(async () => (await byTitle(page, "WORK")).col).toBe(1);
 
     // フィクスチャは読み直すたびに種を蒔き直すので、それが走らない
@@ -221,104 +242,29 @@ test.describe("縦列は保存される", () => {
   });
 });
 
-test.describe("縦列モード", () => {
-  const mode = (page) => page.evaluate(() => localStorage.getItem("taskspace-board-columns"));
 
-  test("既定で縦列になっている", async ({ page, seed }) => {
-    await seed({ tasks: [t("a", "なにか")] });
-    await expect(page.getByRole("button", { name: "縦列" })).toHaveClass(/emerald/);
-  });
-
-  test("縦列のときは、末尾に書くと右に列が増える", async ({ page, seed }) => {
+test.describe("列を足す", () => {
+  test("/右に列を足す で、右に空の列ができてすぐ書ける", async ({ page, seed }) => {
     await seed({ tasks: [t("g1", "ひとつめ", { rowKey: "r1", col: 0, style: { framed: true } })] });
-
-    await page.locator("[data-board] [data-block-tail]").click();
-    await page.keyboard.type("ふたつめ");
-    await page.keyboard.press("Escape");
-
-    await expect.poll(async () => (await byTitle(page, "ふたつめ"))?.col).toBe(1);
-    expect((await byTitle(page, "ふたつめ")).rowKey).toBe("r1");   // 同じ行に並ぶ
-    expect((await byTitle(page, "ふたつめ")).style?.framed).toBe(true); // 囲みも付く
-  });
-
-  test("縦列をやめると、末尾に書いたものは下に積まれる", async ({ page, seed }) => {
-    await seed({ tasks: [t("g1", "ひとつめ")] });
-    await page.getByRole("button", { name: "縦列" }).click();      // やめる
-    await expect.poll(() => mode(page)).toBe("false");
-
-    await page.locator("[data-board] [data-block-tail]").click();
-    await page.keyboard.type("ふたつめ");
-    await page.keyboard.press("Escape");
-
-    await expect.poll(async () => (await byTitle(page, "ふたつめ"))?.title).toBe("ふたつめ");
-    expect((await byTitle(page, "ふたつめ")).rowKey).toBeFalsy();
-  });
-
-  test("縦列の設定は読み直しても残る", async ({ page, seed }) => {
-    await seed({ tasks: [t("g1", "ひとつめ")] });
-    await page.getByRole("button", { name: "縦列" }).click();
-    await expect.poll(() => mode(page)).toBe("false");
-
-    const fresh = await page.context().newPage();
-    await fresh.goto("/");
-    await fresh.waitForSelector("[data-board]");
-    await expect(fresh.getByRole("button", { name: "縦列" })).not.toHaveClass(/emerald/);
-    await fresh.close();
-  });
-
-  test("列の中は本文と同じ操作感のまま", async ({ page, seed }) => {
-    await seed({ tasks: [t("g1", "みだし", { rowKey: "r1", col: 0, style: { framed: true } })] });
-
-    const row = page.locator("[data-board] [data-task-id]").filter({ hasText: "みだし" }).first();
-    await row.locator("div.cursor-text").first().click();
-    await page.keyboard.press("End");
-    await page.keyboard.press("Enter");          // 列の中で改行
-    await page.keyboard.type("なかみ");
-    await page.keyboard.press("Escape");
-
-    // 同じ列に積まれる（新しい列にならない）
-    await expect.poll(async () => (await byTitle(page, "なかみ"))?.col).toBe(0);
-    expect((await byTitle(page, "なかみ")).rowKey).toBe("r1");
-  });
-});
-
-test.describe("縦のカテゴリを足す", () => {
-  test("「+ 列」で、右に空の列ができてすぐ書ける", async ({ page, seed }) => {
-    await seed({ tasks: [t("g1", "ひとつめ", { rowKey: "r1", col: 0, style: { framed: true } })] });
-    await page.getByRole("button", { name: "+ 列" }).click();
+    await runCommand(page, "右に列を足す");
 
     await expect(page.locator("textarea")).toHaveCount(1);
     await page.keyboard.type("ふたつめ");
     await page.keyboard.press("Escape");
 
     await expect.poll(async () => (await byTitle(page, "ふたつめ"))?.col).toBe(1);
-    expect((await byTitle(page, "ふたつめ")).rowKey).toBe("r1");      // 同じ行に並ぶ
-    expect((await byTitle(page, "ふたつめ")).style?.framed).toBe(true); // 囲みも付く
+    expect((await byTitle(page, "ふたつめ")).rowKey).toBe("r1");   // 同じ行に並ぶ
   });
 
-  test("何も無いところからでも1本目を作れる", async ({ page, seed }) => {
-    await seed({ tasks: [] });
-    await page.getByRole("button", { name: "+ 列" }).click();
-    await page.keyboard.type("さいしょの列");
+  test("何も無いところからでも列にできる", async ({ page, seed }) => {
+    await seed({ tasks: [t("g1", "さいしょ")] });
+    await runCommand(page, "右に列を足す");
+    await page.keyboard.type("つぎ");
     await page.keyboard.press("Escape");
 
-    await expect.poll(async () => (await byTitle(page, "さいしょの列"))?.col).toBe(0);
-    expect((await byTitle(page, "さいしょの列")).rowKey).toBeTruthy();
-  });
-
-  test("押すたびに右へ増える", async ({ page, seed }) => {
-    await seed({ tasks: [] });
-    for (const name of ["A", "B", "C"]) {
-      await page.getByRole("button", { name: "+ 列" }).click();
-      await page.keyboard.type(name);
-      await page.keyboard.press("Escape");
-      await expect.poll(async () => (await byTitle(page, name))?.title).toBe(name);
-    }
-    expect([
-      (await byTitle(page, "A")).col,
-      (await byTitle(page, "B")).col,
-      (await byTitle(page, "C")).col,
-    ]).toEqual([0, 1, 2]);
+    await expect.poll(async () => (await byTitle(page, "つぎ"))?.col).toBe(1);
+    expect((await byTitle(page, "さいしょ")).col).toBe(0);
+    expect((await byTitle(page, "さいしょ")).rowKey).toBeTruthy();
   });
 });
 

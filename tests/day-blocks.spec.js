@@ -100,9 +100,16 @@ test.describe("ボードの名前と一週間", () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem("taskspace-board-name"))).toBe("デスク");
   });
 
-  test("「+ 一週間」で月〜日が横一列に並ぶ", async ({ page, seed }) => {
-    await seed({ tasks: [t("a", "なにか")] });
-    await page.getByRole("button", { name: "+ 一週間" }).click();
+  test("/一週間を並べる で月〜日が横一列に並ぶ", async ({ page, seed }) => {
+    // ボードにある行からコマンドを呼ぶ
+    await seed({ tasks: [t("a", "もとの行", { pageId: BOARD })] });
+    await page.locator("[data-board] [data-task-id] div.cursor-text").first().click();
+    await page.waitForSelector("textarea");
+    await page.keyboard.press("End");
+    await page.keyboard.type(" /一週間を並べる");
+    await expect(page.locator("[data-slash-menu] button")).toHaveCount(1);
+    await page.waitForTimeout(300);   // 絞り込みが落ち着いてから選ぶ
+    await page.keyboard.press("Enter");
 
     await expect.poll(async () => (await dayBlocks(page)).length).toBe(7);
     const made = await dayBlocks(page);
@@ -134,5 +141,36 @@ test.describe("スラッシュからの呼び出し", () => {
     await page.keyboard.press("Enter");
 
     await expect.poll(async () => (await byTitle(page, "きょうの用事")).scheduledDate).toBe("");
+  });
+});
+
+test.describe("空の行からコマンドを呼ぶ", () => {
+  test("まっさらなところからでも /一週間を並べる が効く", async ({ page, seed }) => {
+    await seed({ tasks: [t("a", "TRAYのやつ")] });
+
+    await page.locator("[data-board] [data-block-tail]").click();
+    await page.waitForSelector("textarea");
+    await page.keyboard.type(" /一週間を並べる");
+    await expect(page.locator("[data-slash-menu] button")).toHaveCount(1);
+    await page.keyboard.press("Enter");
+
+    // 打ったのに何も起きない、にならないこと
+    await expect.poll(async () => (await dayBlocks(page)).length).toBe(7);
+    // 呼び出しに使った空の行は残さない
+    const blanks = (await storedTasks(page)).filter((x) => x.pageId === BOARD && !x.title && x.blockType !== "day");
+    expect(blanks).toHaveLength(0);
+  });
+
+  test("空の行で種別を変えるコマンドは、行を残す", async ({ page, seed }) => {
+    await seed({ tasks: [t("a", "TRAYのやつ")] });
+
+    await page.locator("[data-board] [data-block-tail]").click();
+    await page.waitForSelector("textarea");
+    await page.keyboard.type(" /見出し1");
+    await expect(page.locator("[data-slash-menu] button")).toHaveCount(1);
+    await page.keyboard.press("Enter");
+
+    await expect.poll(async () =>
+      (await storedTasks(page)).filter((x) => x.pageId === BOARD && x.blockType === "heading1").length).toBe(1);
   });
 });
