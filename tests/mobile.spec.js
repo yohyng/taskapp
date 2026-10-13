@@ -15,11 +15,11 @@ const test = base.extend({
 const t = (id, title, blockType = "text", over = {}) => ({
   id, title, category: "", project: "", blockType, status: "未着手", parentId: null,
   archived: false, scheduledDate: "", plain: true, stock: false, stockViewId: null,
-  style: null, canvasX: null, canvasY: null, pageId: "page-1",
+  style: null, canvasX: null, canvasY: null, pageId: "board-7days",
   rowKey: null, col: 0, colWidth: null, codeLang: "", ...over,
 });
 
-async function open(page, tasks, mode = "pages") {
+async function open(page, tasks, mode = "list") {
   await page.addInitScript(
     ([key, data, m]) => {
       localStorage.setItem(key, JSON.stringify(data));
@@ -38,7 +38,7 @@ const row = (page, s) => page.locator("[data-task-id]").filter({ hasText: s }).f
 const pageBlocks = async (page) => (await storedTasks(page)).filter((x) => x.pageId);
 
 test.describe("スマホでの見え方", () => {
-  for (const [mode, label] of [["pages", "ページ"], ["list", "7days"]]) {
+  for (const [mode, label] of [["list", "一覧"]]) {
     test(`${label}: 横にはみ出さない`, async ({ page }) => {
       await open(page, [t("a", "ながい行のテキストをここに置いて折り返しを見る")], mode);
       const { doc, win } = await page.evaluate(() => ({
@@ -73,15 +73,6 @@ test.describe("スマホでの見え方", () => {
     expect(ratio).toBeLessThan(2);
   });
 
-  test("ページ一覧が本文の前に画面を埋めない", async ({ page }) => {
-    await page.addInitScript(() => localStorage.setItem("taskspace-pages", JSON.stringify([
-      { id: "page-1", title: "いち", icon: "📄" }, { id: "page-2", title: "に", icon: "📝" },
-      { id: "page-3", title: "さん", icon: "📌" }, { id: "page-4", title: "よん", icon: "💡" },
-    ])));
-    await open(page, [t("a", "ほんぶん")]);
-    const h = await page.locator("aside").evaluate((a) => a.getBoundingClientRect().height);
-    expect(h).toBeLessThan(140);
-  });
 });
 
 test.describe("指での操作", () => {
@@ -148,6 +139,10 @@ test.describe("指での操作", () => {
 
   test("指でブロックを動かせる", async ({ page }) => {
     await open(page, [t("a", "いち"), t("c", "に")]);
+    // ボードは画面の下のほうにあるので、まず見えるところまで送る。
+    // 画面の外を触っても、指は何にも触れていないことになる。
+    await row(page, "に").scrollIntoViewIfNeeded();
+    await page.waitForTimeout(200);
     const from = await row(page, "に").boundingBox();
     const to = await row(page, "いち").boundingBox();
     const cdp = await page.context().newCDPSession(page);

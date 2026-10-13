@@ -2,10 +2,11 @@ import { test, expect, block, dayBlock, storedTasks, storedTask } from "./helper
 
 // Notion 風のブロック入力。3つのビュー（PJボード・TRAY・7days）で
 // 同じキーボード操作が効くことを確かめる。
+// 7days は本文と同じ Notion の操作感に寄せたので、ここでは見ない
+//（下の「7days は本文と同じ操作感」で別に見る）。
 const VIEWS = [
   { name: "PJボード", id: "a-solo", locate: (page, id) => block(page, id) },
   { name: "TRAY", id: "tray-1", locate: (page, id) => block(page, id) },
-  { name: "7days", id: "d-1", locate: (page, id) => dayBlock(page, id) },
 ];
 
 test.describe("ブロック入力", () => {
@@ -36,6 +37,37 @@ test.describe("ブロック入力", () => {
       await expect(page.locator("textarea")).toHaveValue("");
     });
   }
+
+  test.describe("7days は本文と同じ操作感", () => {
+    test("クリックでそのまま書き始められる（選択ではない）", async ({ page }) => {
+      await dayBlock(page, "d-1").locator("div.cursor-pointer").first().click();
+      await expect(page.locator("textarea")).toHaveCount(1);
+      await expect(page.locator("textarea")).toHaveValue("今日その1");
+    });
+
+    test("Enter はカーソルのところで割れる", async ({ page }) => {
+      const before = (await storedTasks(page)).length;
+      await dayBlock(page, "d-1").locator("div.cursor-pointer").first().click();
+      await expect(page.locator("textarea")).toHaveCount(1);
+
+      await page.keyboard.press("End");
+      await page.keyboard.press("Enter");
+
+      // 下に空ブロックができ、そのまま書き続けられる
+      await expect.poll(async () => (await storedTasks(page)).length).toBe(before + 1);
+      await expect(page.locator("textarea")).toHaveCount(1);
+      await expect(page.locator("textarea")).toHaveValue("");
+    });
+
+    test("Esc でブロックの選択に抜ける", async ({ page }) => {
+      await dayBlock(page, "d-1").locator("div.cursor-pointer").first().click();
+      await expect(page.locator("textarea")).toHaveCount(1);
+      await page.keyboard.press("Escape");
+
+      await expect(page.locator("textarea")).toHaveCount(0);
+      await expect(dayBlock(page, "d-1")).toHaveClass(/ring-sky/);
+    });
+  });
 
   test("空のまま確定したブロックは残らない", async ({ page }) => {
     const before = (await storedTasks(page)).length;

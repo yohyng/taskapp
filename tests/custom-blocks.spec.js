@@ -1,6 +1,7 @@
 import { test, expect, storedTasks } from "./helpers.js";
 
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const emptyArea = (page) => page.getByText("クリックして書き始める", { exact: false });
 const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pageId);
 
@@ -31,7 +32,7 @@ test.describe("自分で作るブロック種別", () => {
     await page.keyboard.press("Enter");
 
     await expect.poll(async () => (await pageBlocks(page))[0].blockType).toMatch(/^custom:/);
-    await expect(page.locator("[data-task-id]").first().getByText("✎")).toBeVisible();
+    await expect(page.locator("[data-board] [data-task-id]").first().getByText("✎")).toBeVisible();
   });
 
   test("決めた記法で変換できる", async ({ page }) => {
@@ -54,7 +55,7 @@ test.describe("自分で作るブロック種別", () => {
     await page.keyboard.press("Escape");
 
     // 本文の見出し要素（装飾が inline style で当たっている行）を探す
-    const css = await page.locator("[data-task-id]").first().evaluate((row) => {
+    const css = await page.locator("[data-board] [data-task-id]").first().evaluate((row) => {
       // textContent 一致だと外側の入れ物を拾うので、装飾が当たっている要素を選ぶ
       const el = row.querySelector('div[style*="font-size"]');
       const s = getComputedStyle(el);
@@ -71,7 +72,7 @@ test.describe("自分で作るブロック種別", () => {
     await page.keyboard.type("ふつう");
     await page.keyboard.press("Escape");
 
-    const row = page.locator("[data-task-id]").first();
+    const row = page.locator("[data-board] [data-task-id]").first();
     await row.hover();
     await row.locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
     await expect(row.getByRole("button", { name: "とくべつ" })).toBeVisible();

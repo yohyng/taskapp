@@ -100,7 +100,7 @@ export const test = base.extend({
       );
       await page.reload();
       // ページ本文だけを置くこともあるので、タスク行ではなくヘッダーの出現で待つ
-      await page.waitForSelector('button[title="ページ表示"]');
+      await page.waitForSelector("header");
     });
   },
 });

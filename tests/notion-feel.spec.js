@@ -3,14 +3,15 @@ import { test, expect, storedTasks } from "./helpers.js";
 // Notion の操作感を1項目ずつ固定する。ここが「どこまで寄せたか」の台帳。
 // 足りないものは test.fixme で残してあるので、埋まった順に外していく。
 
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pageId);
 const row = (page, title) => page.locator("[data-task-id]").filter({ hasText: title }).first();
 
 const b = (id, title, blockType = "text") => ({
   id, title, category: "", project: "", blockType, status: "未着手", parentId: null,
   archived: false, scheduledDate: "", plain: true, stock: false, stockViewId: null,
-  style: null, canvasX: null, canvasY: null, pageId: "page-1",
+  style: null, canvasX: null, canvasY: null, pageId: "board-7days",
   rowKey: null, col: 0, colWidth: null,
 });
 

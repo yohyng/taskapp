@@ -1,7 +1,8 @@
 import { test, expect, storedTasks } from "./helpers.js";
 
 // 第4回: スラッシュメニュー・ページまわり・ブロックの細部
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pageId);
 const row = (page, s) => page.locator("[data-task-id]").filter({ hasText: s }).first();
 const menu = (page) => page.locator("[data-slash-menu]");
@@ -10,7 +11,7 @@ const items = (page) => menu(page).locator("button");
 const b = (id, title, blockType = "text", over = {}) => ({
   id, title, category: "", project: "", blockType, status: "未着手", parentId: null,
   archived: false, scheduledDate: "", plain: true, stock: false, stockViewId: null,
-  style: null, canvasX: null, canvasY: null, pageId: "page-1",
+  style: null, canvasX: null, canvasY: null, pageId: "board-7days",
   rowKey: null, col: 0, colWidth: null, codeLang: "", ...over,
 });
 
@@ -115,55 +116,9 @@ test.describe("目次", () => {
   });
 });
 
-test.describe("ページの操作", () => {
-  const twoPages = [
-    { id: "page-1", title: "さいしょ", icon: "📄" },
-    { id: "page-2", title: "つぎ", icon: "📝" },
-  ];
-  const seedPages = (page) => page.addInitScript(
-    ([v]) => localStorage.setItem("taskspace-pages", JSON.stringify(v)), [twoPages]);
-  const storedPages = (page) => page.evaluate(() =>
-    JSON.parse(localStorage.getItem("taskspace-pages") || "[]").map((p) => p.title));
-
-  test("並びを上下で変えられる", async ({ page, seed }) => {
-    await seedPages(page);
-    await seed({ tasks: [b("a", "ほんぶん")] });
-    await toPages(page);
-    await page.locator("aside").getByText("さいしょ").hover();
-    await page.locator("aside").getByTitle("下へ").first().click();
-    await expect.poll(() => storedPages(page)).toEqual(["つぎ", "さいしょ"]);
-  });
-
-  test("複製すると、中身も段組みも連れていく", async ({ page, seed }) => {
-    await seedPages(page);
-    await seed({
-      tasks: [
-        b("a", "みだし", "heading2", { rowKey: "r1", col: 0 }),
-        b("c", "こ", "text", { parentId: "a" }),
-      ],
-    });
-    await toPages(page);
-    await page.locator("aside").getByText("さいしょ").hover();
-    await page.locator("aside").getByTitle("このページを複製").first().click();
-
-    await expect.poll(() => storedPages(page)).toEqual(["さいしょ", "つぎ", "さいしょ のコピー"]);
-    const all = await pageBlocks(page);
-    const copyPage = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("taskspace-pages")).at(-1).id);
-    const copied = all.filter((t) => t.pageId === copyPage);
-    expect(copied).toHaveLength(2);
-
-    const head = copied.find((t) => t.title === "みだし");
-    const kid = copied.find((t) => t.title === "こ");
-    expect(kid.parentId).toBe(head.id);           // 親子が保たれる
-    expect(head.rowKey).toBeTruthy();
-    expect(head.rowKey).not.toBe("r1");           // 元のページと行が混ざらない
-  });
-
-  test("Cmd+P でページと行を探して飛べる", async ({ page, seed }) => {
-    await seedPages(page);
-    await seed({ tasks: [b("a", "さがしもの"), { ...b("z", "べつのページの行"), pageId: "page-2" }] });
-    await toPages(page);
+test.describe("早見（Cmd+P）", () => {
+  test("ボードの行を探して飛べる", async ({ page, seed }) => {
+    await seed({ tasks: [b("a", "さがしもの"), b("z", "べつの行")] });
 
     await page.keyboard.press("ControlOrMeta+p");
     const find = page.locator("[data-quick-find]");
@@ -175,10 +130,8 @@ test.describe("ページの操作", () => {
     await expect(find).toHaveCount(0);
   });
 
-  test("Cmd+P はかなでも絞れて、Esc で閉じる", async ({ page, seed }) => {
-    await seedPages(page);
+  test("かなでも絞れて、Esc で閉じる", async ({ page, seed }) => {
     await seed({ tasks: [b("a", "ホンブン")] });
-    await toPages(page);
     await page.keyboard.press("ControlOrMeta+p");
     const find = page.locator("[data-quick-find]");
     await find.getByLabel("さがす").fill("ほんぶん");

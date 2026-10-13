@@ -1,6 +1,7 @@
 import { test, expect, storedTasks, dragTo, centerOf } from "./helpers.js";
 
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const emptyArea = (page) => page.getByText("クリックして書き始める", { exact: false });
 const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pageId);
 const byTitle = async (page, t) => (await pageBlocks(page)).find((b) => b.title === t);
@@ -68,7 +69,7 @@ test.describe("段組みの中で編集しても崩れない", () => {
     const b = (id, title, over) => ({
       id, title, category: "", project: "", blockType: "text", status: "未着手",
       parentId: null, archived: false, scheduledDate: "", plain: true, stock: false,
-      style: null, canvasX: null, canvasY: null, pageId: "page-1",
+      style: null, canvasX: null, canvasY: null, pageId: "board-7days",
       rowKey: null, col: 0, colWidth: null, ...over,
     });
     await seed({
@@ -124,7 +125,10 @@ test.describe("ドラッグで列を作る", () => {
     await row(page, "した").hover();
     await dragTo(page, await centerOf(grip), await centerOf(row(page, "うえ")));
 
-    await expect.poll(async () => (await byTitle(page, "した")).rowKey).toBeFalsy();
-    expect((await byTitle(page, "うえ")).rowKey).toBeFalsy();
+    // 真ん中に落としたときは列を増やさない（同じ列のまま並べ替わる）
+    await expect.poll(async () => (await byTitle(page, "した")).col)
+      .toBe((await byTitle(page, "うえ")).col);
+    const cols = new Set((await pageBlocks(page)).map((t) => t.col));
+    expect(cols.size).toBe(1);
   });
 });

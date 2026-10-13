@@ -1,7 +1,8 @@
 import { test, expect, storedTasks, storedTask, dragTo, centerOf, todayKey } from "./helpers.js";
 
 const BOARD = "board-7days";
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const row = (page, title) => page.locator("[data-task-id]").filter({ hasText: title }).first();
 const openMenu = async (page, title) => {
   await row(page, title).hover();
@@ -17,7 +18,7 @@ const b = (id, title, over) => ({
 
 test.describe("見出しの色を選ぶ", () => {
   test("⠿ のメニューに色の見本が並び、押すと見出しに色がつく", async ({ page, seed }) => {
-    await seed({ tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2" })] });
+    await seed({ tasks: [b("h", "みだし", { pageId: "board-7days", blockType: "heading2" })] });
     await toPages(page);
     await openMenu(page, "みだし");
 
@@ -31,7 +32,7 @@ test.describe("見出しの色を選ぶ", () => {
   });
 
   test("選んでいる色に印がつき、既定に戻せる", async ({ page, seed }) => {
-    await seed({ tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2", style: { color: "#60a5fa" } })] });
+    await seed({ tasks: [b("h", "みだし", { pageId: "board-7days", blockType: "heading2", style: { color: "#60a5fa" } })] });
     await toPages(page);
     await openMenu(page, "みだし");
 
@@ -113,7 +114,7 @@ test.describe("7days と下のブロックを行き来する", () => {
 });
 
 test.describe("好きな色を選ぶ", () => {
-  const heading = { tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2" })] };
+  const heading = { tasks: [b("h", "みだし", { pageId: "board-7days", blockType: "heading2" })] };
 
   test("色コードを入れると、その色になる", async ({ page, seed }) => {
     await seed(heading);
@@ -181,7 +182,7 @@ test.describe("好きな色を選ぶ", () => {
 });
 
 test.describe("色みほんをつまんでも控えが溢れない", () => {
-  const heading = { tasks: [b("h", "みだし", { pageId: "page-1", blockType: "heading2" })] };
+  const heading = { tasks: [b("h", "みだし", { pageId: "board-7days", blockType: "heading2" })] };
   // つまみを動かしているときの連続通知を真似る
   const sweep = (input, values) => input.evaluate((el, vs) => {
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;

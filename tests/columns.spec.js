@@ -1,6 +1,7 @@
 import { test, expect, storedTasks } from "./helpers.js";
 
-const toPages = (page) => page.locator('button[title="ページ表示"]').click();
+// ボードは一覧の中に出ているので、表示の切り替えはいらない
+const toPages = async () => {};
 const emptyArea = (page) => page.getByText("クリックして書き始める", { exact: false });
 const pageBlocks = async (page) => (await storedTasks(page)).filter((t) => t.pageId);
 

@@ -368,9 +368,7 @@ const STOCK_VIEWS_SETTING_KEY = "stock_views";
 // ドキュメント型の「ページ」。タスク管理とは別に、Notion のように
 // ブロックを縦に並べて書く場所。中身は同じタスク（blockType 付き）で、
 // pageId でどのページに属するかを持たせる。
-const PAGES_SETTING_KEY = "pages";
 const DEFAULT_PAGES = [{ id: "page-1", title: "はじめてのページ", icon: "📄" }];
-const PAGE_ICONS = ["📄", "📝", "📌", "💡", "🗂", "🎯", "🌱", "🔧", "📚", "✏️"];
 
 // アプリ全体の配色。--ts-bg / --ts-text に流し込むと、面や枠は
 // alpha 指定なので自動で追従する。
@@ -823,20 +821,6 @@ function App() {
     saveCustomTypes: persistCustomTypes,
   }), [customBlockTypes, persistCustomTypes]);
 
-  const [pages, setPages] = useState(() => {
-    try {
-      const raw = localStorage.getItem("taskspace-pages");
-      const parsed = raw ? JSON.parse(raw) : null;
-      if (Array.isArray(parsed) && parsed.length) return parsed;
-    } catch { /* 壊れていたら既定 */ }
-    return DEFAULT_PAGES;
-  });
-  const persistPages = useCallback((next) => {
-    setPages(next);
-    try { localStorage.setItem("taskspace-pages", JSON.stringify(next)); } catch { /* quota */ }
-    dbSaveSetting(PAGES_SETTING_KEY, JSON.stringify(next));
-  }, []);
-
   const [stockViews, setStockViews] = useState(() => {
     try {
       const raw = localStorage.getItem("taskspace-stock-views");
@@ -978,7 +962,6 @@ function App() {
   const use5col = true; // 7days上 + Board下 固定レイアウト
   const [viewMode, setViewMode] = useState(() => localStorage.getItem("taskspace-view-mode") || "list");
   useEffect(() => { localStorage.setItem("taskspace-view-mode", viewMode); }, [viewMode]);
-  const canvasMode = viewMode === "canvas";
   const [activeDrag, setActiveDrag] = useState(null); // { type, id, data }
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -1126,8 +1109,17 @@ function App() {
 
     // ページ本文は指の位置で決める。画面に出している線と同じ基準にしないと、
     // 線の場所と実際に入る場所がずれる。
-    const pointer = activatorEvent && delta
-      ? { x: (activatorEvent.clientX ?? 0) + delta.x, y: (activatorEvent.clientY ?? 0) + delta.y }
+    // 指で触ったときは clientX がイベント直下に無く、touches の中にいる。
+    // 0 として扱うと左端に落としたことになり、並べ替えのつもりが列になる。
+    const startPoint = (() => {
+      const e = activatorEvent;
+      if (!e) return null;
+      if (typeof e.clientX === "number") return { x: e.clientX, y: e.clientY };
+      const t = e.touches?.[0] || e.changedTouches?.[0];
+      return t ? { x: t.clientX, y: t.clientY } : null;
+    })();
+    const pointer = startPoint && delta
+      ? { x: startPoint.x + delta.x, y: startPoint.y + delta.y }
       : null;
 
     // 落とした相手の左端／右端なら、そこに新しい列を起こす（Notion と同じ）。
@@ -1474,16 +1466,6 @@ function App() {
           if (Array.isArray(parsed)) {
             setCustomBlockTypes(parsed);
             localStorage.setItem("taskspace-custom-block-types", JSON.stringify(parsed));
-          }
-        } catch { /* 壊れていたらローカルのまま */ }
-      }
-      const remotePages = settings?.[PAGES_SETTING_KEY];
-      if (remotePages) {
-        try {
-          const parsed = typeof remotePages === "string" ? JSON.parse(remotePages) : remotePages;
-          if (Array.isArray(parsed) && parsed.length) {
-            setPages(parsed);
-            localStorage.setItem("taskspace-pages", JSON.stringify(parsed));
           }
         } catch { /* 壊れていたらローカルのまま */ }
       }
@@ -3095,6 +3077,19 @@ function App() {
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
+  // ボードは縦列で持つ。STOCK ビューのように、頭の行とその中身で1列。
+  const [boardColumns, setBoardColumns] = useState(() => {
+    try { return localStorage.getItem("taskspace-board-columns") !== "false"; } catch { return true; }
+  });
+  function setBoardColumnMode(on) {
+    setBoardColumns(on);
+    try { localStorage.setItem("taskspace-board-columns", String(on)); } catch { /* quota */ }
+    if (on) splitBoardIntoColumns({ silent: true });
+    else mergeBoardColumns({ silent: true });
+  }
+
+  const [typeEditor, setTypeEditor] = useState(false);
+
   const [boardName, setBoardName] = useState(() => {
     try { return localStorage.getItem(BOARD_NAME_KEY) ?? "ボード"; } catch { return "ボード"; }
   });
@@ -3127,7 +3122,20 @@ function App() {
 
   // ボードの中身を、親ブロックごとに縦の列へ分ける。
   // 「DESIGNART / WORK / 結婚式関連」のように、頭の行とその子で1列になる。
-  function splitBoardIntoColumns() {
+  function mergeBoardColumns({ silent = false } = {}) {
+    const ids = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && t.rowKey).map((t) => t.id);
+    if (!ids.length) { if (!silent) setToast("分かれている列はありません"); return; }
+    const set = new Set(ids);
+    mapTasks((t) => {
+      if (!set.has(t.id)) return t;
+      const style = t.style ? { ...t.style } : null;
+      if (style) delete style.framed;
+      return { ...t, rowKey: null, col: 0, colWidth: null, style };
+    });
+    if (!silent) setToast("列をまとめました");
+  }
+
+  function splitBoardIntoColumns({ silent = false } = {}) {
     const order = new Map(tasks.map((t, i) => [t.id, i]));
     const tops = tasks
       .filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId)
@@ -3143,7 +3151,7 @@ function App() {
       if (current < 0) continue;
       col.set(b.id, current);
     }
-    if (current < 1) { setToast("列に分けるには、中身のある行が2つ以上必要です"); return; }
+    if (current < 0) { if (!silent) setToast("並べ直すものがありません"); return; }
 
     // 各列の先頭に「枠つき」の印を付ける。日付・STOCK は自前の囲みを
     // 持っているので、二重になるから付けない。
@@ -3166,7 +3174,7 @@ function App() {
       if (framedIds.has(t.id)) next.style = { ...(t.style || {}), framed: true };
       return next;
     });
-    setToast(`${current + 1}列に分けました`);
+    if (!silent) setToast(`${current + 1}列に分けました`);
   }
 
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
@@ -3179,7 +3187,8 @@ function App() {
   // 7days の下の自由ブロック。ページ本文と同じものを、固定の持ち主で置いている。
   const boardBlocks = (
     <div data-board className="mt-3 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-3 sm:px-5">
-      <div className="mb-2 flex items-center gap-2">
+      {/* 狭い画面ではボタンが入りきらないので折り返す */}
+      <div className="mb-2 flex flex-wrap items-center gap-2">
         <input
           aria-label="この場所の名前"
           value={boardName}
@@ -3188,7 +3197,7 @@ function App() {
             try { localStorage.setItem(BOARD_NAME_KEY, e.target.value); } catch { /* quota */ }
           }}
           placeholder="名前をつける"
-          className="min-w-0 flex-1 bg-transparent text-sm font-semibold tracking-tight ts-text outline-none placeholder:text-neutral-700"
+          className="min-w-[8rem] flex-1 bg-transparent text-sm font-semibold tracking-tight ts-text outline-none placeholder:text-neutral-700"
         />
         <button
           onClick={addWeekRow}
@@ -3205,31 +3214,39 @@ function App() {
           + STOCK
         </button>
         <button
-          onClick={splitBoardIntoColumns}
-          title="頭の行とその子で1列にして、縦に分ける"
-          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+          onClick={() => setBoardColumnMode(!boardColumns)}
+          title={boardColumns ? "縦に積む書き方に戻す" : "頭の行とその中身で1列ずつに分ける"}
+          className={classNames(
+            "shrink-0 rounded border px-1.5 py-1 text-[10px] transition",
+            boardColumns
+              ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200"
+              : "border-white/10 text-neutral-500 hover:bg-white/[0.06] hover:text-neutral-300",
+          )}
         >
-          列に分ける
+          縦列
         </button>
         <button
-          onClick={() => {
-            const ids = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && t.rowKey).map((t) => t.id);
-            if (!ids.length) { setToast("分かれている列はありません"); return; }
-            const set = new Set(ids);
-            mapTasks((t) => {
-              if (!set.has(t.id)) return t;
-              const style = t.style ? { ...t.style } : null;
-              if (style) delete style.framed;
-              return { ...t, rowKey: null, col: 0, colWidth: null, style };
-            });
-            setToast("列をまとめました");
-          }}
-          title="分けた列を1本に戻す"
+          onClick={() => splitBoardIntoColumns()}
+          title="いまの中身を、頭の行ごとに並べ直す"
           className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
-          まとめる
+          並べ直す
+        </button>
+        <button
+          onClick={() => setTypeEditor(true)}
+          title="ブロックの種別を自分で作る"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          ブロックを作る
         </button>
       </div>
+      {typeEditor && (
+        <BlockTypeEditor
+          customTypes={customBlockTypes}
+          onSave={persistCustomTypes}
+          onClose={() => setTypeEditor(false)}
+        />
+      )}
       <BlockArea
         pageId={BOARD_PAGE_ID}
         tasks={tasks}
@@ -3243,6 +3260,7 @@ function App() {
         onReorder={swapTaskOrder}
         onMergeBlocks={mergeBlockInto}
         dayDeps={dayDeps}
+        columnMode={boardColumns}
         placeholder="ここは自由。クリックして書き始める。/ でコマンド、/よてい でその日の予定。"
         tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
       />
@@ -3307,20 +3325,6 @@ function App() {
               className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", focusPickMode ? "border-amber-400/40 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
             >
               <Focus className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => setViewMode((v) => (v === "canvas" ? "list" : "canvas"))}
-              title={viewMode === "canvas" ? "リスト表示に戻す" : "キャンバス表示"}
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", viewMode === "canvas" ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => setViewMode((v) => (v === "pages" ? "list" : "pages"))}
-              title={viewMode === "pages" ? "リスト表示に戻す" : "ページ表示"}
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", viewMode === "pages" ? "border-sky-400/40 bg-sky-400/10 text-sky-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
-            >
-              <FileText className="h-3.5 w-3.5" />
             </button>
             <KeepAwakeButton />
             <div className="relative">
@@ -3662,37 +3666,6 @@ function App() {
           </section>
         )}
 
-        {viewMode === "pages" && (
-          <PagesView
-            pages={pages}
-            onPagesChange={persistPages}
-            tasks={tasks}
-            upsertTask={upsertTask}
-            removeTask={removeTask}
-            toggleDone={toggleDone}
-            setSelectedTaskId={setSelectedTaskId}
-            childrenOf={childrenOf}
-            addTask={addTask}
-            addBlocks={addBlocks}
-            addRawBlocks={addRawBlocks}
-            mapTasks={mapTasks}
-            dayDeps={dayDeps}
-            onReorder={swapTaskOrder}
-            onMergeBlocks={mergeBlockInto}
-          />
-        )}
-        {canvasMode && (
-          <CanvasView
-            tasks={tasks}
-            upsertTask={upsertTask}
-            removeTask={removeTask}
-            toggleDone={toggleDone}
-            setSelectedTaskId={setSelectedTaskId}
-            selectedTaskId={selectedTaskId}
-            childrenOf={childrenOf}
-            addTask={addTask}
-          />
-        )}
         {viewMode === "list" && use5col && (
           <>
           {(
@@ -4086,25 +4059,15 @@ function App() {
         )}
         {quickFind && (
           <QuickFind
-            pages={pages}
             tasks={tasks}
             onClose={() => setQuickFind(false)}
             onPick={(hit) => {
               setQuickFind(false);
-              setViewMode("pages");
-              const pageId = hit.kind === "page" ? hit.id : hit.pageId;
-              if (pageId) {
-                localStorage.setItem("taskspace-active-page", pageId);
-                // すでにページ表示にいるときは、読み直しでは切り替わらないので報せる
-                window.dispatchEvent(new CustomEvent("taskspace-open-page", { detail: pageId }));
-              }
-              if (hit.kind === "block") {
-                // 描き直しを待ってから、その行まで送る
-                setTimeout(() => {
-                  document.querySelector(`[data-task-id="${hit.id}"]`)
-                    ?.scrollIntoView({ behavior: "smooth", block: "center" });
-                }, 220);
-              }
+              // 描き直しを待ってから、その行まで送る
+              setTimeout(() => {
+                document.querySelector(`[data-task-id="${hit.id}"]`)
+                  ?.scrollIntoView({ behavior: "smooth", block: "center" });
+              }, 120);
               setSelectedTaskId(null);
             }}
           />
@@ -5634,6 +5597,7 @@ function DayBlock({ task, upsertTask, deps }) {
         projectRules={projectRules}
         flatView
         setSelectedProject={setSelectedProject}
+        addTask={addTask}
       />
     </div>
   );
@@ -5811,79 +5775,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 // 本文は同じ TaskBlock なので、種別もコマンドもそのまま使える。
 // ダッシュボードのひな形。上段に曜日、下段にプロジェクト。
 // 中身は書き換える前提の例なので、構造だけ合っていればいい。
-const H = (text, color) => ({ type: "heading3", text, color, bold: true });
-const T = (text, children) => ({ type: "task", text, children });
-const G = (text, children) => ({ type: "toggle", text, children });
 
-function dashboardTemplate() {
-  const week = [
-    [H("Mon."), T("")],
-    [
-      H("Tue."),
-      T("ナポリ予約→なつみメアド"),
-      T("京都経費精算", [T("タクシー代"), T("ホテル代")]),
-      T("結婚指輪刻印をティファニーに送る"),
-      T("須藤さん返信"),
-    ],
-    [H("Wed."), T("")],
-    [H("Thu."), T("")],
-    [H("Fri."), T("")],
-    [H("Sat.", "#60a5fa"), T(""), H("Sun.", "#f87171"), T("")],
-  ];
-
-  const projects = [
-    [
-      H("NOMLAB PJ", "#60a5fa"),
-      G("空間デザイン試論", [T("全体スケジュール")]),
-      G("現象", [T("植物アプローチ資料作成")]),
-      G("Shiki", [T("新プリンターでテスト"), T("複雑な形状テストで作ってみる")]),
-      G("torinome", [T("HPを空間系に変更"), T("AND対応→")]),
-      G("空間シンクタンク", [T("DSAのSHOPリスト作成")]),
-      G("空間ゆらぎ/AI", [T("DSAの画像全部ダウンロード"), T("空間の動画解析可能かやってみる")]),
-      G("選書企画・コラム", []),
-    ],
-    [
-      H("NOMURA PJ", "#a78bfa"),
-      G("DESIGNART2026", [
-        T("次回定例に向けてプロト作成", [T("スタッコとワイヤーと下地"), T("３Dプリントでオスメス作っておく")]),
-        T("会場選定"),
-      ]),
-      G("歓びと感動学", [
-        T("芝浦工大トーク関連", [
-          T("かずさん人事連絡待ち"),
-          T("人事と連携したノムラのプレゼンにもなるような立て付けにする"),
-        ]),
-        T("感動学資料まとめ"),
-        T("訂正シール確認→確認後酒井さん連絡"),
-      ]),
-      G("学校空間リサーチ", [
-        T("なんとなくひきこもりと空間フォロー"),
-        T("ノムラの空間、竣工実績ベースに読み解いて、それを教育空間にパラフレーズするなら、のシステムというか資料作成しておくといいかも"),
-      ]),
-    ],
-    [
-      H("PRIVATE PJ", "#f87171"),
-      G("結婚回り", [T("婚姻届け7月19日提出に向けて調整")]),
-      T("ゲンロンγ9月に提出", [T("社外活動申請")]),
-      G("京都西陣関連", [T("6月6日の落散前とあと予定検討する")]),
-      G("GEA", [T("6月4日定例に向けて資料作る"), T("SCOOP受け取りしたい")]),
-      G("被覆空間研究", []),
-      G("Other", []),
-    ],
-    [
-      H("Weekly Task", "#fb923c"),
-      T("クリーニング受け取り"),
-      T("経費精算", [T("会議交際費申請"), T("風HDMI無線登録"), T("タクシー登録"), T("AVPレンズ登録")]),
-      T("ニンジャマスク買うといいかも"),
-      T("SIC訪問の件→いったん未来創研メンバーとミラノメンバーに聞く。先着10名でスケジューリングする→それ次第候補日作成で、須藤さん連絡"),
-      T("ゲンロン編集部配本？"),
-      T(""),
-    ],
-  ];
-
-  // 段と段のあいだに空行を1つ挟む（Notion でもそうやって離す）
-  return [week, [[{ type: "text", text: "" }]], projects];
-}
 
 // ブロック本文。ページでも 7days の下でも同じものを使う。
 // pageId で持ち主が決まるだけで、中の操作感は Notion のページと同じ。
@@ -5893,6 +5785,8 @@ function BlockArea({
   tailClass = "mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700",
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   dayDeps,
+  // 縦列で持つか（ボード）。末尾に足すときの行き先が変わる。
+  columnMode = false,
 }) {
   const { markForEdit } = useBlockEdit();
   // トグルの開閉は見た目の設定なので端末内だけに持つ
@@ -6061,6 +5955,24 @@ function BlockArea({
   function addBlockAtEnd() {
     const last = blocks[blocks.length - 1];
     if (last && !last.title.trim()) return; // 末尾が空なら増やさない
+
+    // 縦列で持っているときは、下に足すのではなく右に列を起こす
+    //（STOCK ビューを1本増やすのと同じ感じ）。
+    if (columnMode) {
+      const inRow = blocks.filter((b) => b.rowKey);
+      const rowKey = inRow[0]?.rowKey || `row-${uid()}`;
+      const nextCol = inRow.length ? Math.max(...inRow.map((b) => b.col ?? 0)) + 1 : 0;
+      const made = addTask({
+        title: "", allowEmpty: true, plain: true, pageId, silent: true,
+        afterId: last?.id, rowKey, col: nextCol,
+      });
+      if (made) {
+        upsertTask({ id: made.id, style: { framed: true } });
+        markForEdit?.(made.id);
+      }
+      return;
+    }
+
     const created = addTask({ title: "", allowEmpty: true, plain: true, pageId, silent: true, afterId: last?.id });
     if (created) markForEdit?.(created.id);
   }
@@ -6154,6 +6066,7 @@ function BlockTailZone({ pageId, onClick, className, children }) {
   return (
     <div
       ref={setNodeRef}
+      data-block-tail
       onClick={onClick}
       className={classNames(className, isOver && "rounded bg-sky-400/[0.07] ring-1 ring-inset ring-sky-400/30")}
     >
@@ -6231,398 +6144,7 @@ function ColumnBar({ first, last, width, onMove, onWidth, floating = false }) {
   );
 }
 
-function PagesView({ pages, onPagesChange, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf, addTask, addBlocks, addRawBlocks, mapTasks, onReorder, onMergeBlocks, dayDeps }) {
-  const { customTypes, saveCustomTypes } = useBlockTypes();
-  const [typeEditor, setTypeEditor] = useState(false);
-  const [activeId, setActiveId] = useState(() => localStorage.getItem("taskspace-active-page") || pages[0]?.id);
-  const active = pages.find((p) => p.id === activeId) || pages[0];
-  const [iconOpen, setIconOpen] = useState(false);
 
-  useEffect(() => {
-    if (active) localStorage.setItem("taskspace-active-page", active.id);
-  }, [active]);
-
-  // 早見から選ばれたページに切り替える
-  useEffect(() => {
-    const open = (e) => setActiveId(e.detail);
-    window.addEventListener("taskspace-open-page", open);
-    return () => window.removeEventListener("taskspace-open-page", open);
-  }, []);
-
-  function addPage({ title = "無題のページ", icon, rows, fullWidth = false } = {}) {
-    const page = { id: `page-${uid()}`, title, icon: icon || PAGE_ICONS[pages.length % PAGE_ICONS.length], fullWidth };
-    onPagesChange([...pages, page]);
-    setActiveId(page.id);
-    if (rows) addBlocks(page.id, rows);
-  }
-
-  function removePage(id) {
-    if (pages.length <= 1) return;
-    // 中のブロックも一緒に消える。ページ＝本文なので残しても行き場がない。
-    tasks.filter((t) => t.pageId === id).forEach((t) => removeTask(t.id));
-    onPagesChange(pages.filter((p) => p.id !== id));
-    if (activeId === id) setActiveId(pages.find((p) => p.id !== id).id);
-  }
-
-  // ページを丸ごと写す。中のブロックも親子・段組みごと連れていく。
-  function duplicatePage(id) {
-    const src = pages.find((p) => p.id === id);
-    if (!src) return;
-    const copy = { ...src, id: `page-${uid()}`, title: `${src.title} のコピー` };
-    const body = tasks.filter((t) => t.pageId === id && !t.archived);
-    const idMap = new Map(body.map((t) => [t.id, uid()]));
-    // 行の名前も振り直す。元のページと同じだと、両方の段組みが1行に混ざる。
-    const rowMap = new Map();
-    for (const t of body) {
-      if (t.rowKey && !rowMap.has(t.rowKey)) rowMap.set(t.rowKey, `row-${uid()}`);
-    }
-    const made = body.map((t) => normalizeTask({
-      ...t,
-      id: idMap.get(t.id),
-      pageId: copy.id,
-      parentId: t.parentId ? (idMap.get(t.parentId) ?? null) : null,
-      rowKey: t.rowKey ? rowMap.get(t.rowKey) : null,
-    }));
-    onPagesChange([...pages, copy]);
-    addRawBlocks(made);
-    setActiveId(copy.id);
-  }
-
-  function movePage(id, dir) {
-    const i = pages.findIndex((p) => p.id === id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= pages.length) return;
-    const next = [...pages];
-    [next[i], next[j]] = [next[j], next[i]];
-    onPagesChange(next);
-  }
-
-  if (!active) return null;
-
-  return (
-    <div className="flex flex-col gap-3 sm:flex-row" style={{ minHeight: "calc(100vh - 150px)" }}>
-      {/* ページ一覧。狭い画面では本文の上に横並びで畳む */}
-      <aside className="w-full shrink-0 rounded-lg border border-white/10 bg-white/[0.02] p-2 sm:w-48">
-        <div className="mb-1 hidden px-1 text-[10px] font-semibold text-neutral-500 sm:block">ページ</div>
-        {/* 狭い画面では横一列に流す。縦に積むと、本文にたどり着く前に画面が埋まる。 */}
-        <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:block sm:overflow-visible sm:pb-0">
-        {pages.map((p) => (
-          <div key={p.id} className="group/pg flex shrink-0 items-center gap-1 sm:shrink">
-            <button
-              onClick={() => setActiveId(p.id)}
-              className={classNames(
-                "flex min-w-0 flex-1 items-center gap-1.5 rounded px-1.5 py-1 text-left text-xs transition",
-                p.id === active.id ? "bg-white/10 ts-text" : "text-neutral-400 hover:bg-white/[0.06]",
-              )}
-            >
-              <span className="shrink-0">{p.icon}</span>
-              <span className="min-w-0 truncate">{p.title}</span>
-            </button>
-            <button
-              onClick={() => movePage(p.id, -1)}
-              title="上へ"
-              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block disabled:invisible"
-              disabled={pages[0]?.id === p.id}
-            >
-              <ChevronUp className="h-3 w-3" />
-            </button>
-            <button
-              onClick={() => movePage(p.id, 1)}
-              title="下へ"
-              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block disabled:invisible"
-              disabled={pages[pages.length - 1]?.id === p.id}
-            >
-              <ChevronDown className="h-3 w-3" />
-            </button>
-            <button
-              onClick={() => duplicatePage(p.id)}
-              title="このページを複製"
-              className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-neutral-200 group-hover/pg:opacity-100 sm:block"
-            >
-              <Copy className="h-3 w-3" />
-            </button>
-            {pages.length > 1 && (
-              <button
-                onClick={() => removePage(p.id)}
-                title="このページを削除（中身も消えます）"
-                className="hidden shrink-0 rounded p-0.5 text-neutral-600 opacity-0 transition hover:text-red-300 group-hover/pg:opacity-100 sm:block"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-            )}
-          </div>
-        ))}
-        <button
-          onClick={() => addPage()}
-          className="mt-0 flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:mt-1 sm:w-full"
-        >
-          <Plus className="h-3 w-3" /> 新規ページ
-        </button>
-        <button
-          onClick={() => addPage({ title: "Task", icon: "⚡", rows: dashboardTemplate(), fullWidth: true })}
-          title="曜日とプロジェクトの段組みが入った状態で作る"
-          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:w-full"
-        >
-          <LayoutGrid className="h-3 w-3" /> ダッシュボード
-        </button>
-
-        <div className="my-2 hidden border-t border-white/10 sm:block" />
-        <button
-          onClick={() => setTypeEditor(true)}
-          className="flex shrink-0 items-center gap-1 whitespace-nowrap rounded px-1.5 py-1 text-left text-xs text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300 sm:w-full"
-        >
-          <Settings2 className="h-3 w-3" /> ブロックを作る
-          {customTypes.length > 0 && <span className="ml-auto text-[9px] text-neutral-600">{customTypes.length}</span>}
-        </button>
-        </div>
-      </aside>
-
-      {typeEditor && (
-        <BlockTypeEditor
-          customTypes={customTypes}
-          onSave={saveCustomTypes}
-          onClose={() => setTypeEditor(false)}
-        />
-      )}
-
-      {/* 本文 */}
-      <div className="min-w-0 flex-1 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-6 sm:px-6">
-        <div className={classNames("mx-auto", active.fullWidth ? "max-w-none" : "max-w-2xl")}>
-          <div className="mb-4 flex items-start gap-2">
-            <div className="relative">
-              <button onClick={() => setIconOpen((v) => !v)} title="アイコンを変える" className="text-3xl leading-none transition hover:opacity-70">
-                {active.icon}
-              </button>
-              {iconOpen && (
-                <div className="absolute left-0 top-full z-20 mt-1 flex w-44 flex-wrap gap-1 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
-                  {PAGE_ICONS.map((ic) => (
-                    <button
-                      key={ic}
-                      onClick={() => { onPagesChange(pages.map((p) => p.id === active.id ? { ...p, icon: ic } : p)); setIconOpen(false); }}
-                      className="rounded p-1 text-lg transition hover:bg-white/10"
-                    >{ic}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <input
-              value={active.title}
-              onChange={(e) => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, title: e.target.value } : p))}
-              placeholder="無題"
-              className="min-w-0 flex-1 bg-transparent text-2xl font-bold tracking-tight ts-text outline-none placeholder:text-neutral-700 sm:text-3xl"
-            />
-            <button
-              onClick={() => onPagesChange(pages.map((p) => p.id === active.id ? { ...p, fullWidth: !p.fullWidth } : p))}
-              title={active.fullWidth ? "幅を元に戻す" : "幅いっぱいに広げる"}
-              className="mt-2 shrink-0 rounded p-1 text-neutral-600 transition hover:bg-white/[0.06] hover:text-neutral-300"
-            >
-              {active.fullWidth ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            </button>
-          </div>
-
-          <BlockArea
-            pageId={active.id}
-            tasks={tasks}
-            upsertTask={upsertTask}
-            removeTask={removeTask}
-            toggleDone={toggleDone}
-            setSelectedTaskId={setSelectedTaskId}
-            childrenOf={childrenOf}
-            addTask={addTask}
-            mapTasks={mapTasks}
-            onReorder={onReorder}
-            onMergeBlocks={onMergeBlocks}
-            dayDeps={dayDeps}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// キャンバス上の1ブロック。位置は task に持たせ、移動は素の pointer で行う。
-// 列ビューの dnd-kit は「どこに落としたか」で意味が決まるが、ここは座標そのものが
-// 意味なので、同じ仕組みに載せないほうが素直。
-function CanvasBlock({ task, scale, onMove, ...rest }) {
-  const dragging = useRef(null);
-
-  function onPointerDown(e) {
-    // 左ボタンのみ。テキスト編集やボタンの操作は邪魔しない。
-    if (e.button !== 0) return;
-    if (e.target.closest("textarea,button,input,a")) return;
-    dragging.current = { id: e.pointerId, x: e.clientX, y: e.clientY, ox: task.canvasX, oy: task.canvasY, moved: false };
-    e.currentTarget.setPointerCapture(e.pointerId);
-    e.stopPropagation(); // 背景のパンを開始させない
-  }
-  function onPointerMove(e) {
-    const d = dragging.current;
-    if (!d || d.id !== e.pointerId) return;
-    const dx = (e.clientX - d.x) / scale;
-    const dy = (e.clientY - d.y) / scale;
-    if (!d.moved && Math.abs(dx) < 3 && Math.abs(dy) < 3) return;
-    d.moved = true;
-    onMove(task.id, Math.round(d.ox + dx), Math.round(d.oy + dy));
-  }
-  function onPointerUp(e) {
-    const d = dragging.current;
-    dragging.current = null;
-    if (d?.moved) {
-      // 移動だったらクリック扱いにしない（選択が走らないように）
-      e.stopPropagation();
-      const stop = (ev) => { ev.stopPropagation(); ev.preventDefault(); };
-      e.currentTarget.addEventListener("click", stop, { capture: true, once: true });
-    }
-  }
-
-  return (
-    <div
-      className="absolute w-[260px]"
-      style={{ left: task.canvasX, top: task.canvasY }}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-    >
-      <div className="rounded-md border border-white/10 ts-bg-veil px-1 py-0.5 shadow-lg backdrop-blur">
-        <TaskBlock task={task} {...rest} />
-      </div>
-    </div>
-  );
-}
-
-// 自由配置のキャンバス。列に縛られずブロックを置ける。
-// 背景ドラッグでパン、Ctrl+ホイールで拡大縮小、空き場所のダブルクリックで新規ブロック。
-function CanvasView({ tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, selectedTaskId, childrenOf, addTask }) {
-  const [view, setView] = useState(() => {
-    try {
-      const raw = localStorage.getItem("taskspace-canvas-view");
-      return raw ? JSON.parse(raw) : { x: 0, y: 0, scale: 1 };
-    } catch { return { x: 0, y: 0, scale: 1 }; }
-  });
-  const panRef = useRef(null);
-  const wrapRef = useRef(null);
-
-  useEffect(() => {
-    try { localStorage.setItem("taskspace-canvas-view", JSON.stringify(view)); } catch { /* quota */ }
-  }, [view]);
-
-  const placed = tasks.filter((t) => !t.archived && t.canvasX != null && t.canvasY != null);
-
-  // 画面座標 → キャンバス座標
-  function toCanvas(clientX, clientY) {
-    const r = wrapRef.current.getBoundingClientRect();
-    return {
-      x: Math.round((clientX - r.left - view.x) / view.scale),
-      y: Math.round((clientY - r.top - view.y) / view.scale),
-    };
-  }
-
-  function onPointerDown(e) {
-    if (e.button !== 0 || e.target.closest("[data-task-id]")) return;
-    panRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
-    e.currentTarget.setPointerCapture(e.pointerId);
-  }
-  function onPointerMove(e) {
-    const p = panRef.current;
-    if (!p || p.id !== e.pointerId) return;
-    setView((v) => ({ ...v, x: p.vx + (e.clientX - p.x), y: p.vy + (e.clientY - p.y) }));
-  }
-  function onPointerUp() { panRef.current = null; }
-
-  function onWheel(e) {
-    if (!e.ctrlKey && !e.metaKey) return;
-    e.preventDefault();
-    const r = wrapRef.current.getBoundingClientRect();
-    const mx = e.clientX - r.left;
-    const my = e.clientY - r.top;
-    setView((v) => {
-      const next = Math.min(2.5, Math.max(0.3, v.scale * (e.deltaY < 0 ? 1.1 : 1 / 1.1)));
-      // ポインタ位置を固定したまま拡大縮小する
-      return { scale: next, x: mx - (mx - v.x) * (next / v.scale), y: my - (my - v.y) * (next / v.scale) };
-    });
-  }
-
-  function onDoubleClick(e) {
-    if (e.target.closest("[data-task-id]")) return;
-    const at = toCanvas(e.clientX, e.clientY);
-    addTask({ title: "新規ブロック", plain: true, canvasX: at.x, canvasY: at.y, silent: true });
-  }
-
-  return (
-    <div className="relative overflow-hidden rounded-lg border border-white/10" style={{ height: "calc(100vh - 150px)" }}>
-      <div className="pointer-events-none absolute left-2 top-2 z-10 flex items-center gap-2 text-[10px] text-neutral-500">
-        <span>{placed.length} ブロック</span>
-        <span>·</span>
-        <span>{Math.round(view.scale * 100)}%</span>
-        <span>·</span>
-        <span>背景ドラッグで移動 / Ctrl+ホイールで拡大 / ダブルクリックで追加</span>
-      </div>
-      <button
-        onClick={() => setView({ x: 0, y: 0, scale: 1 })}
-        className="absolute right-2 top-2 z-10 rounded border border-white/10 bg-white/[0.05] px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/10"
-      >位置をリセット</button>
-
-      <div
-        ref={wrapRef}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onWheel={onWheel}
-        onDoubleClick={onDoubleClick}
-        data-canvas
-        className="h-full w-full cursor-grab active:cursor-grabbing"
-        style={{
-          backgroundImage: "radial-gradient(circle, color-mix(in srgb, var(--ts-text) 12%, transparent) 1px, transparent 1px)",
-          backgroundSize: `${24 * view.scale}px ${24 * view.scale}px`,
-          backgroundPosition: `${view.x}px ${view.y}px`,
-        }}
-      >
-        <div
-          className="absolute left-0 top-0 origin-top-left"
-          style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}
-        >
-          {placed.map((task, i) => (
-            <CanvasBlock
-              key={task.id}
-              task={task}
-              listNumber={numberedIndex(placed, i)}
-              scale={view.scale}
-              onMove={(id, x, y) => upsertTask({ id, canvasX: x, canvasY: y })}
-              upsertTask={upsertTask}
-              removeTask={removeTask}
-              setSelectedTaskId={setSelectedTaskId}
-              dragDisabled
-              dragId={`canvas-${task.id}`}
-              dragData={{ type: "task", id: task.id }}
-              dropId={`canvas-drop-${task.id}`}
-              dropData={{ type: "task", id: task.id }}
-              rowClassName={(b) => classNames(
-                "rounded px-1 py-0.5 transition",
-                b.focusRingClass,
-                b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
-              )}
-              textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
-              titleClassName={(b) => classNames(
-                "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
-                b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
-                task.status === "完了" && "line-through opacity-40",
-              )}
-              leading={() => (
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
-                  aria-label={task.status === "完了" ? "未完了に戻す" : "完了にする"}
-                  className={classNames("mt-0.5 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
-                >
-                  {task.status === "完了" ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
-                </button>
-              )}
-
-            />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ブロック左端の操作列（Notion の + と ⠿）。ホバーで出る。
 // 場所は常に確保しておく。出入りで幅が変わると行がガタつくため。
@@ -7215,13 +6737,12 @@ function toggleInlineMark(text, start, end, mark) {
 }
 
 // Cmd+P / Cmd+Shift+P で開く、ページと行の早見。
-function QuickFind({ pages, tasks, onClose, onPick }) {
+function QuickFind({ tasks, onClose, onPick }) {
   const [q, setQ] = useState("");
   const [index, setIndex] = useState(0);
 
   const hits = useMemo(() => {
     const needle = kana(q).trim();
-    const pageRows = pages.map((p) => ({ kind: "page", id: p.id, icon: p.icon, label: p.title, sub: "ページ" }));
     const blockRows = tasks
       .filter((t) => t.pageId && !t.archived && t.title.trim())
       .map((t) => ({
@@ -7230,12 +6751,12 @@ function QuickFind({ pages, tasks, onClose, onPick }) {
         pageId: t.pageId,
         icon: "·",
         label: t.title,
-        sub: pages.find((p) => p.id === t.pageId)?.title || "",
+        sub: "ボード",
       }));
-    const all = [...pageRows, ...blockRows];
+    const all = blockRows;
     if (!needle) return all.slice(0, 40);
     return all.filter((r) => kana(`${r.label} ${r.sub}`).includes(needle)).slice(0, 40);
-  }, [q, pages, tasks]);
+  }, [q, tasks]);
 
   useEffect(() => { setIndex(0); }, [q]);
 
@@ -7787,7 +7308,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
       newTitle: newTitles[dateKey] || "",
       setNewTitle: (v) => setNewTitles((prev) => ({ ...prev, [dateKey]: v })),
       onAdd: (title) => handleAdd(dateKey, title),
-      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject,
+      toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject, addTask,
     };
   };
 
@@ -8075,10 +7596,35 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
   );
 }
 
-function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip }) {
+function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf, categoryTone, toggleDone, upsertTask, removeTask, setSelectedTaskId, selectedTaskId, onIndent, onOutdent, dayDateKey, autoFocusEnd, onFocusEndDone, onDeleteFocusPrev, showProjectChip, addTask, siblings = [], idx = 0 }) {
   const tone = categoryTone(task.category);
   const isDone = task.status === "完了";
   const children = childrenOf?.(task.id) || [];
+  const { markForEdit } = useBlockEdit();
+
+  // 本文と同じ操作感にするぶん、ブロックの操作も同じだけ用意する。
+  // 渡し忘れると、Enter も行頭 Backspace も黙って何も起きない。
+  const enterBlock = (t, before, after = "") => {
+    upsertTask?.({ id: t.id, title: normalizeBlockText(before ?? t.title) });
+    const made = addTask?.({
+      title: after, blockText: true, allowEmpty: true, plain: true,
+      scheduledDate: dayDateKey || "", parentId: t.parentId || null,
+      afterId: t.id, silent: true,
+    });
+    if (made) markForEdit?.(made.id, !!after);
+  };
+  const mergeBack = (t, draft) => {
+    const prev = siblings[idx - 1];
+    if (!prev) {
+      // 前がいないときは、空なら消えるだけ（Notion と同じ）
+      if (!String(draft || "").trim()) removeTask?.(t.id);
+      return;
+    }
+    const merged = (prev.title || "") + (draft || "");
+    upsertTask?.({ id: prev.id, title: merged });
+    removeTask?.(t.id);
+    markForEdit?.(prev.id, true);
+  };
 
   return (
     <div style={depth > 0 ? { marginLeft: depth * 12 } : undefined}>
@@ -8106,6 +7652,11 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
         }}
         setSelectedTaskId={setSelectedTaskId}
         extraProps={{ "data-daytask": "true" }}
+        // 7days も本文と同じ操作感にする。クリックで書き始められ、
+        // Esc で選択、Enter はカーソルのところで割れる。
+        notionMode
+        onEnterBlock={enterBlock}
+        onMergeBack={mergeBack}
         compactGutter
         rowClassName={(b) => classNames(
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
@@ -8147,6 +7698,10 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
           listNumber={numberedIndex(children, i)}
           task={child}
           depth={depth + 1}
+          addTask={addTask}
+          siblings={children}
+          idx={i}
+          dayDateKey={dayDateKey}
           childrenOf={childrenOf}
           categoryTone={categoryTone}
           toggleDone={toggleDone}
@@ -8169,7 +7724,7 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
   );
 }
 
-function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, dateKey, onIndent, onOutdent, focusEndId, onFocusEndDone, onDeleteFocusPrev, onOpenInspector }) {
+function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTone, toggleDone, upsertTask, setSelectedTaskId, selectedTaskId, dateKey, onIndent, onOutdent, focusEndId, onFocusEndDone, onDeleteFocusPrev, onOpenInspector, addTask }) {
   const { setNodeRef, isOver } = useDroppable({
     id: `day-proj-drop-${dateKey}-${g.key}`,
     data: { type: "project", category: g.category, project: g.project },
@@ -8189,7 +7744,7 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
       {!collapsed && (
         <div className="flex flex-col gap-0.5">
           {g.items.map((task, i) => (
-            <DayTask key={task.id} listNumber={numberedIndex(g.items, i)} task={task} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => onIndent(task.id)} onOutdent={() => onOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={onFocusEndDone} onDeleteFocusPrev={onDeleteFocusPrev} />
+            <DayTask key={task.id} listNumber={numberedIndex(g.items, i)} task={task} addTask={addTask} siblings={g.items} idx={i} hideProject childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => onIndent(task.id)} onOutdent={() => onOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={onFocusEndDone} onDeleteFocusPrev={onDeleteFocusPrev} />
           ))}
         </div>
       )}
@@ -8198,7 +7753,7 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
 }
 
 // zoneKey: 同じ日を2か所（7days とブロック）に出すので、置き場の名札を分ける。
-function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject, zoneKey = "week" }) {
+function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject, zoneKey = "week", addTask }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${zoneKey}-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [focusEndId, setFocusEndId] = useState(null);
@@ -8296,16 +7851,17 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
         {flatView ? (
           // Bモード: フラット表示（全タスク＋プロジェクトチップ）
           flatRoots.map((task, i) => (
-            <DayTask key={task.id} listNumber={numberedIndex(flatRoots, i)} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} showProjectChip />
+            <DayTask key={task.id} listNumber={numberedIndex(flatRoots, i)} task={task} addTask={addTask} siblings={flatRoots} idx={i} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} showProjectChip />
           ))
         ) : (
           // Aモード: プロジェクトグループヘッダーあり（現状）
           <>
             {plainTasks.map((task, i) => (
-              <DayTask key={task.id} listNumber={numberedIndex(plainTasks, i)} task={task} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
+              <DayTask key={task.id} listNumber={numberedIndex(plainTasks, i)} task={task} addTask={addTask} siblings={plainTasks} idx={i} childrenOf={childrenOf} categoryTone={categoryTone} toggleDone={toggleDone} upsertTask={upsertTask} removeTask={removeTask} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} dayDateKey={dateKey} onIndent={() => makeIndent(task.id)} onOutdent={() => makeOutdent(task.id)} autoFocusEnd={focusEndId === task.id} onFocusEndDone={() => setFocusEndId(null)} onDeleteFocusPrev={handleDeleteFocusPrev} />
             ))}
             {projectGroups.map((g) => (
               <DayProjectGroup
+                addTask={addTask}
                 key={g.key}
                 g={g}
                 tone={categoryTone(g.category)}

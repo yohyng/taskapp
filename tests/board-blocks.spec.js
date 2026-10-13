@@ -64,10 +64,4 @@ test.describe("7daysの下の自由ブロック", () => {
     expect(Math.abs(a.width - b.width)).toBeLessThan(8);
   });
 
-  test("ページ本文とは別の持ち物で、混ざらない", async ({ page, seed }) => {
-    await seed(THREE);
-    await page.locator('button[title="ページ表示"]').click();
-    await expect(page.getByText("クリックして書き始める。/ でコマンド。", { exact: false })).toBeVisible();
-    await expect(page.locator("[data-task-id]").filter({ hasText: "真ん中の列" })).toHaveCount(0);
-  });
 });
