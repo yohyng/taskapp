@@ -2998,6 +2998,30 @@ function App() {
     setToast(`STOCK を${made.length}本、横に並べました`);
   }
 
+  // ボードの中身を、親ブロックごとに縦の列へ分ける。
+  // 「DESIGNART / WORK / 結婚式関連」のように、頭の行とその子で1列になる。
+  function splitBoardIntoColumns() {
+    const order = new Map(tasks.map((t, i) => [t.id, i]));
+    const tops = tasks
+      .filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId)
+      .sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+
+    const rowKey = `row-${uid()}`;
+    const col = new Map();
+    let current = -1;
+    for (const b of tops) {
+      // 中身のある行で新しい列を起こす。空行は直前の列に付ける
+      //（列の末尾で書き足せる場所として残る）。
+      if (b.title.trim() || b.blockType === "day" || b.blockType === "stock") current++;
+      if (current < 0) continue;
+      col.set(b.id, current);
+    }
+    if (current < 1) { setToast("列に分けるには、中身のある行が2つ以上必要です"); return; }
+
+    mapTasks((t) => (col.has(t.id) ? { ...t, rowKey, col: col.get(t.id) } : t));
+    setToast(`${current + 1}列に分けました`);
+  }
+
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   const dayDeps = {
     tasks: filteredTasks, projectRules, childrenOf, toggleDone, removeTask,
@@ -3032,6 +3056,26 @@ function App() {
           className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
           + STOCK
+        </button>
+        <button
+          onClick={splitBoardIntoColumns}
+          title="頭の行とその子で1列にして、縦に分ける"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          列に分ける
+        </button>
+        <button
+          onClick={() => {
+            const ids = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && t.rowKey).map((t) => t.id);
+            if (!ids.length) { setToast("分かれている列はありません"); return; }
+            const set = new Set(ids);
+            mapTasks((t) => (set.has(t.id) ? { ...t, rowKey: null, col: 0, colWidth: null } : t));
+            setToast("列をまとめました");
+          }}
+          title="分けた列を1本に戻す"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          まとめる
         </button>
       </div>
       <BlockArea
