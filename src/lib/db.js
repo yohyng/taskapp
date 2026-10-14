@@ -5,18 +5,26 @@ const STORAGE_KEY = 'notion-like-taskdb-prototype-v4'
 // あとから足した tasks の列。まだ ALTER TABLE していない環境でも同期全体が
 // 落ちないよう、列が無いと分かった時点でその列を送るのをやめる。
 const OPTIONAL_TASK_COLUMNS = {
-  stock: { note: 'STOCK の在／不在' },
-  stock_view_id: { note: 'どの STOCK ビューに入れたか' },
-  style: { note: 'タスクごとの色・太さ' },
-  block_type: { note: '見出し・区切り線などのブロック種別' },
-  canvas_x: { note: 'キャンバス上の位置' },
-  canvas_y: { note: 'キャンバス上の位置' },
-  page_id: { note: 'どのページに書かれたブロックか' },
-  row_key: { note: '段組みの行' },
-  col_index: { note: '段組みの列位置' },
-  col_width: { note: '段組みの列幅（取り分）' },
-  code_lang: { note: 'コードブロックの言語' },
-  day_date: { note: '日付ブロックが見ている日' },
+  stock: { note: 'STOCK の在／不在', type: 'boolean not null default false' },
+  stock_view_id: { note: 'どの STOCK ビューに入れたか', type: 'text' },
+  style: { note: 'タスクごとの色・太さ', type: 'jsonb' },
+  block_type: { note: '見出し・区切り線などのブロック種別', type: 'text' },
+  canvas_x: { note: 'キャンバス上の位置', type: 'real' },
+  canvas_y: { note: 'キャンバス上の位置', type: 'real' },
+  page_id: { note: 'どのページに書かれたブロックか', type: 'text' },
+  row_key: { note: '段組みの行', type: 'text' },
+  col_index: { note: '段組みの列位置', type: 'integer not null default 0' },
+  col_width: { note: '段組みの列幅（取り分）', type: 'real' },
+  code_lang: { note: 'コードブロックの言語', type: 'text' },
+  day_date: { note: '日付ブロックが見ている日', type: 'text' },
+}
+
+// 足りないと分かった列だけを足すと、次に別の機能を使ったときにまた出る。
+// 一度で済むように、任意列はまとめて作る文を出す。
+export function optionalColumnsSql() {
+  return Object.entries(OPTIONAL_TASK_COLUMNS)
+    .map(([name, { type }]) => `alter table tasks add column if not exists ${name} ${type};`)
+    .join('\n')
 }
 const optionalColumnSupported = Object.fromEntries(
   Object.keys(OPTIONAL_TASK_COLUMNS).map((c) => [c, true])

@@ -13,7 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
 import { motion, AnimatePresence } from "framer-motion";
@@ -3828,17 +3828,32 @@ function App() {
               Supabase に置き場が無いので、ほかの端末には伝わりません：
               {missingColumns.map((c) => c.note).join("、")}
             </div>
-            <pre className="mb-2 overflow-x-auto rounded bg-black/30 p-2 text-[10px] text-amber-50/90">
-{missingColumns.map((c) => `alter table tasks add column if not exists ${c.name} ${
-  c.name === "col_width" ? "real" : c.name === "col_index" ? "integer not null default 0" : "text"
-};`).join("\n")}
+            <div className="mb-1 text-[10px] text-amber-100/70">
+              Supabase の SQL Editor に貼って実行してください。足りないぶんだけでなく、
+              あとから出てこないように任意の列をまとめて作ります（既にある列はそのまま）。
+            </div>
+            <pre className="mb-2 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-black/30 p-2 text-[10px] text-amber-50/90">
+{optionalColumnsSql()}
             </pre>
-            <button
-              onClick={() => setMissingColumns([])}
-              className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15"
-            >
-              閉じる
-            </button>
+            <div className="flex gap-1.5">
+              <button
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(optionalColumnsSql());
+                    setToast("SQL をコピーしました");
+                  } catch { setToast("コピーできませんでした。手で選んでください"); }
+                }}
+                className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15"
+              >
+                SQL をコピー
+              </button>
+              <button
+                onClick={() => setMissingColumns([])}
+                className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15"
+              >
+                閉じる
+              </button>
+            </div>
           </div>
         )}
         {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 ts-surface px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}

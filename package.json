@@ -1,7 +1,7 @@
 {
   "name": "taskapp-scaffold",
   "private": true,
-  "version": "1.0.91",
+  "version": "1.0.92",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "test": "playwright test",
     "preview": "vite preview",
-    "test:unit": "vitest run",
+    "test:unit": "vitest run src",
     "test:ui": "playwright test --ui"
   },
   "dependencies": {
