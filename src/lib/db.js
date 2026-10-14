@@ -33,9 +33,17 @@ export function missingOptionalColumn(error) {
 }
 
 // 列が足りないと分かったら落とす。落とせたら true（＝再試行する価値がある）。
+// 無かった列を覚えておく。黙って落とすと、他の端末に伝わっていないことに
+// 気づけないので、アプリ側から知らせられるようにする。
+const missingColumns = new Set()
+export function getMissingOptionalColumns() {
+  return [...missingColumns].map((name) => ({ name, note: OPTIONAL_TASK_COLUMNS[name]?.note || '' }))
+}
+
 function disableOptionalColumn(name) {
   if (!name || !optionalColumnSupported[name]) return false
   optionalColumnSupported[name] = false
+  missingColumns.add(name)
   console.warn(`[db] tasks.${name} 列が無いため「${OPTIONAL_TASK_COLUMNS[name].note}」はこの端末内のみで保持されます`)
   return true
 }

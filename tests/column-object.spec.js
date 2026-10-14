@@ -155,3 +155,68 @@ test.describe("列の見出しの字を変える", () => {
     await expect.poll(async () => (await byTitle(page, "ふつうの行")).style?.size).toBeTruthy();
   });
 });
+
+test.describe("列の設定が保存される", () => {
+  test("名前・位置・幅・枠・字が、開き直しても残る", async ({ page, seed }) => {
+    await seed({
+      tasks: [
+        { ...colHead("c1", "NOMLAB", 0), colWidth: 2.5, style: { size: 18, weight: 400, color: "#f87171" } },
+        t("k", "中の行", { rowKey: "r1", col: 0 }),
+        colHead("c2", "NOMURA", 1),
+      ],
+    });
+
+    // フィクスチャは読み直すたびに種を蒔き直すので、新しいタブで
+    // 「保存されたものだけ」を見る
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("[data-board]");
+
+    const head = await byTitle(page, "NOMLAB");
+    expect(head.blockType).toBe("column");
+    expect(head.col).toBe(0);
+    expect(head.colWidth).toBe(2.5);
+    expect(head.style).toEqual({ size: 18, weight: 400, color: "#f87171" });
+    expect((await byTitle(page, "NOMURA")).col).toBe(1);
+
+    // 画面でも、幅と字がそのまま出ている
+    const title = fresh.locator("[data-board] [data-task-id]").filter({ hasText: "NOMLAB" })
+      .first().locator(".ts-block-text").first();
+    const css = await title.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { size: parseFloat(s.fontSize), weight: s.fontWeight, color: s.color };
+    });
+    expect(css.size).toBe(18);
+    expect(css.weight).toBe("400");
+    expect(css.color).toBe("rgb(248, 113, 113)");
+
+    const w = async (name) => (await fresh.locator("[data-board] [data-task-id]")
+      .filter({ hasText: name }).first().locator("xpath=..").boundingBox()).width;
+    expect(await w("NOMLAB")).toBeGreaterThan((await w("NOMURA")) * 2);
+    await fresh.close();
+  });
+
+  test("作ってから変えた設定も、そのまま残る", async ({ page, seed }) => {
+    await seed({ tasks: [] });
+    await page.getByRole("button", { name: "+ 列" }).click();
+    await page.keyboard.type("あたらしい列");
+    await page.keyboard.press("Escape");
+
+    await openMenu(page, "あたらしい列");
+    await page.locator("[data-block-menu]").getByTitle("大きく").click();
+    await page.locator("[data-block-menu]").getByTitle("太さ：ほそ").click();
+    await expect.poll(async () => (await byTitle(page, "あたらしい列")).style?.weight).toBe(400);
+
+    const saved = await byTitle(page, "あたらしい列");
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("[data-board]");
+
+    const again = await byTitle(page, "あたらしい列");
+    expect(again.blockType).toBe("column");
+    expect(again.style?.size).toBe(saved.style.size);
+    expect(again.style?.weight).toBe(400);
+    expect(again.rowKey).toBeTruthy();
+    await fresh.close();
+  });
+});
