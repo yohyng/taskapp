@@ -2229,6 +2229,13 @@ function App() {
     setToast(nextValue ? "Todayに追加しました" : "Todayから外しました");
   }
 
+  // 画面から消すだけだと、Supabase に残った行が次の読み込みで戻ってくる。
+  // 状態から外すのとは別に、消したことを覚えて向こうからも消す。
+  function forgetTask(id) {
+    addTombstone(TOMBSTONE_TASKS_KEY, id);
+    dbDeleteTask(id).catch((e) => addSyncLog(`✗ タスク DELETE失敗: ${e?.message}`));
+  }
+
   function removeTask(id) {
     addTombstone(TOMBSTONE_TASKS_KEY, id);
     addSyncLog(`🗑 タスク削除 id=${id.slice(0,8)}`);
@@ -2793,6 +2800,7 @@ function App() {
   // 前のブロックに文字を足して自分を消す。1回の更新でやらないと、
   // 後の書き込みが更新前の状態を元にして前の書き込みを消してしまう。
   function mergeBlockInto(prevId, taskId, mergedTitle) {
+    forgetTask(taskId);
     commitTasks((prev) => prev
       .map((t) => (t.id === prevId ? { ...t, title: mergedTitle } : t))
       .filter((t) => t.id !== taskId));
@@ -3042,6 +3050,7 @@ function App() {
     // 列を消す。中身は消さず、列から出して縦に戻す。
     removeColumn: (task) => {
       const { rowKey, col } = task;
+      forgetTask(task.id);
       commitTasks((prev) => prev
         .filter((t) => t.id !== task.id)
         .map((t) => (t.rowKey === rowKey && (t.col ?? 0) === (col ?? 0)
