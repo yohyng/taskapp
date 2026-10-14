@@ -71,11 +71,17 @@ body {
    マウスが無い＝ホバーが無いので、ホバー前提の作りがそのままだと
    触れないものになる。ここでまとめて面倒を見る。 */
 
-/* 上の帯のボタン。小さいと狙えない（Apple の目安は44pt） */
+/* 上の帯のボタン。狙える大きさは要るが、並びすぎると場所を食う。
+   よく押す「タスクを追加」だけ横に広げ、ほかは控えめにする。 */
 @media (pointer: coarse) {
   header button {
+    min-height: 34px;
+    min-width: 34px;
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+  header button[data-quick-add] {
     min-height: 40px;
-    min-width: 40px;
   }
   /* ページの帯も指で押す。文字だけの行は薄くて狙いにくい。 */
   aside button {

@@ -14,7 +14,9 @@ test.describe("終日の帯", () => {
     const head = page.locator("[data-day-head]").first();
     const key = await head.getAttribute("data-day-head");
 
-    await dragTo(page, await centerOf(card), await centerOf(head));
+    // dnd-kit は動いた距離で発火する。混んでいても取りこぼさないよう細かく動かす
+    await card.hover();
+    await dragTo(page, await centerOf(card), await centerOf(head), 30);
     await expect.poll(async () => (await storedTask(page, "tray-1")).dueDate).toBe(key);
     expect((await storedTask(page, "tray-1")).scheduledDate).toBe(key);
     await expect(bar(page)).toBeVisible();

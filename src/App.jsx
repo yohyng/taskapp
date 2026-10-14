@@ -979,6 +979,8 @@ function App() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddTitle, setQuickAddTitle] = useState("");
+  // 追加したタスクをいつに置くか。既定は今日。
+  const [quickAddWhen, setQuickAddWhen] = useState(() => toDateKey(new Date()));
   const [showMovePanel, setShowMovePanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
   const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1.2"));
@@ -3269,32 +3271,15 @@ function App() {
           </div>
 
           <div className="flex w-full flex-wrap items-center justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
-            {quickAddOpen ? (
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const title = quickAddTitle.trim();
-                if (title) {
-                  addTask({ title, category: "", project: "", plain: true, scheduledDate: toDateKey(new Date()) });
-                  setToast(`「${title}」をTRAYに追加しました`);
-                }
-                setQuickAddTitle("");
-                setQuickAddOpen(false);
-              }} className="flex items-center gap-1">
-                <input
-                  autoFocus
-                  type="text"
-                  value={quickAddTitle}
-                  onChange={(e) => setQuickAddTitle(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); } }}
-                  placeholder="タスク名を入力…"
-                  className="w-44 rounded-md border border-white/20 bg-white/[0.07] px-2 py-1.5 text-xs ts-text placeholder-neutral-500 outline-none focus:border-emerald-400/50 focus:ring-1 focus:ring-emerald-400/20 sm:w-56"
-                />
-                <button type="submit" className="rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 py-1.5 text-xs text-emerald-200 transition hover:bg-emerald-500/25">追加</button>
-                <button type="button" onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }} className="rounded-md border border-white/10 bg-white/[0.03] p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"><X className="h-3.5 w-3.5" /></button>
-              </form>
-            ) : (
-              <button onClick={() => setQuickAddOpen(true)} title="タスクを追加" className="rounded-md border border-emerald-400/40 bg-emerald-500/15 px-2 py-1.5 text-xs text-emerald-300 transition hover:bg-emerald-500/25"><Plus className="h-3.5 w-3.5" /></button>
-            )}
+            <button
+              onClick={() => setQuickAddOpen(true)}
+              title="タスクを追加"
+              data-quick-add
+              className="flex min-w-0 flex-[2] items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 sm:flex-none"
+            >
+              <Plus className="h-3.5 w-3.5 shrink-0" />
+              <span className="whitespace-nowrap">タスクを追加</span>
+            </button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
@@ -4098,6 +4083,91 @@ function App() {
             </div>
           </div>
         )}
+        {/* タスク追加。スマホでも打ちやすいよう、画面の真ん中に大きく出す。 */}
+        {quickAddOpen && (
+          <div
+            data-quick-add-dialog
+            className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) { setQuickAddOpen(false); setQuickAddTitle(""); } }}
+          >
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const title = quickAddTitle.trim();
+                if (!title) return;
+                addTask({
+                  title, category: "", project: "", plain: true,
+                  scheduledDate: quickAddWhen === "none" ? "" : quickAddWhen,
+                });
+                setQuickAddTitle("");
+                setToast(`「${title}」を追加しました`);
+              }}
+              className="w-full max-w-md rounded-2xl border border-white/15 ts-surface p-4 shadow-2xl"
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-sm font-semibold ts-text">タスクを追加</span>
+                <button
+                  type="button"
+                  onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }}
+                  className="rounded-md border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <textarea
+                autoFocus
+                rows={3}
+                value={quickAddTitle}
+                onChange={(e) => setQuickAddTitle(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); }
+                  // Enter で追加、Shift+Enter で改行
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
+                }}
+                placeholder="やること（Enter で追加・Shift+Enter で改行）"
+                className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text placeholder-neutral-600 outline-none focus:border-emerald-400/50"
+              />
+
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setQuickAddWhen(value)}
+                    className={classNames(
+                      "rounded-full border px-3 py-1.5 text-xs transition",
+                      quickAddWhen === value
+                        ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100"
+                        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-4 flex items-center gap-2">
+                <button
+                  type="submit"
+                  disabled={!quickAddTitle.trim()}
+                  className="flex-1 rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-emerald-500/30 disabled:opacity-30"
+                >
+                  追加
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }}
+                  className="rounded-xl border border-white/10 px-3 py-2.5 text-sm text-neutral-400 transition hover:bg-white/[0.07]"
+                >
+                  閉じる
+                </button>
+              </div>
+              <div className="mt-2 text-[10px] text-neutral-600">続けて打てば、そのまま何件でも足せます。</div>
+            </form>
+          </div>
+        )}
+
         {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 ts-surface px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
       </div>
     </div>

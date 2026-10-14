@@ -159,12 +159,22 @@ test.describe("指での操作", () => {
 
   test("上の帯のボタンが指で押せる大きさ", async ({ page }) => {
     await open(page, [t("a", "もじ")]);
+    // アイコンだけのボタンは控えめ（場所を食わない）が、指では押せる大きさを保つ
     const small = await page.evaluate(() =>
-      [...document.querySelectorAll("header button")]
+      [...document.querySelectorAll("header button:not([data-quick-add])")]
         .filter((b) => b.getBoundingClientRect().height > 0)
-        .filter((b) => b.getBoundingClientRect().height < 36)
+        .filter((b) => b.getBoundingClientRect().height < 32)
         .map((b) => b.getAttribute("title") || ""));
     expect(small).toEqual([]);
+  });
+
+  test("「タスクを追加」だけは大きく、横に広い", async ({ page }) => {
+    await open(page, [t("a", "もじ")]);
+    const add = await page.locator("header button[data-quick-add]").boundingBox();
+    expect(add.height).toBeGreaterThanOrEqual(40);
+    const others = await page.locator("header button:not([data-quick-add])")
+      .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+    expect(add.width).toBeGreaterThan(Math.max(...others) * 2);
   });
 });
 
