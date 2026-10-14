@@ -155,6 +155,8 @@ const BASE_BLOCK_TYPES = {
   code:      { label: "コード", code: true, md: ["```"], reading: "こーど code そーす" },
   divider:   { label: "区切り線", text: false, md: ["--- "], reading: "くぎりせん divider せん しきり" },
   toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
+  // 列の頭。これ自体が「列」なので、中身が空になっても消えない。
+  column:    { label: "列", size: 13, weight: 700, reading: "れつ column たて かてごり" },
   image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
   day:       { label: "その日の予定", text: false, reading: "よてい day かれんだー 曜日 ようび 7days いちにち" },
 };
@@ -3060,6 +3062,16 @@ function App() {
       if (created) setPendingEditId(created.id);
     },
     addWeekRow: () => addWeekRow(),
+    // 列を消す。中身は消さず、列から出して縦に戻す。
+    removeColumn: (task) => {
+      const { rowKey, col } = task;
+      commitTasks((prev) => prev
+        .filter((t) => t.id !== task.id)
+        .map((t) => (t.rowKey === rowKey && (t.col ?? 0) === (col ?? 0)
+          ? { ...t, rowKey: null, col: 0, colWidth: null }
+          : t)));
+      setToast("列を消しました（中身は残っています）");
+    },
     clearColumns: (task) => {
       if (!task.rowKey) return;
       commitTasks((prev) => prev.map((t) =>
@@ -3091,6 +3103,7 @@ function App() {
     addColumn: (...a) => slashHandlers.current.addColumn(...a),
     clearColumns: (...a) => slashHandlers.current.clearColumns(...a),
     addWeekRow: (...a) => slashHandlers.current.addWeekRow(...a),
+    removeColumn: (...a) => slashHandlers.current.removeColumn(...a),
     placeOnCanvas: (...a) => slashHandlers.current.placeOnCanvas(...a),
     setStyle: (...a) => slashHandlers.current.setStyle(...a),
     get defaultStockViewId() { return slashHandlers.current.defaultStockViewId; },
@@ -3112,6 +3125,20 @@ function App() {
   });
 
   // 月〜日の日付ブロックを、横一列の段組みとして一気に置く
+  // 列を1本足す。列は独立した持ち物なので、中身を消しても残る。
+  function addBoardColumn() {
+    const here = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId);
+    const inRow = here.filter((t) => t.rowKey);
+    const rowKey = inRow[0]?.rowKey || `row-${uid()}`;
+    const nextCol = inRow.length ? Math.max(...inRow.map((t) => t.col ?? 0)) + 1 : 0;
+    const made = normalizeTask({
+      id: uid(), title: "", category: "", project: "", status: "未着手", plain: true,
+      pageId: BOARD_PAGE_ID, blockType: "column", rowKey, col: nextCol,
+    });
+    addRawBlocks([made]);
+    setPendingEditId(made.id);
+  }
+
   function addWeekRow() {
     const base = getWeekDays(new Date());
     const rowKey = `row-${uid()}`;
@@ -3125,20 +3152,6 @@ function App() {
   }
 
   // 縦のカテゴリを1本足す。頭の行を作って、そこから書き始められるようにする。
-  function addBoardColumn() {
-    const here = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId);
-    const inRow = here.filter((t) => t.rowKey);
-    const rowKey = inRow[0]?.rowKey || `row-${uid()}`;
-    const nextCol = inRow.length ? Math.max(...inRow.map((t) => t.col ?? 0)) + 1 : 0;
-    const made = normalizeTask({
-      id: uid(), title: "", category: "", project: "", status: "未着手", plain: true,
-      pageId: BOARD_PAGE_ID, blockType: "task",
-      rowKey, col: nextCol, style: { framed: true },
-    });
-    addRawBlocks([made]);
-    setPendingEditId(made.id);
-  }
-
   // ボードの中身を、親ブロックごとに縦の列へ分ける。
   // 「DESIGNART / WORK / 結婚式関連」のように、頭の行とその子で1列になる。
 
@@ -3165,6 +3178,13 @@ function App() {
           placeholder="名前をつける"
           className="min-w-[8rem] flex-1 bg-transparent text-sm font-semibold tracking-tight ts-text outline-none placeholder:text-neutral-700"
         />
+        <button
+          onClick={addBoardColumn}
+          title="縦の列を1本足す（中身を消しても列は残ります）"
+          className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
+        >
+          + 列
+        </button>
       </div>
       {typeEditor && (
         <BlockTypeEditor
@@ -5125,6 +5145,9 @@ function useTaskBlock({
     if (e.key === "Backspace" || e.key === "Delete") {
       if (notionMode && e.key === "Backspace" && atStart) {
         const kind = blockTypeOf(task, types);
+        // 列の頭は、Backspace では種別も変えないし消さない。
+        // 消すのは ⠿ のメニューの「この列を消す」から。
+        if (kind === "column") { e.preventDefault(); return; }
         // まず種類をテキストに戻し、それから前のブロックに繋げる
         if (kind !== "text" && kind !== "task") {
           e.preventDefault();
@@ -5147,7 +5170,8 @@ function useTaskBlock({
       }
       if (!el.value) {
         e.preventDefault();
-        removeAndLeave();
+        // 列の頭は、中身が空でも残す。列ごと消すのは ⠿ のメニューから。
+        if (task.blockType !== "column") removeAndLeave();
         return;
       }
     }
@@ -5933,7 +5957,7 @@ function BlockArea({
               // 先頭の行が見出しの帯、その下が中身になる。
               // 枠は列のどれかが持っていれば立てる。先頭に何か入っただけで
               // 枠が消えると、列を作り直したように見えてしまう。
-              const framed = !row.single && colBlocks.some((x) => x.style?.framed);
+              const framed = !row.single && colBlocks.some((x) => x.blockType === "column" || x.style?.framed);
               return (
                 <div
                   key={ci}
@@ -6212,6 +6236,18 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
           >
             <Copy className="h-3 w-3 shrink-0" /> 複製
           </button>
+          {task.blockType === "column" && (
+            <button
+              onMouseDown={(e) => {
+                e.preventDefault();
+                slashCtx.removeColumn(task);
+                setMenu(false);
+              }}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-red-300 transition hover:bg-white/[0.07]"
+            >
+              <Trash2 className="h-3 w-3 shrink-0" /> この列を消す（中身は残る）
+            </button>
+          )}
           <button
             onMouseDown={(e) => {
               e.preventDefault();
