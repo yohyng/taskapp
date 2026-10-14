@@ -61,7 +61,7 @@ test.describe("Ctrl+Z で戻せる", () => {
 
   test("足した列が戻る", async ({ page, seed }) => {
     await seed({ tasks: [t("a", "もとの行")] });
-    await page.getByRole("button", { name: "+ 列" }).click();
+    await page.getByRole("button", { name: "＋PJ" }).click();
     await page.keyboard.press("Escape");
     await expect.poll(async () =>
       (await boardTasks(page)).filter((x) => x.blockType === "column").length).toBe(1);

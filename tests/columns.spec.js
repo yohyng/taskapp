@@ -25,7 +25,7 @@ async function sideBySide(page, titleA, titleB) {
 
 test.describe("段組み", () => {
   test("列を追加すると横に並ぶ", async ({ page }) => {
-    await write(page, "ひだり /列を追加");
+    await write(page, "ひだり /PJを追加");
     await page.keyboard.press("Enter");
 
     await expect.poll(async () => (await pageBlocks(page)).length).toBe(2);
@@ -43,7 +43,7 @@ test.describe("段組み", () => {
   });
 
   test("左に列を追加すると自分が右になる", async ({ page }) => {
-    await write(page, "もとのブロック /左に列を追加");
+    await write(page, "もとのブロック /左にPJを追加");
     await page.keyboard.press("Enter");
 
     const [a, b] = await pageBlocks(page);
@@ -51,7 +51,7 @@ test.describe("段組み", () => {
   });
 
   test("段組みをやめると縦に戻る", async ({ page }) => {
-    await write(page, "いち /列を追加");
+    await write(page, "いち /PJを追加");
     await page.keyboard.press("Enter");
     await page.keyboard.type("に");
     await page.keyboard.press("Escape");
@@ -69,9 +69,9 @@ test.describe("段組み", () => {
   });
 
   test("3列まで増やせる", async ({ page }) => {
-    await write(page, "A /列を追加");
+    await write(page, "A /PJを追加");
     await page.keyboard.press("Enter");
-    await page.keyboard.type("B /列を追加");
+    await page.keyboard.type("B /PJを追加");
     await page.keyboard.press("Enter");
     await page.keyboard.type("C");
     await page.keyboard.press("Escape");
@@ -83,7 +83,7 @@ test.describe("段組み", () => {
   });
 
   test("狭い画面では縦に積む", async ({ page }) => {
-    await write(page, "ひだり /列を追加");
+    await write(page, "ひだり /PJを追加");
     await page.keyboard.press("Enter");
     await page.keyboard.type("みぎ");
     await page.keyboard.press("Escape");

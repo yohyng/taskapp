@@ -105,3 +105,51 @@ test.describe("列は動かさない", () => {
     await expect.poll(async () => (await stored(page)).find((t) => t.id === "h0")?.blockType).toBe("column");
   });
 });
+
+test.describe("PJ の箱", () => {
+  test("入りきらない PJ は下の段に回る", async ({ page, seed }) => {
+    // 細い画面に 4本。横一列には収まらないので折り返す。
+    await page.setViewportSize({ width: 760, height: 900 });
+    await seed({
+      tasks: [0, 1, 2, 3].map((c) => b(`h${c}`, `PJ${c}`, { col: c, blockType: "column" })),
+    });
+    const tops = await page.evaluate(() =>
+      [...document.querySelectorAll("[data-col-index]")]
+        .map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(tops.length).toBe(4);
+    expect(new Set(tops).size).toBeGreaterThan(1); // 一列に並びきっていない
+  });
+
+  test("広い画面なら横一列のまま", async ({ page, seed }) => {
+    await page.setViewportSize({ width: 1600, height: 900 });
+    await seed({
+      tasks: [0, 1, 2, 3].map((c) => b(`h${c}`, `PJ${c}`, { col: c, blockType: "column" })),
+    });
+    const tops = await page.evaluate(() =>
+      [...document.querySelectorAll("[data-col-index]")]
+        .map((e) => Math.round(e.getBoundingClientRect().top)));
+    expect(new Set(tops).size).toBe(1);
+  });
+
+  test("帯のつまみをドラッグすると、PJ ごと入れ替わる", async ({ page, seed }) => {
+    const { storedTasks, dragTo, centerOf } = await import("./helpers.js");
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await seed({
+      tasks: [
+        b("h0", "ひだりPJ", { col: 0, blockType: "column" }),
+        b("a", "ひだりの中身", { col: 0 }),
+        b("h1", "みぎPJ", { col: 1, blockType: "column" }),
+      ],
+    });
+    const first = page.locator('[data-col-index="0"]');
+    await first.hover();
+    const grab = first.locator("[data-pj-grab]").first();
+    await dragTo(page, await centerOf(grab), await centerOf(page.locator('[data-col-index="1"]')));
+
+    await expect.poll(async () =>
+      (await storedTasks(page)).find((t) => t.id === "h0")?.col).toBe(1);
+    const all = await storedTasks(page);
+    expect(all.find((t) => t.id === "h1").col).toBe(0);
+    expect(all.find((t) => t.id === "a").col).toBe(1); // 中身も一緒に動く
+  });
+});

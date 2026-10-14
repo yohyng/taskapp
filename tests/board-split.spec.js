@@ -1,7 +1,7 @@
 import { test, expect, storedTasks, dragTo, centerOf } from "./helpers.js";
 
 // ボードの縦の列。列そのものはデータ（rowKey / col / 枠）として持ち、
-// 作るのは「/列を追加する」。ここでは、持っている列が正しく描かれ、
+// 作るのは「/PJを追加する」。ここでは、持っている列が正しく描かれ、
 // 触っても壊れないことを見る。
 const BOARD = "board-7days";
 
@@ -118,12 +118,12 @@ test.describe("列は保存される", () => {
 });
 
 test.describe("列を足す", () => {
-  test("/列を追加する で、右に空の列ができてすぐ書ける", async ({ page, seed }) => {
+  test("/PJを追加する で、右に空の列ができてすぐ書ける", async ({ page, seed }) => {
     await seed({ tasks: [head("g1", "ひとつめ", 0)] });
 
     await row(page, "ひとつめ").locator("div.cursor-text").first().click();
     await page.keyboard.press("End");
-    await page.keyboard.type(" /列を追加する");
+    await page.keyboard.type(" /PJを追加する");
     await page.keyboard.press("Enter");
 
     await expect(page.locator("textarea")).toHaveCount(1);
@@ -139,7 +139,7 @@ test.describe("列を足す", () => {
 
     await row(page, "さいしょ").locator("div.cursor-text").first().click();
     await page.keyboard.press("End");
-    await page.keyboard.type(" /列を追加する");
+    await page.keyboard.type(" /PJを追加する");
     await page.keyboard.press("Enter");
     await page.keyboard.type("つぎ");
     await page.keyboard.press("Escape");

@@ -12,7 +12,7 @@ async function twoColumns(page) {
   await toPages(page);
   await emptyArea(page).click();
   await expect(page.locator("textarea")).toHaveCount(1);
-  await page.keyboard.type("ひだり /列を追加");
+  await page.keyboard.type("ひだり /PJを追加");
   await page.keyboard.press("Enter");
   await page.keyboard.type("みぎ");
   await page.keyboard.press("Escape");

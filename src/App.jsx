@@ -156,7 +156,7 @@ const BASE_BLOCK_TYPES = {
   divider:   { label: "区切り線", text: false, md: ["--- "], reading: "くぎりせん divider せん しきり" },
   toc:       { label: "目次", text: false, reading: "もくじ toc contents みだし いちらん" },
   // 列の頭。これ自体が「列」なので、中身が空になっても消えない。
-  column:    { label: "列", size: 13, weight: 700, reading: "れつ column たて かてごり" },
+  column:    { label: "PJ", size: 13, weight: 700, reading: "ぴーじぇい pj れつ column たて かてごり ぷろじぇくと" },
   image:     { label: "画像", reading: "がぞう image picture しゃしん ずかい" },
   day:       { label: "その日の予定", text: false, reading: "よてい day かれんだー 曜日 ようび 7days いちにち" },
 };
@@ -165,6 +165,9 @@ const BASE_BLOCK_TYPES = {
 const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
+// PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
+const PJ_BASIS = 260;
+const PJ_MIN = 220;
 
 // 手元のボードを組み直すときのひな形。画面にあった構成をそのまま持っている。
 // 中身は [題名, {色・種別など}, [子…]] の3つ組。
@@ -330,11 +333,11 @@ const SLASH_COMMANDS = [
     run: ({ task, ctx }) => ctx.upsertTask({ id: task.id, scheduledDate: "", today: false, thisWeek: false }),
   },
   {
-    key: "col-right", group: "段組み", label: "列を追加する", hint: "右に新しい列を作る", keywords: "column 段組み 列 横 right れつ ついか たて",
+    key: "col-right", group: "段組み", label: "PJを追加する", hint: "PJ の箱をひとつ足す", keywords: "column 段組み 列 横 right れつ ついか たて pj ぴーじぇい ぷろじぇくと",
     run: ({ task, ctx }) => ctx.addColumn(task, 1),
   },
   {
-    key: "col-left", group: "段組み", label: "左に列を追加する", hint: "左に新しい列を作る", keywords: "column 段組み 列 横 left れつ ついか ひだり",
+    key: "col-left", group: "段組み", label: "左にPJを追加する", hint: "ひとつ左に足す", keywords: "column 段組み 列 横 left れつ ついか ひだり pj ぴーじぇい",
     run: ({ task, ctx }) => ctx.addColumn(task, -1),
   },
   {
@@ -3203,10 +3206,10 @@ function App() {
         />
         <button
           onClick={addBoardColumn}
-          title="縦の列を1本足す（中身を消しても列は残ります）"
+          title="PJ の箱をひとつ足す（入りきらないぶんは下の段へ）"
           className="shrink-0 rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-500 transition hover:bg-white/[0.06] hover:text-neutral-300"
         >
-          + 列
+          ＋PJ
         </button>
       </div>
       {typeEditor && (
@@ -3229,7 +3232,7 @@ function App() {
         onReorder={swapTaskOrder}
         onMergeBlocks={mergeBlockInto}
         dayDeps={dayDeps}
-        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/列を追加する で縦の列。"
+        placeholder="ここは自由。クリックして書き始める。/ でコマンド、/PJを追加する で PJ の箱。"
         tailClass="mt-1 min-h-[120px] cursor-text pt-2 text-[13px] text-neutral-700"
       />
     </div>
@@ -5847,6 +5850,34 @@ function BlockArea({
     mapTasks((t) => (t.rowKey === rowKey && (t.col ?? 0) === col ? { ...t, colWidth: w } : t));
   }, [mapTasks]);
 
+  // PJ の箱をつかんで入れ替える。中のブロックのドラッグとは別物なので、
+  // 帯のつまみだけで動かす（dnd-kit は中のブロック用に使っている）。
+  const [pjDrag, setPjDrag] = useState(null);
+  const [pjOver, setPjOver] = useState(null);
+  const pjRow = useRef(null);
+  function startPjDrag(rowKey, colNum, e) {
+    pjRow.current = rowKey;
+    setPjDrag(colNum);
+    setPjOver(colNum);
+    const colAt = (ev) => {
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-col-index]");
+      const n = el ? Number(el.getAttribute("data-col-index")) : null;
+      return n == null || Number.isNaN(n) ? null : n;
+    };
+    const move = (ev) => setPjOver(colAt(ev));
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const to = colAt(ev);
+      if (to != null && to !== colNum) swapColumns(pjRow.current, colNum, to);
+      setPjDrag(null);
+      setPjOver(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    e.preventDefault();
+  }
+
   function addBlockAtEnd() {
     const last = blocks[blocks.length - 1];
     if (last && !last.title.trim()) return; // 末尾が空なら増やさない
@@ -5862,7 +5893,8 @@ function BlockArea({
           <div
             key={row.key}
             // 段組みは広い画面だけ。狭い画面では縦に積む。
-            className={row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-1 sm:flex-row sm:items-start"}
+            // PJ は横に並べ、入りきらなくなったら下の段へ回す。
+            className={row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-3 sm:flex-row sm:flex-wrap sm:items-start"}
           >
             {row.cols.map((colBlocks, ci) => {
               const colNum = row.single ? 0 : row.colNums[ci];
@@ -5875,11 +5907,17 @@ function BlockArea({
               return (
                 <div
                   key={ci}
+                  data-col-index={colNum}
                   className={classNames(
                     "min-w-0",
+                    pjOver === colNum && pjDrag != null && pjDrag !== colNum && "outline outline-2 outline-sky-400/60",
                     framed && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
                   )}
-                  style={row.single ? undefined : { flexGrow: width, flexBasis: 0, flexShrink: 1 }}
+                  // flexBasis を 0 にすると何本でも1段に詰め込んでしまう。
+                  // 目安の幅を持たせて、入らないぶんは折り返させる。
+                  style={row.single ? undefined : {
+                    flexGrow: width, flexBasis: `${PJ_BASIS * width}px`, flexShrink: 1, minWidth: PJ_MIN,
+                  }}
                 >
                   {colBlocks.map((task, i) => (
                     <PageBlock
@@ -5922,6 +5960,7 @@ function BlockArea({
                       width={width}
                       onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
                       onWidth={(w) => setColumnWidth(row.key, colNum, w)}
+                      onGrab={(e) => startPjDrag(row.key, colNum, e)}
                     />
                   )}
                 </div>
@@ -5966,7 +6005,7 @@ function countInColumn(colBlocks, childrenOf) {
   return colBlocks.slice(1).length + colBlocks.reduce((n, b) => n + walk(b.id), 0);
 }
 
-function ColumnBar({ first, last, width, onMove, onWidth, floating = false }) {
+function ColumnBar({ first, last, width, onMove, onWidth, onGrab, floating = false }) {
   const drag = useRef(null);
 
   function onPointerDown(e) {
@@ -6010,6 +6049,16 @@ function ColumnBar({ first, last, width, onMove, onWidth, floating = false }) {
       >
         <ChevronRight className="h-3 w-3" />
       </button>
+      {onGrab && (
+        <span
+          data-pj-grab
+          onPointerDown={onGrab}
+          title="ドラッグでこの PJ を入れ替える"
+          className="cursor-grab select-none px-0.5 text-[10px] leading-none text-neutral-600 transition hover:text-neutral-200"
+        >
+          ⠿
+        </span>
+      )}
       <span
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}

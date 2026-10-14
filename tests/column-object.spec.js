@@ -19,9 +19,9 @@ const openMenu = async (page, s) => {
 };
 
 test.describe("列は独立した持ち物", () => {
-  test("「+ 列」で作れて、すぐ名前を書ける", async ({ page, seed }) => {
+  test("「＋PJ」で作れて、すぐ名前を書ける", async ({ page, seed }) => {
     await seed({ tasks: [] });
-    await page.getByRole("button", { name: "+ 列" }).click();
+    await page.getByRole("button", { name: "＋PJ" }).click();
 
     await expect(page.locator("textarea")).toHaveCount(1);
     await page.keyboard.type("NOMLAB");
@@ -34,7 +34,7 @@ test.describe("列は独立した持ち物", () => {
   test("押すたびに右へ増える", async ({ page, seed }) => {
     await seed({ tasks: [] });
     for (const name of ["A", "B"]) {
-      await page.getByRole("button", { name: "+ 列" }).click();
+      await page.getByRole("button", { name: "＋PJ" }).click();
       await page.keyboard.type(name);
       await page.keyboard.press("Escape");
       await expect.poll(async () => (await byTitle(page, name))?.title).toBe(name);
@@ -198,7 +198,7 @@ test.describe("列の設定が保存される", () => {
 
   test("作ってから変えた設定も、そのまま残る", async ({ page, seed }) => {
     await seed({ tasks: [] });
-    await page.getByRole("button", { name: "+ 列" }).click();
+    await page.getByRole("button", { name: "＋PJ" }).click();
     await page.keyboard.type("あたらしい列");
     await page.keyboard.press("Escape");
 
