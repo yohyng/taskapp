@@ -59,14 +59,14 @@ test.describe("ブロック種別", () => {
 
 test.describe("追加欄のスラッシュ", () => {
   test("追加欄で / を打つとメニューが出る", async ({ page }) => {
-    await page.getByPlaceholder("このProjectに追加").first().click();
+    await page.getByPlaceholder("追加…").first().click();
     await page.keyboard.type("/");
     await expect(menuItem(page, "見出し1")).toBeVisible();
   });
 
   test("文字を書いてからコマンドを選ぶと、その文字でタスクが作られる", async ({ page }) => {
     const before = (await storedTasks(page)).length;
-    await page.getByPlaceholder("このProjectに追加").first().click();
+    await page.getByPlaceholder("追加…").first().click();
     await page.keyboard.type("あたらしい見出し /見出し1");
     await page.keyboard.press("Enter");
 
@@ -195,7 +195,7 @@ test.describe("ブロック種別の見た目", () => {
   });
 
   test("番号付きリストは連番になり、別種を挟むと振り直す", async ({ page }) => {
-    // ALPHA は a-parent / a-solo の2ルート。両方を numbered にすると 1, 2 になる。
+    // TRAY に並ぶ a-parent / a-solo。両方を numbered にすると 1, 2 になる。
     for (const id of ["a-parent", "a-solo"]) {
       await slashOnBlock(page, id, "番号付き");
       await page.keyboard.press("Enter");

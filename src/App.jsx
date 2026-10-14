@@ -877,7 +877,7 @@ function App() {
   const [notionAutoSync, setNotionAutoSync] = useState(() => localStorage.getItem("taskspace-notion-auto") !== "off");
   const [leftPanelHorizontal, setLeftPanelHorizontal] = useState(() => localStorage.getItem("taskspace-left-horizontal") === "true");
   const [panelOrder, setPanelOrder] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "board", "calendar"]; } catch { return ["7days", "tray", "board", "calendar"]; }
+    try { return JSON.parse(localStorage.getItem("taskspace-panel-order") || "null") || ["7days", "tray", "calendar"]; } catch { return ["7days", "tray", "calendar"]; }
   });
   // 下の段のどれを出すか。消すのではなく、しまっておくだけ。
   // 中のタスクはそのまま残るので、いつでも戻せる。
@@ -897,8 +897,8 @@ function App() {
     });
   }
 
-  // PJ ボードのタスクを TRAY へ移す。消すのではなく、Category / Project を
-  // 外して「どこにも属さないタスク」にするだけ。親子も中身もそのまま。
+  // PJボードをやめたあと、タスクに残っている Category / Project を外す。
+  // 消すのではなく所属を外すだけなので、親子も中身もそのまま。
   const [confirmUnproject, setConfirmUnproject] = useState(false);
   function moveProjectTasksToTray() {
     // 保管済みも含めて外す。箱はタスクの Category / Project から
@@ -925,7 +925,7 @@ function App() {
     setConfirmUnproject(false);
   }
 
-  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", board: "Project", calendar: "Calendar" };
+  const DEFAULT_SECTION_LABELS = { tray: "TRAY", today: "Today", weekly: "Weekly List", "7days": "7Days", calendar: "Calendar" };
   const [sectionLabels, setSectionLabels] = useState(() => {
     try { return { ...DEFAULT_SECTION_LABELS, ...JSON.parse(localStorage.getItem("taskspace-section-labels") || "{}") }; } catch { return DEFAULT_SECTION_LABELS; }
   });
@@ -1148,18 +1148,6 @@ function App() {
       const r = over.rect;
       const edge = Math.min(r.height * 0.3, 12);
       return pointer.y > r.top + edge && pointer.y < r.bottom - edge;
-    }
-
-    // Column header reorder
-    if (src.type === "column" && dst.type === "column" && src.key !== dst.key) {
-      moveColumn(src.key, dst.key);
-      return;
-    }
-
-    // Project header reorder
-    if (src.type === "project" && dst.type === "project" && src.category === dst.category && src.project !== dst.project) {
-      moveProject(src.category, src.project, dst.project);
-      return;
     }
 
     // Tray item reorder within tray
@@ -2105,155 +2093,13 @@ function App() {
     setToast("サンプルデータに戻しました");
   }
 
-  function addColumn() {
-    const key = normalizeTitle(newColumn.key).toUpperCase().replace(/\s+/g, "_");
-    if (!key || categories.some((cat) => cat.key === key)) {
-      setToast("列キーが空、または重複しています");
-      return;
-    }
-    commitState((current) => ({
-      ...current,
-      categories: [...current.categories, { key, label: newColumn.label || `${key} PJ`, tone: newColumn.tone }],
-    }));
-    setQuickCategory(key);
-    setNewColumn({ key: "NEW", label: "NEW PJ", tone: "green" });
-    setToast("列を追加しました");
-  }
 
-  function updateColumn(key, patch) {
-    commitState((current) => ({
-      ...current,
-      categories: current.categories.map((cat) => (cat.key === key ? { ...cat, ...patch } : cat)),
-    }));
-  }
 
-  function updateProjectRule(category, project, patch) {
-    const key = projectKey(category, project);
-    commitState((current) => ({
-      ...current,
-      projectRules: {
-        ...(current.projectRules || {}),
-        [key]: {
-          recurrence: "none",
-          recurrenceDay: null,
-          recurrenceStart: "",
-          recurrenceEnd: "",
-          recurrenceDate: 1,
-          recurrenceWeek: 1,
-          ...((current.projectRules || {})[key] || {}),
-          ...patch,
-        },
-      },
-    }));
-  }
 
-  function deleteProject(category, project) {
-    const key = projectKey(category, project);
-    // 中のタスクは消さず、所属だけ外して TRAY に残す。
-    // 以前はタスクを削除して題名だけのメモに作り直していたため、
-    // 子タスク・状態・日付がまるごと消えていた。
-    const targetIds = new Set(
-      tasks.filter((t) => t.category === category && t.project === project).map((t) => t.id),
-    );
-    commitState((current) => {
-      const nextRules = { ...(current.projectRules || {}) };
-      delete nextRules[key];
-      const nextOrder = { ...(current.projectOrder || {}) };
-      if (nextOrder[category]) nextOrder[category] = nextOrder[category].filter((p) => p !== project);
-      return {
-        ...current,
-        tasks: (current.tasks || []).map((t) => (
-          targetIds.has(t.id) ? { ...t, category: "", project: "", plain: true } : t
-        )),
-        projectRules: nextRules,
-        projectOrder: nextOrder,
-      };
-    });
-    dbDeleteProjectRule(key);
-    setSelectedProject(null);
-    setToast(`プロジェクトを消して、${targetIds.size}件を TRAY に戻しました`);
-  }
 
-  function removeColumn(key) {
-    if (categories.length <= 1) {
-      setToast("列は最低1つ必要です");
-      return;
-    }
-    const fallback = categories.find((cat) => cat.key !== key)?.key;
-    commitState((current) => {
-      const nextProjectRules = {};
-      Object.entries(current.projectRules || {}).forEach(([ruleKey, rule]) => {
-        const info = projectLabelFromKey(ruleKey);
-        if (info.category !== key) nextProjectRules[ruleKey] = rule;
-      });
-      return {
-        categories: current.categories.filter((cat) => cat.key !== key),
-        tasks: current.tasks.map((task) => (task.category === key ? { ...task, category: fallback } : task)),
-        projectRules: nextProjectRules,
-        projectOrder: Object.fromEntries(Object.entries(current.projectOrder || {}).filter(([categoryKey]) => categoryKey !== key)),
-        inboxItems: current.inboxItems || [],
-      };
-    });
-    if (quickCategory === key) setQuickCategory(fallback);
-    setToast(`列を削除しました。属していたタスクは ${fallback} に移動しました`);
-  }
 
-  function moveColumn(dragKey, targetKey) {
-    if (!dragKey || !targetKey || dragKey === targetKey) return;
-    commitState((current) => {
-      const from = current.categories.findIndex((cat) => cat.key === dragKey);
-      const to = current.categories.findIndex((cat) => cat.key === targetKey);
-      if (from < 0 || to < 0) return current;
-      const nextCategories = [...current.categories];
-      const [moved] = nextCategories.splice(from, 1);
-      nextCategories.splice(to, 0, moved);
-      return { ...current, categories: nextCategories };
-    });
-    setToast(`${dragKey} を ${targetKey} の位置へ移動しました`);
-  }
 
-  function moveProject(category, dragProject, targetProject) {
-    if (!category || !dragProject || !targetProject || dragProject === targetProject) return;
-    const currentProjects = projectsByCategory[category] || [];
-    const from = currentProjects.indexOf(dragProject);
-    const to = currentProjects.indexOf(targetProject);
-    if (from < 0 || to < 0) return;
 
-    const nextProjects = [...currentProjects];
-    const [moved] = nextProjects.splice(from, 1);
-    nextProjects.splice(to, 0, moved);
-
-    commitState((current) => ({
-      ...current,
-      projectOrder: {
-        ...(current.projectOrder || {}),
-        [category]: nextProjects,
-      },
-    }));
-    setToast(`${dragProject} を移動しました`);
-  }
-
-  function renameProject(category, oldName, newName) {
-    const clean = newName.trim();
-    if (!clean || clean === oldName) return false;
-    const oldKey = projectKey(category, oldName);
-    const newKey = projectKey(category, clean);
-    commitState((current) => {
-      const nextRules = { ...(current.projectRules || {}) };
-      if (nextRules[oldKey]) { nextRules[newKey] = nextRules[oldKey]; delete nextRules[oldKey]; }
-      const nextOrder = { ...(current.projectOrder || {}) };
-      if (nextOrder[category]) nextOrder[category] = nextOrder[category].map((p) => p === oldName ? clean : p);
-      return {
-        ...current,
-        tasks: current.tasks.map((t) => t.category === category && t.project === oldName ? { ...t, project: clean } : t),
-        projectRules: nextRules,
-        projectOrder: nextOrder,
-      };
-    });
-    setSelectedProject({ category, project: clean });
-    setToast(`プロジェクト名を変更しました`);
-    return true;
-  }
 
   function moveWeeklyTask(dragId, targetId) {
     if (!dragId || !targetId || dragId === targetId) return;
@@ -2338,21 +2184,6 @@ function App() {
     setToast("プロジェクト内で並び替えました");
   }
 
-  function handleDropOnProject(event, category, project) {
-    event.preventDefault();
-    const inboxId = event.dataTransfer.getData("inbox/id") || event.dataTransfer.getData("application/x-tray-item");
-    if (inboxId) {
-      acceptInboxItem(inboxId, category, project);
-      return;
-    }
-
-    const id = event.dataTransfer.getData("task/id");
-    if (!id) return;
-    const task = taskMap.get(id);
-    if (!task) return;
-    upsertTask({ id, category, project, parentId: null });
-    setToast(task.parentId ? `親子解除：${category} / ${project} の並列タスクにしました` : `移動：${category} / ${project} に変更しました`);
-  }
 
   function handleDropOnWeekly(event) {
     event.preventDefault();
@@ -2422,19 +2253,6 @@ function App() {
 
   const MAX_DEPTH = 3;
 
-  function rootTasksForProject(category, project) {
-    // sortOrder を持たないものは配列順（＝入れた順）に並べる。
-    // タイトル順にすると見出しや区切り線が勝手に動いて、区切りとして機能しない。
-    const order = new Map(tasks.map((t, i) => [t.id, i]));
-    return tasksForCategory(category)
-      .filter((task) => task.project === project && !task.parentId && !task.plain)
-      .sort((a, b) => {
-        const ao = typeof a.sortOrder === "number" ? a.sortOrder : 999999;
-        const bo = typeof b.sortOrder === "number" ? b.sortOrder : 999999;
-        if (ao !== bo) return ao - bo;
-        return (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0);
-      });
-  }
 
   function childrenOf(parentId) {
     // sortOrder が無い子は、配列の並び（＝足した順）のまま。
@@ -3412,12 +3230,12 @@ function App() {
                       {confirmUnproject
                         ? (() => {
                             const n = tasks.filter((t) => t.category || t.project).length;
-                            return n ? `もう一度押すと実行：${n}件を TRAY へ` : "もう一度押すと実行：空のPJを消す";
+                            return n ? `もう一度押すと実行：${n}件を TRAY へ` : "もう一度押すと実行：古い所属を消す";
                           })()
-                        : "PJ を消して、タスクを TRAY に移す"}
+                        : "残っている Category / Project を消す"}
                     </button>
                     <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
-                      Category / Project を外してプロジェクトを空にします。タスクも親子も消えません。取り消しもできます。
+                      PJボードをやめる前のタスクに残っている Category / Project を外します。タスクも親子も消えません。取り消しもできます。
                     </div>
                   </div>
 
@@ -3430,7 +3248,6 @@ function App() {
                       ["stock", "STOCK"],
                       ["tray", "TRAY"],
                       ["7days", "7days"],
-                      ["board", "PJボード"],
                       ["calendar", "カレンダー"],
                     ].map(([key, label]) => (
                       <button
@@ -3453,7 +3270,7 @@ function App() {
                     <div className="mb-1.5 text-[11px] text-neutral-500">セクション順序</div>
                     <div className="flex flex-col gap-1">
                       {panelOrder.map((key, idx) => {
-                        const hints = { "7days": "横7曜日", tray: "受信トレイ", today: "今日のタスク", weekly: "週次リスト", board: "プロジェクト", calendar: "カレンダー" };
+                        const hints = { "7days": "横7曜日", tray: "受信トレイ", today: "今日のタスク", weekly: "週次リスト", calendar: "カレンダー" };
                         return (
                           <div key={key} className="flex items-center gap-1 rounded border border-white/5 bg-black/15 px-2 py-1">
                             <input
@@ -3601,35 +3418,6 @@ function App() {
         </header>
 
 
-        {showColumnsPanel && (
-          <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="text-xs font-semibold text-neutral-300">Columns / Category Settings</div>
-              <button onClick={() => setShowColumnsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="grid gap-1 md:grid-cols-2 xl:grid-cols-4">
-              {categories.map((cat) => (
-                <div key={cat.key} className="grid grid-cols-[1fr_1.1fr_88px_24px] gap-1 rounded-md border border-white/5 bg-black/15 p-1">
-                  <input value={cat.key} disabled className="rounded border border-white/5 bg-black/25 px-2 py-1 text-[11px] text-neutral-500 outline-none" />
-                  <input value={cat.label} onChange={(event) => updateColumn(cat.key, { label: event.target.value })} className="rounded border border-white/5 bg-black/25 px-2 py-1 text-[11px] outline-none" />
-                  <select value={cat.tone} onChange={(event) => updateColumn(cat.key, { tone: event.target.value })} className="rounded border border-white/5 bg-black/25 px-1 py-1 text-[11px] outline-none">
-                    {TONES.map((tone) => <option key={tone}>{tone}</option>)}
-                  </select>
-                  <button onClick={() => removeColumn(cat.key)} className="rounded border border-red-300/10 text-red-200/50 hover:bg-red-400/10"><Trash2 className="mx-auto h-3.5 w-3.5" /></button>
-                </div>
-              ))}
-            </div>
-            <div className="mt-2 grid gap-1 md:grid-cols-[120px_1fr_100px_60px]">
-              <input value={newColumn.key} onChange={(event) => setNewColumn((prev) => ({ ...prev, key: event.target.value }))} placeholder="KEY" className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" />
-              <input value={newColumn.label} onChange={(event) => setNewColumn((prev) => ({ ...prev, label: event.target.value }))} placeholder="Label" className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none" />
-              <select value={newColumn.tone} onChange={(event) => setNewColumn((prev) => ({ ...prev, tone: event.target.value }))} className="rounded border border-white/10 bg-black/25 px-2 py-1.5 text-xs outline-none">
-                {TONES.map((tone) => <option key={tone}>{tone}</option>)}
-              </select>
-              <button onClick={addColumn} className="rounded bg-white px-2 py-1.5 text-xs font-medium text-neutral-950">Add</button>
-            </div>
-          </section>
-        )}
-
         {viewMode === "list" && use5col && (
           <>
           {(
@@ -3648,18 +3436,19 @@ function App() {
               <div className="rounded-lg border border-white/10 bg-white/[0.02]">
                 <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
                   <span className="text-sm font-bold text-neutral-200">TRAY</span>
-                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId).length + inboxItems.length}</span>
+                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.archived && !t.stock && !t.pageId).length + inboxItems.length}</span>
                 </div>
                 <div className="flex flex-col gap-0.5 px-2 py-2">
                   {(() => {
                     // TRAY は「まだどこにも置いていないもの」だけ。
                     // 日付が付いていれば 7days に、pageId があればボードに出ているので、
                     // ここに重ねて出すと同じものが2か所に見える。
-                    const rootTrayTasks = tasks.filter(t => !t.category && !t.project && !t.archived && !t.stock && !t.pageId && !t.scheduledDate && !t.parentId);
+                    const rootTrayTasks = tasks.filter(t => !t.archived && !t.stock && !t.pageId && !t.scheduledDate && !t.parentId);
                     return rootTrayTasks.map((task, idx) => (
                       <TrayTask
                         key={task.id}
                         task={task}
+                        listNumber={numberedIndex(rootTrayTasks, idx)}
                         depth={0}
                         toggleDone={toggleDone}
                         upsertTask={upsertTask}
@@ -3736,12 +3525,6 @@ function App() {
                 </button>
               </div>
             )}
-            {/* Board category columns。しまってあるときは出さない */}
-            {!hiddenPanels.has("board") && categories.map((cat) => (
-              <div key={cat.key} className="min-w-0">
-                <CategoryColumn category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} onDeleteProject={deleteProject} />
-              </div>
-            ))}
           </div>
           {/* 5列モードでもカレンダーは下に残す */}
           <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
@@ -3754,7 +3537,7 @@ function App() {
         <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           {(() => {
             // Group consecutive board-type sections into a shared auto-fit grid
-            const BOARD_KEYS = new Set(["tray", "today", "weekly", "board"]);
+            const BOARD_KEYS = new Set(["tray", "today", "weekly"]);
             const chunks = [];
             for (const key of panelOrder) {
               // しまってある段は組み立てない（中身はそのまま残る）
@@ -3837,15 +3620,11 @@ function App() {
                 selectMode={selectMode}
               />
             );
-            const boardCols = categories.map((cat) => (
-              <CategoryColumn key={cat.key} category={cat} projects={projectsByCategory[cat.key] || []} rootTasksForProject={rootTasksForProject} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveColumn={moveColumn} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} />
-            ));
 
             function renderBoardSection(key) {
               if (key === "tray") return <div key="tray" className="min-w-[200px] flex-1">{trayEl}</div>;
               if (key === "today") return <div key="today" className="min-w-[200px] flex-1">{todayEl}</div>;
               if (key === "weekly") return <div key="weekly" className="min-w-[200px] flex-1">{weeklyEl()}</div>;
-              if (key === "board") return boardCols;
               return null;
             }
 
@@ -3914,8 +3693,6 @@ function App() {
         <div className={classNames("", (selectedTask || selectedProject) && "md:pr-[384px]")}>
           <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
         </div>
-
-        <ProjectInspector selectedProject={selectedTask ? null : selectedProject} projectRules={projectRules} updateProjectRule={updateProjectRule} deleteProject={deleteProject} moveProject={moveProject} renameProject={renameProject} projectsByCategory={projectsByCategory} onClose={() => setSelectedProject(null)} />
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
 
@@ -4588,159 +4365,6 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   );
 }
 
-function CategoryColumn({ category, projects, rootTasksForProject, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveColumn, moveProject, categoryTone, projectRules, selectMode, onDeleteProject }) {
-  const tone = toneClasses(category.tone);
-  const [newProject, setNewProject] = useState("");
-  const [showProjectInput, setShowProjectInput] = useState(false);
-  const columnKey = `column:${category.key}`;
-  const isColumnCollapsed = collapsed[columnKey];
-  const effectiveProjects = projects.length ? projects : ["未分類"];
-
-  const { setNodeRef: colDropRef, isOver: isColOver } = useDroppable({ id: `col-drop-${category.key}`, data: { type: "column", key: category.key } });
-  const { attributes: colDragAttrs, listeners: colDragListeners, setNodeRef: colDragRef, isDragging: isColDragging } = useDraggable({ id: `col-drag-${category.key}`, data: { type: "column", key: category.key, label: category.label } });
-
-  function createProject() {
-    const clean = normalizeTitle(newProject);
-    if (!clean) return;
-    addTask({ title: "新規タスク", category: category.key, project: clean });
-    setNewProject("");
-    setShowProjectInput(false);
-  }
-
-  return (
-    <div
-      ref={colDropRef}
-      className={classNames("w-full rounded-lg border p-2 transition", isColumnCollapsed ? "min-h-0" : "min-h-[420px] md:min-h-[560px] xl:min-h-[660px]", tone.panel, isColOver && "border-white/30")}
-    >
-      <div
-        ref={colDragRef}
-        {...colDragListeners}
-        {...colDragAttrs}
-        className={classNames("mb-2 flex cursor-grab items-center justify-between gap-2 border-b border-white/10 pb-1.5 active:cursor-grabbing", isColDragging && "opacity-40")}
-      >
-        <button
-          onClick={() => setCollapsed((prev) => ({ ...prev, [columnKey]: !prev[columnKey] }))}
-          className="flex min-w-0 flex-1 items-center gap-2 text-left"
-        >
-          <GripVertical className="h-3.5 w-3.5 shrink-0 text-neutral-600 hover:text-neutral-300" />
-          {isColumnCollapsed ? <ChevronRight className="h-4 w-4 text-neutral-500" /> : <ChevronDown className="h-4 w-4 text-neutral-500" />}
-          <span className={classNames("truncate text-sm font-semibold", tone.accent)}>{category.label}</span>
-          <span className="rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] text-neutral-500">{projects.length}</span>
-        </button>
-        <button
-          onClick={(event) => {
-            event.stopPropagation();
-            if (isColumnCollapsed) setCollapsed((prev) => ({ ...prev, [columnKey]: false }));
-            setShowProjectInput((value) => !value);
-          }}
-          className={classNames("rounded border px-1.5 py-1 text-[10px] transition", tone.add)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-        </button>
-      </div>
-      {!isColumnCollapsed && showProjectInput && (
-        <div className="mb-2 flex gap-1">
-          <input value={newProject} onChange={(event) => setNewProject(event.target.value)} onKeyDown={(event) => event.key === "Enter" && createProject()} placeholder="新しいProject" className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-2 py-1 text-xs outline-none placeholder:text-neutral-600" />
-          <button onClick={createProject} className="rounded bg-white px-2 py-1 text-xs font-medium text-neutral-950">作成</button>
-        </div>
-      )}
-      {!isColumnCollapsed && (
-        <div className="flex flex-col gap-2">
-          {effectiveProjects.map((project) => <ProjectGroup key={`${category.key}-${project}`} category={category.key} project={project} roots={rootTasksForProject(category.key, project)} childrenOf={childrenOf} taskMap={taskMap} collapsed={collapsed} setCollapsed={setCollapsed} addTask={addTask} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} handleDropOnProject={handleDropOnProject} handleDropOnTask={handleDropOnTask} moveProject={moveProject} categoryTone={categoryTone} projectRules={projectRules} selectMode={selectMode} onDeleteProject={onDeleteProject} />)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ProjectGroup({ category, project, roots, childrenOf, taskMap, collapsed, setCollapsed, addTask, upsertTask, removeTask, toggleDone, toggleWeek, toggleToday, selectedTaskId, setSelectedTaskId, setSelectedProject, handleDropOnProject, handleDropOnTask, moveProject, categoryTone, projectRules, selectMode, onDeleteProject }) {
-  const [newTitle, setNewTitle] = useState("");
-  const key = `${category}:${project}`;
-  const isCollapsed = collapsed[key];
-  const tone = categoryTone(category);
-  const rule = projectRules?.[projectKey(category, project)];
-
-  const { setNodeRef: projDropRef, isOver } = useDroppable({ id: `proj-drop-${category}-${project}`, data: { type: "project", category, project } });
-  const { attributes: projDragAttrs, listeners: projDragListeners, setNodeRef: projDragRef, isDragging: isProjDragging } = useDraggable({ id: `proj-drag-${category}-${project}`, data: { type: "project", category, project } });
-
-  function create(titleArg) {
-    const task = addTask({ title: (titleArg ?? newTitle) || "新規タスク", category, project });
-    if (task) setNewTitle("");
-    return task;
-  }
-
-  return (
-    <div
-      ref={(node) => { projDropRef(node); projDragRef(node); }}
-      {...projDragAttrs}
-      className={classNames(
-        "group/proj rounded-md border px-1.5 py-1 transition",
-        isOver ? "border-white/25 bg-white/[0.06]" : "border-white/5 bg-black/10",
-        isProjDragging && "opacity-40"
-      )}
-    >
-      <div className="mb-1 flex w-full items-center justify-between gap-1 text-left">
-        <div className="flex min-w-0 flex-1 items-center gap-1">
-          <span
-            {...projDragListeners}
-            className="cursor-grab touch-none text-neutral-700 hover:text-neutral-400 active:cursor-grabbing"
-          >
-            <GripVertical className="h-3.5 w-3.5" />
-          </span>
-          <button
-            onClick={() => setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))}
-            className="shrink-0"
-          >
-            {isCollapsed ? <ChevronRight className="h-3.5 w-3.5 text-neutral-500" /> : <ChevronDown className="h-3.5 w-3.5 text-neutral-500" />}
-          </button>
-          <span
-            onClick={(event) => {
-              event.stopPropagation();
-              setSelectedTaskId(null);
-              setSelectedProject({ category, project });
-            }}
-            className={classNames("truncate text-xs font-semibold underline-offset-2 hover:underline cursor-pointer", !rule?.color && tone.accent)}
-            style={rule?.color ? { color: rule.color } : undefined}
-            title={rule?.description || "Project settings"}
-          >
-            {rule?.emoji ? `${rule.emoji} ` : ""}{rule?.recurrence && rule.recurrence !== "none" ? "↺ " : ""}{project}
-          </span>
-        </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <span className="text-xs text-neutral-500">{isOver ? "並列化" : roots.length}</span>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              if (window.confirm(`プロジェクト「${project}」を消しますか？\n中のタスクは消えず、TRAY に残ります。`)) {
-                onDeleteProject?.(category, project);
-              }
-            }}
-            title="このプロジェクトを消す（中のタスクは TRAY に残ります）"
-            className="rounded p-1 text-neutral-500 transition hover:bg-red-400/15 hover:text-red-300"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-      {!isCollapsed && (
-        <div className="flex flex-col gap-0.5">
-          <AnimatePresence initial={false}>{roots.map((task, i) => <TaskCard key={task.id} listNumber={numberedIndex(roots, i)} task={task} taskMap={taskMap} children={childrenOf(task.id)} childrenOf={childrenOf} categoryTone={categoryTone} depth={0} collapsed={collapsed} setCollapsed={setCollapsed} upsertTask={upsertTask} removeTask={removeTask} toggleDone={toggleDone} toggleWeek={toggleWeek} toggleToday={toggleToday} selectedTaskId={selectedTaskId} setSelectedTaskId={setSelectedTaskId} handleDropOnTask={handleDropOnTask} selectMode={selectMode} />)}</AnimatePresence>
-          <div className="mt-1 flex gap-1">
-            <AddBlockInput
-              value={newTitle}
-              onChange={setNewTitle}
-              onSubmit={(title) => create(title)}
-              placeholder="このProjectに追加"
-              className="w-full rounded border border-white/5 bg-white/[0.025] px-2 py-1 text-xs outline-none placeholder:text-neutral-700 focus:border-white/20"
-            />
-            <button onClick={create} className="rounded border border-white/5 px-1.5 py-1 text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"><Plus className="h-4 w-4" /></button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // Long-press context menu component
 function LongPressMenu({ x, y, task, upsertTask, projectsByCategory, categories, onClose }) {
   const [showProjectPicker, setShowProjectPicker] = useState(false);
@@ -4982,8 +4606,12 @@ function useTaskBlock({
       onDeleteEmpty(task.id, cur);
       removeTask?.(task.id);
     } else {
+      // 消したあとだと cur は DOM から外れていて、隣が引けない。
+      // 行き先は消す前に決めておく。
+      const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
+      const prev = all[all.indexOf(cur) - 1] || null;
       removeTask?.(task.id);
-      setTimeout(() => focusAdjacentBlock(cur, -1), 0);
+      setTimeout(() => prev?.focus(), 0);
     }
   }
 
@@ -8130,240 +7758,6 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
   );
 }
 
-const PROJECT_COLORS = ["", "#ef4444", "#f97316", "#eab308", "#22c55e", "#06b6d4", "#3b82f6", "#8b5cf6", "#ec4899"];
-
-function ProjectInspector({ selectedProject, projectRules, updateProjectRule, deleteProject, moveProject, renameProject, projectsByCategory, onClose }) {
-  if (!selectedProject) return null;
-  const { category, project } = selectedProject;
-  const key = projectKey(category, project);
-  const rule = projectRules?.[key] || { recurrence: "none", recurrenceDay: null, recurrenceEnd: "" };
-  const [nameInput, setNameInput] = React.useState(project);
-
-  // プロジェクトが切り替わったら入力欄をリセット
-  React.useEffect(() => { setNameInput(project); }, [project]);
-
-  const projects = projectsByCategory?.[category] || [];
-  const idx = projects.indexOf(project);
-  const canUp = idx > 0;
-  const canDown = idx !== -1 && idx < projects.length - 1;
-
-  function handleDelete() {
-    if (window.confirm(`プロジェクト「${project}」を削除しますか？\n中のタスクはTRAYに戻ります。`)) {
-      deleteProject(category, project);
-    }
-  }
-
-  return (
-    <aside className="fixed bottom-0 right-0 z-40 max-h-[78vh] w-full overflow-y-auto rounded-t-2xl border-t border-white/10 ts-bg-veil p-4 shadow-2xl backdrop-blur md:top-[56px] md:max-h-[calc(100vh-56px)] md:w-[380px] md:max-w-[380px] md:rounded-none md:border-l md:border-t-0">
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-xs text-neutral-500">Project</div>
-          <div className="flex items-baseline gap-2">
-            <input
-              value={nameInput}
-              onChange={(e) => setNameInput(e.target.value)}
-              onBlur={() => renameProject(category, project, nameInput)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.target.blur(); } if (e.key === "Escape") { setNameInput(project); e.target.blur(); } }}
-              className="flex-1 bg-transparent text-2xl font-semibold tracking-tight outline-none focus:border-b focus:border-white/20"
-            />
-            {rule?.recurrence && rule.recurrence !== "none" && <span className="shrink-0 text-sm">↺</span>}
-          </div>
-          <p className="mt-1 text-xs text-neutral-500">{category}</p>
-        </div>
-        <button onClick={onClose} className="rounded-full border border-white/10 p-2 text-neutral-400 transition hover:bg-white/10 hover:ts-text"><X className="h-4 w-4" /></button>
-      </div>
-
-      <div className="space-y-3">
-        <PropertyRow label="Emoji">
-          <input
-            value={rule.emoji || ""}
-            onChange={(event) => updateProjectRule(category, project, { emoji: event.target.value.slice(0, 4) })}
-            placeholder="🗂"
-            className="w-20 rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-center text-lg outline-none"
-          />
-        </PropertyRow>
-
-        <PropertyRow label="Color">
-          <div className="flex flex-wrap gap-2">
-            {PROJECT_COLORS.map((c) => (
-              <button
-                key={c || "none"}
-                onClick={() => updateProjectRule(category, project, { color: c })}
-                title={c || "なし"}
-                className={classNames(
-                  "h-6 w-6 rounded-full border transition",
-                  (rule.color || "") === c ? "border-white ring-2 ring-white/40" : "border-white/20 hover:border-white/50"
-                )}
-                style={c ? { backgroundColor: c } : undefined}
-              >
-                {!c && <span className="text-[10px] text-neutral-500">×</span>}
-              </button>
-            ))}
-          </div>
-        </PropertyRow>
-
-        <PropertyRow label="Description">
-          <textarea
-            value={rule.description || ""}
-            onChange={(event) => updateProjectRule(category, project, { description: event.target.value })}
-            placeholder="このプロジェクトの説明・メモ"
-            rows={3}
-            className="min-w-0 w-full resize-y rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none placeholder:text-neutral-600"
-          />
-        </PropertyRow>
-
-        <PropertyRow label="Repeat">
-          <div className="grid min-w-0 gap-2">
-            <select
-              value={rule.recurrence || "none"}
-              onChange={(event) => {
-                const recurrence = event.target.value;
-                const defaults = {
-                  recurrence,
-                  recurrenceDay: ["weekly", "biweekly", "monthlyNthWeekday"].includes(recurrence) ? Number(rule.recurrenceDay ?? 3) : null,
-                  recurrenceStart: recurrence === "biweekly" ? (rule.recurrenceStart || toDateKey(new Date())) : (rule.recurrenceStart || ""),
-                  recurrenceDate: recurrence === "monthlyDate" ? Number(rule.recurrenceDate ?? 1) : (rule.recurrenceDate ?? 1),
-                  recurrenceWeek: recurrence === "monthlyNthWeekday" ? Number(rule.recurrenceWeek ?? 1) : (rule.recurrenceWeek ?? 1),
-                };
-                updateProjectRule(category, project, defaults);
-              }}
-              className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-            >
-              <option value="none">なし</option>
-              <option value="daily">毎日</option>
-              <option value="weekdays">平日</option>
-              <option value="weekly">毎週</option>
-              <option value="biweekly">隔週</option>
-              <option value="monthlyDate">毎月・日付指定</option>
-              <option value="monthlyNthWeekday">毎月・第n曜日</option>
-            </select>
-
-            {["weekly", "biweekly", "monthlyNthWeekday"].includes(rule.recurrence) && (
-              <select
-                value={Number(rule.recurrenceDay ?? 3)}
-                onChange={(event) => updateProjectRule(category, project, { recurrenceDay: Number(event.target.value) })}
-                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-              >
-                <option value={0}>日曜</option>
-                <option value={1}>月曜</option>
-                <option value={2}>火曜</option>
-                <option value={3}>水曜</option>
-                <option value={4}>木曜</option>
-                <option value={5}>金曜</option>
-                <option value={6}>土曜</option>
-              </select>
-            )}
-
-            {rule.recurrence === "biweekly" && (
-              <div>
-                <div className="mb-1 text-[10px] text-neutral-600">起点日</div>
-                <DueDatePicker value={rule.recurrenceStart || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceStart: v })} />
-              </div>
-            )}
-
-            {rule.recurrence === "monthlyDate" && (
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={Number(rule.recurrenceDate ?? 1)}
-                  onChange={(e) => updateProjectRule(category, project, { recurrenceDate: Number(e.target.value) })}
-                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  placeholder="日付"
-                />
-                <span className="shrink-0 text-xs text-neutral-500">〜</span>
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  value={rule.recurrenceDateTo != null ? Number(rule.recurrenceDateTo) : ""}
-                  onChange={(e) => updateProjectRule(category, project, { recurrenceDateTo: e.target.value === "" ? null : Number(e.target.value) })}
-                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  placeholder="終了日（省略可）"
-                />
-                <span className="shrink-0 text-xs text-neutral-500">日</span>
-              </div>
-            )}
-
-            {rule.recurrence === "monthlyNthWeekday" && (
-              <select
-                value={Number(rule.recurrenceWeek ?? 1)}
-                onChange={(event) => updateProjectRule(category, project, { recurrenceWeek: Number(event.target.value) })}
-                className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-              >
-                <option value={1}>第1</option>
-                <option value={2}>第2</option>
-                <option value={3}>第3</option>
-                <option value={4}>第4</option>
-                <option value={-1}>最終</option>
-              </select>
-            )}
-
-            {rule.recurrence !== "none" && (
-              <>
-                <input
-                  type="time"
-                  value={rule.recurrenceTime || ""}
-                  onChange={(event) => updateProjectRule(category, project, { recurrenceTime: event.target.value })}
-                  className="min-w-0 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-sm outline-none"
-                  title="表示時刻（7Daysでの並び順に使用）"
-                />
-                <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
-                  <div>
-                    <div className="mb-1 text-[10px] text-neutral-600">開始日</div>
-                    <DueDatePicker value={rule.recurrenceStart || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceStart: v })} />
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[10px] text-neutral-600">終了日</div>
-                    <DueDatePicker value={rule.recurrenceEnd || ""} onChange={(v) => updateProjectRule(category, project, { recurrenceEnd: v })} />
-                  </div>
-                </div>
-                <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-white/10 bg-black/20 px-3 py-2 transition hover:bg-black/30">
-                  <input
-                    type="checkbox"
-                    checked={!!rule.showRepeatBar}
-                    onChange={(e) => updateProjectRule(category, project, { showRepeatBar: e.target.checked })}
-                    className="accent-violet-400"
-                  />
-                  <span className="text-xs text-neutral-300">7Daysのバーに表示</span>
-                </label>
-              </>
-            )}
-          </div>
-        </PropertyRow>
-      </div>
-
-      <div className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-xs leading-5 text-neutral-400">
-        Project単位のRepeatは、タスクとは別にカレンダーへ表示されます。タスク単位のRepeatもそのまま使えます。
-      </div>
-
-      <div className="mt-4 flex gap-2">
-        <button
-          onClick={() => canUp && moveProject(category, project, projects[idx - 1])}
-          disabled={!canUp}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          <ChevronUp className="h-4 w-4" /> 上へ
-        </button>
-        <button
-          onClick={() => canDown && moveProject(category, project, projects[idx + 1])}
-          disabled={!canDown}
-          className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-sm text-neutral-300 transition hover:bg-white/[0.08] disabled:opacity-25 disabled:cursor-not-allowed"
-        >
-          下へ <ChevronDown className="h-4 w-4" />
-        </button>
-      </div>
-
-      <button
-        onClick={handleDelete}
-        className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2.5 text-sm font-medium text-red-300 transition hover:bg-red-500/20"
-      >
-        <Trash2 className="h-4 w-4" /> プロジェクトを削除
-      </button>
-    </aside>
-  );
-}
 
 function TaskInspector({ task, taskMap, categories, projectsByCategory, upsertTask, removeTask, addTask, onClose }) {
   const [subTitle, setSubTitle] = useState("");
