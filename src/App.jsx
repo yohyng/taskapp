@@ -6117,6 +6117,10 @@ function ColumnBar({ first, last, width, onMove, onWidth, floating = false }) {
 function BlockGutter({ block, compact, task, onDuplicate }) {
   const slashCtx = useSlash();
   const { types } = useBlockTypes();
+  // 種別が持っている既定の大きさ・太さ。ブロックごとの指定が無いときの土台。
+  const cfgOfType = types[blockTypeOf(task, types)] || {};
+  const cfgSize = cfgOfType.size ?? 14;
+  const cfgWeight = cfgOfType.weight ?? 400;
   const [menu, setMenu] = useState(false);
   const grabbed = useRef(false);
 
@@ -6228,6 +6232,7 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
         <div
           ref={menuRef}
           data-block-menu
+          onClick={(e) => e.stopPropagation()}
           className="absolute left-0 top-full z-[130] mt-1 max-h-72 w-52 overflow-y-auto rounded-lg border border-white/15 ts-surface p-1 shadow-2xl"
         >
           <button
@@ -6259,6 +6264,51 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
           >
             <LinkIcon className="h-3 w-3 shrink-0" /> リンクをコピー
           </button>
+
+          <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">字</div>
+          <div className="flex items-center gap-1 px-2 pb-1">
+            <button
+              onMouseDown={(e) => { e.preventDefault(); slashCtx.setStyle(task, { size: stepTextSize(task.style?.size ?? cfgSize, -1) }); }}
+              title="小さく"
+              className="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"
+            >
+              −
+            </button>
+            <span className="min-w-[34px] text-center text-[10px] tabular-nums text-neutral-500">
+              {task.style?.size ?? cfgSize}
+            </span>
+            <button
+              onMouseDown={(e) => { e.preventDefault(); slashCtx.setStyle(task, { size: stepTextSize(task.style?.size ?? cfgSize, 1) }); }}
+              title="大きく"
+              className="rounded border border-white/10 px-1.5 py-0.5 text-[11px] text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"
+            >
+              ＋
+            </button>
+            <span className="mx-0.5 h-3 w-px bg-white/10" />
+            {[["ほそ", 400], ["ふつう", 600], ["ふとい", 700]].map(([label, w]) => (
+              <button
+                key={w}
+                onMouseDown={(e) => { e.preventDefault(); slashCtx.setStyle(task, { weight: w, bold: w >= 700 }); }}
+                title={`太さ：${label}`}
+                className={classNames(
+                  "rounded border px-1.5 py-0.5 text-[10px] transition",
+                  (task.style?.weight ?? (task.style?.bold ? 700 : cfgWeight)) === w
+                    ? "border-white/40 ts-text"
+                    : "border-white/10 text-neutral-500 hover:bg-white/10 hover:text-neutral-200",
+                )}
+                style={{ fontWeight: w }}
+              >
+                A
+              </button>
+            ))}
+            <button
+              onMouseDown={(e) => { e.preventDefault(); slashCtx.setStyle(task, { size: null, weight: null, bold: false }); }}
+              title="字の設定を戻す"
+              className="ml-auto rounded px-1 py-0.5 text-[9px] text-neutral-600 transition hover:bg-white/10 hover:text-neutral-300"
+            >
+              戻す
+            </button>
+          </div>
 
           <div className="px-2 pb-0.5 pt-1.5 text-[9px] font-semibold text-neutral-600">色</div>
           <div className="flex flex-wrap items-center gap-1 px-2 pb-1">
@@ -6548,7 +6598,11 @@ function TaskBlock({
                   b.setEditing(false);
                 }}
                 className={textareaClassName?.(b)}
-                style={cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight } : undefined}
+                style={{
+                  ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight } : null),
+                  // 読んでいるときと書いているときで、大きさが変わらないように
+                  ...b.titleProps.style,
+                }}
               />
               {b.slash && <SlashMenu slash={b.slash} matches={b.slashMatches} onPick={b.runSlash} onHover={b.hoverSlash} />}
             </div>
@@ -6560,9 +6614,10 @@ function TaskBlock({
                   {...titleAttrs?.(b)}
                   className={titleClassName?.(b)}
                   style={{
-                    ...b.titleProps.style,
                     ...(cfg.size ? { fontSize: cfg.size, fontWeight: cfg.weight, letterSpacing: "0.01em" } : null),
                     ...(cfg.color ? { color: cfg.color } : null),
+                    // ブロックごとに決めたぶんが、種別の既定より強い
+                    ...b.titleProps.style,
                   }}
                 >
                   {task.title
@@ -6887,8 +6942,23 @@ function taskTextStyle(task) {
   if (!st) return undefined;
   const out = {};
   if (st.color) out.color = st.color;
-  if (st.bold) out.fontWeight = 700;
+  if (st.size) out.fontSize = `${st.size}px`;
+  // weight は「太さを決めた」ぶん。bold は昔からの入／切。
+  if (st.weight) out.fontWeight = st.weight;
+  else if (st.bold) out.fontWeight = 700;
   return Object.keys(out).length ? out : undefined;
+}
+
+// 字の大きさの段階。これを −／＋ で行き来する。
+const TEXT_SIZES = [11, 12.5, 14, 16, 18, 22, 28];
+function stepTextSize(current, dir) {
+  const i = TEXT_SIZES.indexOf(current);
+  if (i === -1) {
+    // 決めていないときは、いまの見た目にいちばん近いところから動かす
+    const near = TEXT_SIZES.reduce((a, b) => (Math.abs(b - (current || 14)) < Math.abs(a - (current || 14)) ? b : a));
+    return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, TEXT_SIZES.indexOf(near) + dir))];
+  }
+  return TEXT_SIZES[Math.min(TEXT_SIZES.length - 1, Math.max(0, i + dir))];
 }
 
 function autoResize(el) {

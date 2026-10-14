@@ -93,3 +93,65 @@ test.describe("列は独立した持ち物", () => {
     await expect(page.locator("[data-block-menu]").getByText("この列を消す", { exact: false })).toHaveCount(0);
   });
 });
+
+test.describe("列の見出しの字を変える", () => {
+  // 題名そのものを測る。親の入れ物を拾うと別の値になる。
+  const sizeOf = (page, s) => row(page, s).locator(".ts-block-text").first().evaluate((el) => {
+    const cs = getComputedStyle(el);
+    return { size: parseFloat(cs.fontSize), weight: cs.fontWeight };
+  });
+
+  test("大きくできて、保存される", async ({ page, seed }) => {
+    await seed({ tasks: [colHead("c1", "NOMLAB", 0)] });
+    const before = await sizeOf(page, "NOMLAB");
+
+    await openMenu(page, "NOMLAB");
+    await page.locator("[data-block-menu]").getByTitle("大きく").click();
+
+    await expect.poll(async () => (await byTitle(page, "NOMLAB")).style?.size).toBeTruthy();
+    const after = await sizeOf(page, "NOMLAB");
+    expect(after.size).toBeGreaterThan(before.size);
+  });
+
+  test("小さくもできる", async ({ page, seed }) => {
+    await seed({ tasks: [colHead("c1", "NOMLAB", 0)] });
+    const before = await sizeOf(page, "NOMLAB");
+
+    await openMenu(page, "NOMLAB");
+    await page.locator("[data-block-menu]").getByTitle("小さく").click();
+
+    await expect.poll(async () => (await sizeOf(page, "NOMLAB")).size).toBeLessThan(before.size);
+  });
+
+  test("太さを選べる", async ({ page, seed }) => {
+    await seed({ tasks: [colHead("c1", "NOMLAB", 0)] });
+
+    await openMenu(page, "NOMLAB");
+    await page.locator("[data-block-menu]").getByTitle("太さ：ほそ").click();
+
+    await expect.poll(async () => (await byTitle(page, "NOMLAB")).style?.weight).toBe(400);
+    expect((await sizeOf(page, "NOMLAB")).weight).toBe("400");
+  });
+
+  test("「戻す」で既定に返る", async ({ page, seed }) => {
+    await seed({
+      tasks: [{ ...colHead("c1", "NOMLAB", 0), style: { size: 28, weight: 400 } }],
+    });
+    const changed = await sizeOf(page, "NOMLAB");
+    expect(changed.size).toBe(28);
+
+    await openMenu(page, "NOMLAB");
+    await page.locator("[data-block-menu]").getByTitle("字の設定を戻す").click();
+
+    await expect.poll(async () => (await byTitle(page, "NOMLAB")).style?.size).toBeFalsy();
+    // 種別の既定（列は太め）に戻る
+    await expect.poll(async () => (await sizeOf(page, "NOMLAB")).weight).toBe("700");
+  });
+
+  test("ふつうの行でも字を変えられる", async ({ page, seed }) => {
+    await seed({ tasks: [t("a", "ふつうの行")] });
+    await openMenu(page, "ふつうの行");
+    await page.locator("[data-block-menu]").getByTitle("大きく").click();
+    await expect.poll(async () => (await byTitle(page, "ふつうの行")).style?.size).toBeTruthy();
+  });
+});
