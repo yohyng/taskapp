@@ -13,7 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
+import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
 import { motion, AnimatePresence } from "framer-motion";
@@ -815,6 +815,34 @@ function adjacentBlockId(fromEl, dir) {
   return all[i + dir]?.getAttribute("data-task-id") || null;
 }
 
+
+// Supabase に置き場が無い（または足したばかりの）項目は、向こうから
+// 空になって返ってくる。そのまま当てると ＋列の設定などが毎回ほどけるので、
+// 手元に値があるほうを残す。
+const MISSING_COLUMNS_KEY = "taskspace-known-missing-columns";
+const ALL_OPTIONAL_COLUMNS = [
+  "stock", "stock_view_id", "style", "block_type", "canvas_x", "canvas_y",
+  "page_id", "row_key", "col_index", "col_width", "code_lang", "day_date",
+];
+function isEmptyField(field, value) {
+  // blockType は列が空のとき "task" になって返ってくる。これも「無し」と見る。
+  if (field === "blockType") return !value || value === "task";
+  return value === null || value === undefined || value === "" || value === 0 || value === false
+    || (typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === 0);
+}
+// remote: Supabase から来たタスク, local: いま手元にあるタスク
+// hardFields: 列そのものが無い（向こうは何も知らない）→ 無条件に手元を残す
+// softFields: 列が今回できた→ 向こうが空のときだけ手元を残す（一度きり）
+export function mergeKeepingLocal(remote, local, hardFields, softFields) {
+  if (!local) return remote;
+  const out = { ...remote };
+  for (const f of hardFields) out[f] = local[f];
+  for (const f of softFields) {
+    if (isEmptyField(f, remote[f]) && !isEmptyField(f, local[f])) out[f] = local[f];
+  }
+  return out;
+}
+
 function focusAdjacentBlock(fromEl, dir) {
   const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
   const i = all.indexOf(fromEl);
@@ -1512,9 +1540,41 @@ function App() {
         const remoteTaskIds = new Set((remote.tasks || []).map(t => t.id))
         if (deletedTasks.size) addSyncLog(`🔍 tombstone ${[...deletedTasks].length}件 remote残存:${[...deletedTasks].filter(id => remoteTaskIds.has(id)).length}件`)
         pruneTombstones(TOMBSTONE_TASKS_KEY, remoteTaskIds)
-        const applied = (remote.tasks || []).filter(t => !deletedTasks.has(t.id)).map(normalizeTask);
+        // 向こうに置き場が無い項目は、手元の値のほうが正しい。
+        // 列を足した直後は、向こうがまだ空のままなので一度だけ手元を優先し、
+        // そのあとの保存で送り直す（上の useEffect が差分を拾う）。
+        const absent = remote.absentColumns || [];
+        let known = null;
+        try {
+          const raw = localStorage.getItem(MISSING_COLUMNS_KEY);
+          known = raw === null ? null : JSON.parse(raw);
+        } catch { known = null; }
+        // 初めてこの版を動かしたときは、前に何が無かったか分からない。
+        // 列を足す前に書いた行は向こうが空のままなので、空のところだけ
+        // 手元を優先して直す（向こうに値があれば、そちらを採る）。
+        const justAdded = (known ?? ALL_OPTIONAL_COLUMNS).filter((c) => !absent.includes(c));
+        try { localStorage.setItem(MISSING_COLUMNS_KEY, JSON.stringify(absent)); } catch { /* 保存できなくても動く */ }
+        const hardFields = fieldsForColumns(absent);
+        absentFieldsRef.current = hardFields;
+        const softFields = fieldsForColumns(justAdded);
+        if (absent.length && !missingNoticeRef.current) {
+          missingNoticeRef.current = true;
+          setMissingColumns(getMissingOptionalColumns());
+        }
+        if (justAdded.length) addSyncLog(`🩹 ${justAdded.join(", ")} が増えたので、この端末の値を送り直します`);
+
+        // 読み込みはマウント時に1回だけ走るので、ここの tasks は手元の内容そのもの
+        const mine = new Map((tasks || []).map((t) => [t.id, t]));
+        const incoming = (remote.tasks || []).filter(t => !deletedTasks.has(t.id));
+        const applied = incoming.map((t) => normalizeTask(
+          hardFields.length || softFields.length
+            ? mergeKeepingLocal(t, mine.get(t.id), hardFields, softFields)
+            : t
+        ));
         setTasks(applied);
-        rememberSynced(applied, null);
+        // 「同期済み」には向こうの姿を覚えておく。手元を残したぶんは差分として
+        // 残るので、列ができていれば次の保存で送られる。
+        rememberSynced(incoming.map(normalizeTask), null);
       }
       if (remote.categories?.length) setCategories(remote.categories);
       if (Object.keys(remote.projectRules || {}).length) setProjectRules(remote.projectRules);
@@ -1589,14 +1649,18 @@ function App() {
         const row = payload?.new;
         if (!row) return;
         if (getTombstoneSet(TOMBSTONE_TASKS_KEY).has(row.id)) return; // 自分が削除済みなら無視
-        const incoming = normalizeTask(rowToTask(row));
+        const fromRemote = normalizeTask(rowToTask(row));
         addSyncLog('📡 Realtime: タスク更新受信');
         setTasks((prev) => {
-          const idx = prev.findIndex((t) => t.id === incoming.id);
-          if (idx === -1) return [incoming, ...prev];
-          const next = [...prev]; next[idx] = incoming; return next;
+          const idx = prev.findIndex((t) => t.id === fromRemote.id);
+          if (idx === -1) return [fromRemote, ...prev];
+          // 置き場が無い項目は向こうが空で来る。段組みをほどかない。
+          const merged = normalizeTask(
+            mergeKeepingLocal(fromRemote, prev[idx], absentFieldsRef.current, [])
+          );
+          const next = [...prev]; next[idx] = merged; return next;
         });
-        syncedTasksRef.current.set(incoming.id, sig(incoming));
+        syncedTasksRef.current.set(fromRemote.id, sig(fromRemote));
       },
       onTrayChange: (payload) => {
         if (!supabaseReadyRef.current) return;
@@ -3012,6 +3076,8 @@ function App() {
   const [typeEditor, setTypeEditor] = useState(false);
   // Supabase に列が無くて、この端末にしか残らない項目
   const missingNoticeRef = useRef(false);
+  // Supabase にまだ無い列。Realtime で来た行にも同じ手当てをする。
+  const absentFieldsRef = useRef([]);
   const [missingColumns, setMissingColumns] = useState([]);
 
   const [boardName, setBoardName] = useState(() => {
@@ -3033,6 +3099,17 @@ function App() {
     setPendingEditId(made.id);
   }
 
+
+
+  // 向こうの行が空のままで直らないときの逃げ道。
+  // この端末の内容を、全部まとめて送り直す。
+  function resendEverything() {
+    syncedTasksRef.current = new Map();
+    syncedTrayRef.current = new Map();
+    setToast("この端末の内容を Supabase に送り直しています…");
+    // 保存は tasks の変化で走るので、同じ中身で作り直して火をつける
+    commitTasks((prev) => prev.map((t) => ({ ...t })));
+  }
 
   // 画像にあったボードの構成を、そのまま組み立てて入れる。
   // いまあるブロックは消さず、新しい行として足す。
@@ -3316,6 +3393,20 @@ function App() {
                     >
                       <Settings2 className="h-3 w-3" /> ブロックの種別を作る
                     </button>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">同期</div>
+                    <button
+                      onClick={() => { resendEverything(); setShowSettingsPanel(false); }}
+                      className="mb-1 w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left text-xs text-neutral-400 transition hover:bg-white/[0.07]"
+                    >
+                      この端末の内容を送り直す
+                    </button>
+                    <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                      Supabase に列を足したあと、前に書いたぶんが空のままのときに。
+                      この端末に出ているものが、そのまま向こうの中身になります。
+                    </div>
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">

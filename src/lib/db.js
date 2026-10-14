@@ -223,6 +223,35 @@ export function saveLocal(data) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
 }
 
+// tasks の任意列 → アプリ側の名前。読み込んだ行に列そのものが無いときの
+// 見分けに使う（列が無ければキーごと返ってこない。null とは意味が違う）。
+const OPTIONAL_FIELD_BY_COLUMN = {
+  stock: 'stock',
+  stock_view_id: 'stockViewId',
+  style: 'style',
+  block_type: 'blockType',
+  canvas_x: 'canvasX',
+  canvas_y: 'canvasY',
+  page_id: 'pageId',
+  row_key: 'rowKey',
+  col_index: 'col',
+  col_width: 'colWidth',
+  code_lang: 'codeLang',
+  day_date: 'dayDate',
+}
+
+// Supabase にまだ無い列を、行の形から見つける。
+// 1行も無いときは判断できないので「分からない」= 空を返す。
+export function absentTaskColumns(rows) {
+  const sample = rows?.[0]
+  if (!sample) return []
+  return Object.keys(OPTIONAL_FIELD_BY_COLUMN).filter((col) => !(col in sample))
+}
+
+export function fieldsForColumns(cols) {
+  return cols.map((c) => OPTIONAL_FIELD_BY_COLUMN[c]).filter(Boolean)
+}
+
 // --- Supabase load (all tables at once) ---
 
 export async function loadFromSupabase() {
@@ -252,7 +281,13 @@ export async function loadFromSupabase() {
       projectOrder[row.category] = row.projects
     }
 
+    // 列が無いと分かったら、送るのをやめて画面にも知らせる。
+    // 保存でエラーになるまで待たずに、読み込んだ時点で気づける。
+    const absentColumns = absentTaskColumns(taskRows)
+    absentColumns.forEach(disableOptionalColumn)
+
     return {
+      absentColumns,
       tasks: taskRows.map(rowToTask),
       categories: catRows.map(rowToCategory),
       projectRules: rowsToProjectRules(ruleRows),

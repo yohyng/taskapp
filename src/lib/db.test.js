@@ -31,3 +31,23 @@ describe('任意列の作り方を知らせる', () => {
     expect(missingOptionalColumn(null)).toBe(null)
   })
 })
+
+describe('列がまだ無いことを、行の形から見分ける', () => {
+  it('列が無い行では、そのキーごと返ってこない', async () => {
+    const { absentTaskColumns, fieldsForColumns } = await import('./db.js')
+    const row = { id: '1', title: 'a', stock: false, style: null } // 段組みの列が無い
+    const absent = absentTaskColumns([row])
+    expect(absent).toContain('row_key')
+    expect(absent).toContain('col_index')
+    expect(absent).not.toContain('stock')
+    // null は「列はあるが空」なので、無い扱いにしない
+    expect(absent).not.toContain('style')
+    expect(fieldsForColumns(['row_key', 'col_index'])).toEqual(['rowKey', 'col'])
+  })
+
+  it('1行も無いときは判断しない', async () => {
+    const { absentTaskColumns } = await import('./db.js')
+    expect(absentTaskColumns([])).toEqual([])
+    expect(absentTaskColumns(null)).toEqual([])
+  })
+})
