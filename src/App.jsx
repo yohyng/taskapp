@@ -5859,6 +5859,28 @@ function BlockArea({
     });
   }, [mapTasks]);
 
+  // PJ をつかんだ位置へ入れ込む。入れ替えではなく、抜いて差し込む並べ替え。
+  // 列の番号は飛んでいることがあるので、実際に使われている番号の並びで考える。
+  const moveColumnTo = useCallback((rowKey, from, to, after) => {
+    const nums = [...new Set(tasks
+      .filter((t) => t.pageId === pageId && !t.archived && t.rowKey === rowKey)
+      .map((t) => t.col ?? 0))].sort((a, b) => a - b);
+    const fromIdx = nums.indexOf(from);
+    let toIdx = nums.indexOf(to);
+    if (fromIdx < 0 || toIdx < 0) return;
+    if (after) toIdx += 1;
+    if (toIdx > fromIdx) toIdx -= 1;
+    if (toIdx === fromIdx) return;
+    const order = [...nums];
+    const [moved] = order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, moved);
+    // 並べ直したあとの位置が、そのまま新しい列番号になる
+    const next = new Map(order.map((c, i) => [c, i]));
+    mapTasks((t) => (
+      t.rowKey === rowKey && next.has(t.col ?? 0) ? { ...t, col: next.get(t.col ?? 0) } : t
+    ));
+  }, [mapTasks, tasks, pageId]);
+
   // 列の取り分を変える。列の全ブロックに同じ値を書く。
   const setColumnWidth = useCallback((rowKey, col, width) => {
     const w = Math.max(0.3, Math.min(4, width));
@@ -5868,23 +5890,27 @@ function BlockArea({
   // PJ の箱をつかんで入れ替える。中のブロックのドラッグとは別物なので、
   // 帯のつまみだけで動かす（dnd-kit は中のブロック用に使っている）。
   const [pjDrag, setPjDrag] = useState(null);
-  const [pjOver, setPjOver] = useState(null);
+  const [pjOver, setPjOver] = useState(null); // { col, after }
   const pjRow = useRef(null);
   function startPjDrag(rowKey, colNum, e) {
     pjRow.current = rowKey;
     setPjDrag(colNum);
-    setPjOver(colNum);
-    const colAt = (ev) => {
+    setPjOver(null);
+    // 重ねている列と、その左右どちら側に入るか。真ん中より右なら後ろに差し込む。
+    const spotAt = (ev) => {
       const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-col-index]");
-      const n = el ? Number(el.getAttribute("data-col-index")) : null;
-      return n == null || Number.isNaN(n) ? null : n;
+      if (!el) return null;
+      const n = Number(el.getAttribute("data-col-index"));
+      if (Number.isNaN(n)) return null;
+      const r = el.getBoundingClientRect();
+      return { col: n, after: ev.clientX > r.left + r.width / 2 };
     };
-    const move = (ev) => setPjOver(colAt(ev));
+    const move = (ev) => setPjOver(spotAt(ev));
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      const to = colAt(ev);
-      if (to != null && to !== colNum) swapColumns(pjRow.current, colNum, to);
+      const spot = spotAt(ev);
+      if (spot) moveColumnTo(pjRow.current, colNum, spot.col, spot.after);
       setPjDrag(null);
       setPjOver(null);
     };
@@ -5925,7 +5951,11 @@ function BlockArea({
                   data-col-index={colNum}
                   className={classNames(
                     "min-w-0",
-                    pjOver === colNum && pjDrag != null && pjDrag !== colNum && "outline outline-2 outline-sky-400/60",
+                    pjDrag != null && pjOver?.col === colNum && "relative",
+                    pjDrag != null && pjOver?.col === colNum && (pjOver.after
+                      ? "shadow-[inset_-3px_0_0_0_rgb(56_189_248)]"
+                      : "shadow-[inset_3px_0_0_0_rgb(56_189_248)]"),
+                    pjDrag === colNum && "opacity-50",
                     framed && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
                   )}
                   // flexBasis を 0 にすると何本でも1段に詰め込んでしまう。

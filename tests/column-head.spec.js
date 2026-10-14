@@ -131,25 +131,50 @@ test.describe("PJ の箱", () => {
     expect(new Set(tops).size).toBe(1);
   });
 
-  test("帯のつまみをドラッグすると、PJ ごと入れ替わる", async ({ page, seed }) => {
+  test("帯のつまみをドラッグすると、PJ ごと落とした場所へ動く", async ({ page, seed }) => {
     const { storedTasks, dragTo, centerOf } = await import("./helpers.js");
     await page.setViewportSize({ width: 1400, height: 900 });
     await seed({
       tasks: [
         b("h0", "ひだりPJ", { col: 0, blockType: "column" }),
         b("a", "ひだりの中身", { col: 0 }),
-        b("h1", "みぎPJ", { col: 1, blockType: "column" }),
+        b("h1", "まんなかPJ", { col: 1, blockType: "column" }),
+        b("h2", "みぎPJ", { col: 2, blockType: "column" }),
       ],
     });
     const first = page.locator('[data-col-index="0"]');
     await first.hover();
     const grab = first.locator("[data-pj-grab]").first();
-    await dragTo(page, await centerOf(grab), await centerOf(page.locator('[data-col-index="1"]')));
+    // いちばん右の列の、さらに右半分へ落とす＝末尾に入れる
+    const last = await page.locator('[data-col-index="2"]').boundingBox();
+    await dragTo(page, await centerOf(grab), { x: last.x + last.width - 10, y: last.y + 20 });
 
-    await expect.poll(async () =>
-      (await storedTasks(page)).find((t) => t.id === "h0")?.col).toBe(1);
-    const all = await storedTasks(page);
-    expect(all.find((t) => t.id === "h1").col).toBe(0);
-    expect(all.find((t) => t.id === "a").col).toBe(1); // 中身も一緒に動く
+    const at = async (id) => (await storedTasks(page)).find((t) => t.id === id).col;
+    await expect.poll(() => at("h0")).toBe(2);
+    expect(await at("h1")).toBe(0); // 抜けたぶん、残りが詰まる
+    expect(await at("h2")).toBe(1);
+    expect(await at("a")).toBe(2);  // 中身も一緒に動く
+  });
+
+  test("真ん中の列の左半分に落とすと、その手前に入る", async ({ page, seed }) => {
+    const { storedTasks, dragTo, centerOf } = await import("./helpers.js");
+    await page.setViewportSize({ width: 1400, height: 900 });
+    await seed({
+      tasks: [
+        b("h0", "ひとつめ", { col: 0, blockType: "column" }),
+        b("h1", "ふたつめ", { col: 1, blockType: "column" }),
+        b("h2", "みっつめ", { col: 2, blockType: "column" }),
+      ],
+    });
+    const third = page.locator('[data-col-index="2"]');
+    await third.hover();
+    const grab = third.locator("[data-pj-grab]").first();
+    const mid = await page.locator('[data-col-index="1"]').boundingBox();
+    await dragTo(page, await centerOf(grab), { x: mid.x + 8, y: mid.y + 20 });
+
+    const at = async (id) => (await storedTasks(page)).find((t) => t.id === id).col;
+    await expect.poll(() => at("h2")).toBe(1);
+    expect(await at("h0")).toBe(0);
+    expect(await at("h1")).toBe(2);
   });
 });
