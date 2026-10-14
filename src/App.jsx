@@ -19,6 +19,7 @@ import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWe
 import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
+  CheckSquare,
   ChevronUp,
   ChevronRight,
   ChevronLeft,
@@ -37,13 +38,11 @@ import {
   Redo2,
   Settings2,
   Trash2,
-  CheckSquare,
   FileText,
   Info,
   Pin,
   Pencil,
   Copy,
-  Focus,
   Airplay,
   LayoutGrid,
   Maximize2,
@@ -728,10 +727,6 @@ function normalizeTask(task) {
 }
 
 // フォーカスモード: propsのバケツリレーを避けてContextで配る
-const FocusModeContext = React.createContext({ focusPickMode: false, pickTask: null, pickTrayItem: null });
-function useFocusMode() {
-  return React.useContext(FocusModeContext);
-}
 
 // 選択状態。7days は SevenDayView→DayColumn→DayProjectGroup→DayTask と深いので
 // props ではなく Context で配る。
@@ -958,9 +953,6 @@ function App() {
   const [showDone, setShowDone] = useState(true);
   const [weeklyFlat, setWeeklyFlat] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState(null);
-  const [focusTaskId, setFocusTaskId] = useState(null);
-  const [focusPickMode, setFocusPickMode] = useState(false);
-  const [focusTrayItem, setFocusTrayItem] = useState(null);
   const [pendingEditId, setPendingEditId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [quickMemo, setQuickMemo] = useState("");
@@ -2949,12 +2941,6 @@ function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const focusModeValue = useMemo(() => ({
-    focusPickMode,
-    pickTask: (id) => { setFocusTaskId(id); setFocusPickMode(false); },
-    pickTrayItem: (item) => { setFocusTrayItem(item); setFocusPickMode(false); },
-  }), [focusPickMode]);
-
   // Enter で「同じ場所の直下」に空ブロックを作り、そのまま編集に入る
   const addBlockBelow = useCallback((task) => {
     // addTask は空タイトルを弾くので、いったん placeholder を入れて
@@ -3260,7 +3246,6 @@ function App() {
     <SelectionContext.Provider value={selectionValue}>
     <SlashContext.Provider value={slashValue}>
     <BlockEditContext.Provider value={blockEditValue}>
-    <FocusModeContext.Provider value={focusModeValue}>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen ts-bg ts-text" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
@@ -3275,29 +3260,14 @@ function App() {
               onClick={() => setQuickAddOpen(true)}
               title="タスクを追加"
               data-quick-add
-              className="flex min-w-0 flex-[2] items-center justify-center gap-1.5 whitespace-nowrap rounded-md border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 sm:flex-none"
+              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 sm:flex-none"
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
-              <span className="whitespace-nowrap">タスクを追加</span>
+              <span className="truncate">タスクを追加</span>
             </button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
-            <button
-              onClick={() => { if (selectMode) exitSelectMode(); else setSelectMode(true); }}
-              title="Select mode"
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", selectMode ? "border-white/30 bg-white/20 ts-text" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
-            >
-              <CheckSquare className="h-3.5 w-3.5" />
-            </button>
-            <button
-              onClick={() => { setFocusPickMode((v) => !v); setFocusTaskId(null); }}
-              title="フォーカスモード"
-              className={classNames("rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1", focusPickMode ? "border-amber-400/40 bg-amber-400/10 text-amber-300" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}
-            >
-              <Focus className="h-3.5 w-3.5" />
-            </button>
-            <KeepAwakeButton />
             <div className="relative">
               <button
                 onClick={() => setShowSettingsPanel((v) => !v)}
@@ -3702,11 +3672,10 @@ function App() {
                     <div
                       key={item.id}
                       data-tray-id={item.id}
-                      onClick={() => { if (focusPickMode) { setFocusTrayItem(item); setFocusPickMode(false); return; } onToggleTraySelect(item.id); }}
+                      onClick={() => onToggleTraySelect(item.id)}
                       onDoubleClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})}
                       className={classNames(
                         "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]",
-                        focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
                       )}
                     >
                       <span className="mt-0.5 shrink-0 text-[9px] text-neutral-600 font-bold">n</span>
@@ -3922,26 +3891,6 @@ function App() {
         </div>
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
-
-        {focusTaskId && (
-          <FocusOverlay
-            taskId={focusTaskId}
-            taskMap={taskMap}
-            childrenOf={childrenOf}
-            categoryTone={categoryTone}
-            upsertTask={upsertTask}
-            toggleDone={toggleDone}
-            onClose={() => setFocusTaskId(null)}
-          />
-        )}
-
-        {focusTrayItem && (
-          <FocusOverlay
-            trayItem={focusTrayItem}
-            categoryTone={categoryTone}
-            onClose={() => setFocusTrayItem(null)}
-          />
-        )}
 
         <MarqueeSelect onSelect={handleMarqueeSelect} />
 
@@ -4189,7 +4138,6 @@ function App() {
       {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold ts-text shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
-    </FocusModeContext.Provider>
     </BlockEditContext.Provider>
     </SlashContext.Provider>
     </SelectionContext.Provider>
@@ -4580,7 +4528,6 @@ function InboxTray({ label = "TRAY", items, updateInboxItem, removeInboxItem, mo
 }
 
 function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, acceptInboxItem, selectMode = false, isSelected = false, onToggleSelect }) {
-  const { focusPickMode, pickTrayItem } = useFocusMode();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.title);
 
@@ -4620,10 +4567,10 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
   return (
     <div
       ref={setRefs}
-      {...(!selectMode && !focusPickMode ? trayDragListeners : {})}
-      {...(!selectMode && !focusPickMode ? trayDragAttrs : {})}
+      {...(!selectMode ? trayDragListeners : {})}
+      {...(!selectMode ? trayDragAttrs : {})}
       onContextMenu={e => e.preventDefault()}
-      onClick={() => { if (focusPickMode) { pickTrayItem?.(item); return; } onToggleSelect?.(item.id); }}
+      onClick={() => onToggleSelect?.(item.id)}
       data-draggable
       data-tray-id={item.id}
       style={{ userSelect: "none", WebkitUserSelect: "none" }}
@@ -4633,7 +4580,6 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
         isTrayDragging && "opacity-40",
         isSelected && "border-sky-500/50 bg-sky-500/10",
         selectMode && "cursor-pointer",
-        focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70"
       )}
     >
       <div className="flex items-start gap-2">
@@ -4674,7 +4620,7 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
             />
           ) : (
             <div
-              onDoubleClick={(e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); }}
+              onDoubleClick={(e) => { e.stopPropagation(); setEditing(true); }}
               className="ts-row-text block w-full break-words [overflow-wrap:anywhere] text-left text-[12.5px] font-medium leading-[1.35] text-neutral-200"
             >
               {item.title}
@@ -4806,7 +4752,6 @@ function useTaskBlock({
   onMoveBlock,    // Alt+Shift+↑↓: 並びを入れ替える
   onDuplicate,    // Cmd+D: ブロックを複製する
 }) {
-  const { focusPickMode, pickTask } = useFocusMode();
   const { addBlockBelow, markForEdit, pendingEditId, claimPendingEdit, pendingKeepsText } = useBlockEdit();
   const { selectedIds, toggleTask, selectRange, noteAnchor, selectMany } = useSelection();
   const slashCtx = useSlash();
@@ -4839,7 +4784,7 @@ function useTaskBlock({
   // 列の頭（＋列で作ったもの）は置きっぱなしにする。
   // うっかり掴んで動くと、せっかく組んだ段組みが崩れてしまう。
   const isColumnHead = task.blockType === "column";
-  const dragOff = dragDisabled || focusPickMode || isColumnHead;
+  const dragOff = dragDisabled || isColumnHead;
 
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: dragId,
@@ -4947,7 +4892,7 @@ function useTaskBlock({
 
   // カードにフォーカスがある状態でのキー操作（Notion のブロック選択に相当）
   function onCardKeyDown(e) {
-    if (editing || focusPickMode) return;
+    if (editing) return;
     if (e.key === "Enter") {
       e.preventDefault();
       addBlockBelow?.(task);
@@ -5198,7 +5143,6 @@ function useTaskBlock({
     onKeyDown: onCardKeyDown,
     onClick: (e) => {
       if (clickGuard?.()) return;
-      if (focusPickMode) { pickTask?.(task.id); return; }
       if (editing) return;
       // Shift+クリックは、起点からここまでをまとめて選ぶ（Notion と同じ）
       if (e?.shiftKey) { e.preventDefault(); selectRange?.(task.id); return; }
@@ -5243,18 +5187,18 @@ function useTaskBlock({
   useEffect(() => { if (!editing && sq.slash) sq.setSlash(null); }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const titleProps = {
-    onDoubleClick: (e) => { if (focusPickMode) return; e.stopPropagation(); setEditing(true); },
+    onDoubleClick: (e) => { e.stopPropagation(); setEditing(true); },
     style: taskTextStyle(task),
   };
   // Notion では Enter でも編集に入れる（選択状態からの復帰）
   const notionEditable = notionMode;
 
   // フォーカスモード中に付ける目印（全ビュー共通）
-  const focusRingClass = focusPickMode && "cursor-crosshair ring-1 ring-amber-400/25 hover:ring-2 hover:ring-amber-400/70";
+  const focusRingClass = false;
 
   return {
     editing, setEditing, draft, setDraft,
-    isSelected, isDragging, isOver, focusPickMode,
+    isSelected, isDragging, isOver,
     cardRef, textareaRef,
     blockProps, textareaProps, titleProps, focusRingClass, dropHint,
     mark, applyMark, linkRange, setLinkRange, applyLink,
@@ -5710,7 +5654,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         textareaClassName={() => "ts-block-text w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
           "ts-block-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[14px] leading-relaxed ts-text",
-          b.focusPickMode ? "cursor-crosshair" : "cursor-text",
+          "cursor-text",
           task.status === "完了" && "line-through opacity-40",
         )}
         leading={() => (
@@ -7161,7 +7105,7 @@ function TaskCard({ task, listNumber, taskMap, categoryTone, children = [], chil
         )}
         titleClassName={(b) => classNames(
           "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35]",
-          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          "cursor-pointer",
           task.status === "完了" && "line-through",
         )}
         leading={(b) => (
@@ -7368,6 +7312,7 @@ function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, c
         leftRound ? "rounded-l-none" : "rounded-l",
         rightRound ? "rounded-r-none" : "rounded-r",
         bar.isOverdue ? "bg-red-500/25 text-red-200" : tone,
+        bar.isDone && "opacity-45",
       )}
     >
       {editable && (
@@ -7385,13 +7330,16 @@ function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, c
           data-span-done
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onDone(bar.taskId); }}
-          title="押すと完了にする"
-          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-current opacity-70 transition hover:bg-white/25 hover:opacity-100"
+          title={bar.isDone ? "押すと未完了に戻す" : "押すと完了にする"}
+          className={classNames(
+            "grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-current text-[8px] leading-none transition hover:bg-white/25 hover:opacity-100",
+            bar.isDone ? "opacity-100" : "opacity-70",
+          )}
         >
-          <span className="sr-only">完了にする</span>
+          {bar.isDone ? "✓" : <span className="sr-only">完了にする</span>}
         </button>
       )}
-      <span className="truncate">{bar.label}</span>
+      <span className={classNames("truncate", bar.isDone && "line-through")}>{bar.label}</span>
       {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-", "/")}→` : `〆${bar.dueDate.slice(5).replace("-", "/")}`}</span>}
       {bar.kind === "repeat" && bar.rangeEndDay != null && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
       {bar.kind === "repeat" && bar.rangeEndDay == null && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
@@ -7485,16 +7433,18 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     const wEnd = wKeys[6];
     const toCol = (key) => { const idx = wKeys.indexOf(key); if (idx < 0) return key < wStart ? 0 : 5; return Math.min(idx, 5); };
     const dueBars = tasks
-      .filter((t) => t.dueDate && !t.archived && t.status !== "完了" && t.dueDate >= wStart)
+      // 完了しても帯は消さない。線を引いて、そのまま置いておく。
+      .filter((t) => t.dueDate && !t.archived && t.dueDate >= wStart)
       .map((t) => {
         const rawStart = t.scheduledDate && t.scheduledDate >= wStart ? t.scheduledDate : wStart;
         const rawEnd = t.dueDate <= wEnd ? t.dueDate : wEnd;
         const startCol = toCol(rawStart);
         const endCol = toCol(rawEnd);
-        const isOverdue = t.dueDate < todayKey;
+        const isDone = t.status === "完了";
+        const isOverdue = !isDone && t.dueDate < todayKey;
         const extendsLeft = !!(t.scheduledDate && t.scheduledDate < wStart);
         const extendsRight = t.dueDate > wEnd;
-        return { kind: "due", id: `${t.id}-${wStart}`, taskId: t.id, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsLeft, extendsRight, dueDate: t.dueDate };
+        return { kind: "due", id: `${t.id}-${wStart}`, taskId: t.id, isDone, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsLeft, extendsRight, dueDate: t.dueDate };
       })
       .filter((b) => b.endCol >= b.startCol);
     const ruleBars = [];
@@ -7802,7 +7752,7 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
         textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium ts-text outline-none"}
         titleClassName={(b) => classNames(
           "ts-row-text min-w-0 flex-1 break-words [overflow-wrap:anywhere] text-[12.5px] ts-text",
-          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          "cursor-pointer",
           isDone && "line-through opacity-40",
         )}
         leading={(b) => selectMode ? (
@@ -7925,10 +7875,10 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
         textareaClassName={() => "ts-row-text w-full resize-none overflow-hidden rounded border-b border-white/25 bg-transparent text-[12.5px] font-medium leading-[1.35] ts-text outline-none"}
         titleClassName={(b) => classNames(
           "ts-row-text break-words [overflow-wrap:anywhere] text-[12.5px] font-medium leading-[1.35] ts-text",
-          b.focusPickMode ? "cursor-crosshair" : "cursor-pointer",
+          "cursor-pointer",
           isDone && "line-through opacity-40",
         )}
-        titleAttrs={(b) => ({ title: b.focusPickMode ? "クリックでフォーカス" : "ダブルクリックで名前を編集" })}
+        titleAttrs={() => ({ title: "ダブルクリックで名前を編集" })}
         leading={() => (
           <button
             onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
@@ -8492,120 +8442,6 @@ function DueDatePicker({ value, onChange }) {
   );
 }
 
-function FocusOverlay({ taskId, taskMap, childrenOf, categoryTone, upsertTask, toggleDone, onClose, trayItem }) {
-  useEffect(() => {
-    function onKey(e) { if (e.key === "Escape") onClose(); }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  // TRAYアイテムモード
-  if (trayItem) {
-    return (
-      <div className="fixed inset-0 z-[300] flex items-center justify-center" style={{ background: "rgba(0,0,0,0.95)" }} onClick={onClose}>
-        <div className="w-full max-w-xl px-4" onClick={(e) => e.stopPropagation()}>
-          <div className="rounded-xl border border-white/10 ts-surface p-4">
-            <p className="text-xs text-neutral-500 mb-2">TRAY</p>
-            <p className="text-base font-medium ts-text leading-snug">{trayItem.title}</p>
-          </div>
-          <button onClick={onClose} className="mt-4 w-full text-center text-xs text-neutral-600 hover:text-neutral-400 transition">Esc で閉じる</button>
-        </div>
-      </div>
-    );
-  }
-
-  if (!taskId || !taskMap) return null;
-  const task = taskMap.get(taskId);
-  if (!task) return null;
-
-  // 親チェーンを収集
-  const ancestors = [];
-  let cur = task.parentId ? taskMap.get(task.parentId) : null;
-  while (cur) {
-    ancestors.unshift(cur);
-    cur = cur.parentId ? taskMap.get(cur.parentId) : null;
-  }
-
-  const children = childrenOf ? childrenOf(taskId) : [];
-  const tone = categoryTone(task.category);
-
-  return (
-    <div
-      className="fixed inset-0 z-[300] flex items-center justify-center"
-      style={{ background: "rgba(0,0,0,0.95)" }}
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-xl px-4"
-        onClick={(e) => e.stopPropagation()}
-      >
-        {/* 親チェーン */}
-        {ancestors.length > 0 && (
-          <div className="mb-3 flex flex-col gap-1">
-            {ancestors.map((a) => (
-              <div key={a.id} className="text-xs text-neutral-600 truncate">
-                ↳ {a.title}
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* フォーカスタスク本体 */}
-        <div className={classNames("rounded-xl border p-4", tone.panel)}>
-          <div className="flex items-start gap-3">
-            <button
-              onClick={() => toggleDone(task.id)}
-              className={classNames(
-                "mt-0.5 h-5 w-5 shrink-0 rounded-full border-2 transition",
-                task.archived ? "border-transparent bg-neutral-600" : "border-neutral-500 hover:border-neutral-300"
-              )}
-            >
-              {task.archived && <span className="flex h-full w-full items-center justify-center text-[10px] text-neutral-400">✓</span>}
-            </button>
-            <div className="min-w-0 flex-1">
-              <p className={classNames("text-base font-medium leading-snug", task.archived ? "line-through text-neutral-500" : "ts-text")}>
-                {task.title}
-              </p>
-              {task.project && (
-                <p className={classNames("mt-1 text-xs", tone.accent)}>{task.category} / {task.project}</p>
-              )}
-              {task.memo?.trim() && (
-                <p className="mt-2 whitespace-pre-wrap text-xs text-neutral-500">{task.memo}</p>
-              )}
-            </div>
-          </div>
-
-          {/* 子タスク */}
-          {children.length > 0 && (
-            <div className="mt-3 flex flex-col gap-1 border-t border-white/10 pt-3">
-              {children.map((child) => (
-                <div key={child.id} className="flex items-center gap-2">
-                  <button
-                    onClick={() => toggleDone(child.id)}
-                    className={classNames(
-                      "h-4 w-4 shrink-0 rounded-full border-2 transition",
-                      child.archived ? "border-transparent bg-neutral-600" : "border-neutral-600 hover:border-neutral-400"
-                    )}
-                  >
-                    {child.archived && <span className="flex h-full w-full items-center justify-center text-[8px] text-neutral-400">✓</span>}
-                  </button>
-                  <span className={classNames("text-sm", child.archived ? "line-through text-neutral-600" : "text-neutral-300")}>
-                    {child.title}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <button onClick={onClose} className="mt-4 w-full text-center text-xs text-neutral-600 hover:text-neutral-400 transition">
-          Esc で閉じる
-        </button>
-      </div>
-    </div>
-  );
-}
-
 // Notion 風のドラッグ範囲選択（マーキー）。
 // 余白から左ドラッグを始めたときだけ矩形を出し、重なったタスク／TRAY行を選択する。
 // タスクカード上から始まったドラッグは dnd-kit の移動なので手を出さない。
@@ -8685,158 +8521,6 @@ function MarqueeSelect({ onSelect }) {
       className="pointer-events-none fixed z-[250] rounded-sm border border-sky-400/70 bg-sky-400/10"
       style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     />
-  );
-}
-
-// 画面スリープ防止。
-// 本命は Screen Wake Lock API（iPadOS 16.4+ / Chrome / Edge）。
-// iOS Safari は標準の PiP API を持たず webkitSetPresentationMode のみなので、
-// Wake Lock が無い環境向けに PiP をフォールバックとして残す。
-const hasWakeLock = typeof navigator !== "undefined" && "wakeLock" in navigator;
-function pipFlavor() {
-  if (typeof document === "undefined") return null;
-  if (document.pictureInPictureEnabled) return "standard";
-  const v = document.createElement("video");
-  if (typeof v.webkitSetPresentationMode === "function") return "webkit";
-  return null;
-}
-
-function KeepAwakeButton() {
-  const [active, setActive] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const sentinelRef = useRef(null);
-  const videoRef = useRef(null);
-  const rafRef = useRef(null);
-  const flavor = useMemo(pipFlavor, []);
-  const supported = hasWakeLock || !!flavor;
-
-  const releasePip = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    const v = videoRef.current;
-    if (v) {
-      try {
-        if (flavor === "webkit" && v.webkitPresentationMode === "picture-in-picture") {
-          v.webkitSetPresentationMode("inline");
-        } else if (document.pictureInPictureElement === v) {
-          document.exitPictureInPicture();
-        }
-      } catch { /* すでに閉じている */ }
-      v.pause();
-      v.remove();
-      videoRef.current = null;
-    }
-  }, [flavor]);
-
-  // Wake Lock はタブが背面に回ると自動解放されるので、復帰時に取り直す
-  useEffect(() => {
-    if (!active || !hasWakeLock) return;
-    async function reacquire() {
-      if (document.visibilityState !== "visible" || sentinelRef.current) return;
-      try {
-        sentinelRef.current = await navigator.wakeLock.request("screen");
-        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-      } catch { /* 取得できなければ諦める */ }
-    }
-    document.addEventListener("visibilitychange", reacquire);
-    return () => document.removeEventListener("visibilitychange", reacquire);
-  }, [active]);
-
-  useEffect(() => () => {
-    sentinelRef.current?.release().catch(() => {});
-    releasePip();
-  }, [releasePip]);
-
-  async function startPipFallback() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 320;
-    canvas.height = 180;
-    const ctx = canvas.getContext("2d");
-    function draw() {
-      const now = new Date();
-      const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
-        .map((n) => String(n).padStart(2, "0")).join(":");
-      ctx.fillStyle = "#0a0a0a";
-      ctx.fillRect(0, 0, 320, 180);
-      ctx.fillStyle = "#e5e5e5";
-      ctx.font = "bold 56px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(t, 160, 80);
-      ctx.fillStyle = "#525252";
-      ctx.font = "14px sans-serif";
-      ctx.fillText("Task Space", 160, 148);
-      rafRef.current = requestAnimationFrame(draw);
-    }
-    draw();
-
-    const video = document.createElement("video");
-    video.srcObject = canvas.captureStream(1);
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    // iOS は DOM に載っていない video を PiP に上げられない
-    video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;";
-    document.body.appendChild(video);
-    videoRef.current = video;
-
-    await video.play();
-    if (flavor === "webkit") {
-      video.webkitSetPresentationMode("picture-in-picture");
-      video.addEventListener("webkitpresentationmodechanged", () => {
-        if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setActive(false); }
-      });
-    } else {
-      await video.requestPictureInPicture();
-      video.addEventListener("leavepictureinpicture", () => { releasePip(); setActive(false); }, { once: true });
-    }
-  }
-
-  async function start() {
-    setFailed(false);
-    if (hasWakeLock) {
-      try {
-        sentinelRef.current = await navigator.wakeLock.request("screen");
-        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-        setActive(true);
-        return;
-      } catch { /* Wake Lock が拒否されたら PiP を試す */ }
-    }
-    if (!flavor) { setFailed(true); return; }
-    try {
-      await startPipFallback();
-      setActive(true);
-    } catch {
-      releasePip();
-      setFailed(true);
-    }
-  }
-
-  async function stop() {
-    try { await sentinelRef.current?.release(); } catch { /* noop */ }
-    sentinelRef.current = null;
-    releasePip();
-    setActive(false);
-  }
-
-  if (!supported) return null;
-
-  return (
-    <button
-      onClick={active ? stop : start}
-      title={
-        failed ? "スリープ防止を開始できませんでした"
-        : active ? "スリープ防止：ON（クリックで解除）"
-        : "スリープ防止：OFF（クリックで開始）"
-      }
-      className={classNames(
-        "rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1",
-        failed ? "border-red-400/40 bg-red-400/10 text-red-300"
-        : active ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
-        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]"
-      )}
-    >
-      <Airplay className="h-3.5 w-3.5" />
-    </button>
   );
 }
 

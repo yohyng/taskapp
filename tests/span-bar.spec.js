@@ -123,10 +123,31 @@ test.describe("帯と曜日のいったりきたり", () => {
     await expect(page.locator(`[data-day-col="${key}"] [data-task-id="s1"]`)).toBeVisible();
   });
 
-  test("◯ を押すと完了になる", async ({ page, seed }) => {
+  test("◯ を押すと完了になるが、帯は消えない", async ({ page, seed }) => {
     await seed({ tasks: [spanTask()] });
     await bar(page).locator("[data-span-done]").click();
     await expect.poll(async () => (await storedTask(page, "s1")).status).toBe("完了");
+
+    // 帯はそのまま。線が引かれて薄くなるだけ。
+    await expect(bar(page)).toBeVisible();
+    const line = await bar(page).locator("span", { hasText: "またぐやつ" }).first()
+      .evaluate((e) => getComputedStyle(e).textDecorationLine);
+    expect(line).toContain("line-through");
+  });
+
+  test("もう一度押すと、未完了に戻る", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask()] });
+    await bar(page).locator("[data-span-done]").click();
+    await expect.poll(async () => (await storedTask(page, "s1")).status).toBe("完了");
+    await bar(page).locator("[data-span-done]").click();
+    await expect.poll(async () => (await storedTask(page, "s1")).status).toBe("未着手");
+  });
+
+  test("完了しても、端をつまんで日は変えられる", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask({ status: "完了" })] });
+    const box = await bar(page).boundingBox();
+    await dragTo(page, await centerOf(bar(page).locator('[data-span-grab="end"]')), { x: box.x + box.width + 200, y: box.y + box.height / 2 });
+    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(day(2));
   });
 
   test("端をつまんだだけでは、曜日に移らない", async ({ page, seed }) => {
