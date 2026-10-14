@@ -31,3 +31,32 @@ describe('向こうが知らない項目は、手元を残す', () => {
     expect(out.title).toBe('あたらしい名前')
   })
 })
+
+import { restoreLocalOrder } from './App.jsx'
+
+describe('読み直しても並びが変わらない', () => {
+  const t = (id) => ({ id })
+
+  it('この端末の並びに戻す', () => {
+    const local = [t('a'), t('b'), t('c')]
+    const remote = [t('c'), t('a'), t('b')] // Supabase は順番を持っていない
+    expect(restoreLocalOrder(remote, local).map((x) => x.id)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('ほかの端末で増えた行は後ろに付ける', () => {
+    const local = [t('a'), t('b')]
+    const remote = [t('z'), t('b'), t('a')]
+    expect(restoreLocalOrder(remote, local).map((x) => x.id)).toEqual(['a', 'b', 'z'])
+  })
+
+  it('消えた行は復活しない', () => {
+    const local = [t('a'), t('b'), t('c')]
+    const remote = [t('c'), t('a')]
+    expect(restoreLocalOrder(remote, local).map((x) => x.id)).toEqual(['a', 'c'])
+  })
+
+  it('手元に何も無ければ、来た順のまま', () => {
+    const remote = [t('b'), t('a')]
+    expect(restoreLocalOrder(remote, []).map((x) => x.id)).toEqual(['b', 'a'])
+  })
+})

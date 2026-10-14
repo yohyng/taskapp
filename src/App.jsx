@@ -843,6 +843,19 @@ export function mergeKeepingLocal(remote, local, hardFields, softFields) {
   return out;
 }
 
+
+// ブロックの並びは配列の順そのもの。Supabase は順番を持っていないので、
+// 読み直すと並びが変わり、段組みの見出しまで入れ替わってしまう。
+// この端末が知っている並びを正として、知らない行だけ後ろに足す。
+export function restoreLocalOrder(remote, local) {
+  const rank = new Map((local || []).map((t, i) => [t.id, i]));
+  const known = [];
+  const fresh = [];
+  for (const t of remote) (rank.has(t.id) ? known : fresh).push(t);
+  known.sort((a, b) => rank.get(a.id) - rank.get(b.id));
+  return [...known, ...fresh];
+}
+
 function focusAdjacentBlock(fromEl, dir) {
   const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
   const i = all.indexOf(fromEl);
@@ -1565,7 +1578,10 @@ function App() {
 
         // 読み込みはマウント時に1回だけ走るので、ここの tasks は手元の内容そのもの
         const mine = new Map((tasks || []).map((t) => [t.id, t]));
-        const incoming = (remote.tasks || []).filter(t => !deletedTasks.has(t.id));
+        const incoming = restoreLocalOrder(
+          (remote.tasks || []).filter(t => !deletedTasks.has(t.id)),
+          tasks,
+        );
         const applied = incoming.map((t) => normalizeTask(
           hardFields.length || softFields.length
             ? mergeKeepingLocal(t, mine.get(t.id), hardFields, softFields)
@@ -5700,7 +5716,13 @@ function BlockArea({
       if (r.single) continue;
       const entries = [...r.byCol.entries()].sort((a, b) => a[0] - b[0]);
       r.colNums = entries.map(([n]) => n);
-      r.cols = entries.map(([, v]) => v);
+      // 列の見出しは「列ブロック」。並びが入れ替わっても見出しは先頭に置く。
+      // ここを配列の先頭任せにしていたため、並びが変わると別のブロックが
+      // 見出しの帯になってしまっていた。
+      r.cols = entries.map(([, v]) => {
+        const head = v.findIndex((b) => b.blockType === "column");
+        return head <= 0 ? v : [v[head], ...v.filter((_, i) => i !== head)];
+      });
     }
     return out;
   }, [blocks]);

@@ -264,7 +264,10 @@ export async function loadFromSupabase() {
       { data: orderRows, error: e4 },
       { data: trayRows, error: e5 },
     ] = await Promise.all([
-      supabase.from('tasks').select('*'),
+      // 並び順を指定しないと、Postgres は更新のたびに違う順で返す。
+      // ブロックの並びは配列の順そのものなので、毎回並びが変わってしまう。
+      // id で並べれば、少なくとも読むたびに変わることはない。
+      supabase.from('tasks').select('*').order('id'),
       supabase.from('categories').select('*').order('sort_order'),
       supabase.from('project_rules').select('*'),
       supabase.from('project_order').select('*'),
