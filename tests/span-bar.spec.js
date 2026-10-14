@@ -157,3 +157,39 @@ test.describe("帯と曜日のいったりきたり", () => {
     expect((await storedTask(page, "s1")).dueDate).not.toBe("");
   });
 });
+
+test.describe("帯のドラッグが、ほかの操作とぶつからない", () => {
+  const spanTask = {
+    id: "s1", title: "またぐやつ", category: "", project: "", status: "未着手",
+    parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: day(2),
+    stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null,
+  };
+
+  test("帯からドラッグしても、範囲選択にならない", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask] });
+    const box = await bar(page).boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 + 120, box.y + 240, { steps: 12 });
+    // 範囲選択の矩形が出ていないこと
+    const marquee = await page.evaluate(() =>
+      [...document.querySelectorAll("div")].some((e) => {
+        const st = getComputedStyle(e);
+        return st.position === "fixed" && e.className.includes("border-sky") && e.getBoundingClientRect().height > 50;
+      }));
+    expect(marquee).toBe(false);
+    await page.mouse.up();
+  });
+
+  test("端をつかんでも、範囲選択にならない", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask] });
+    const grab = bar(page).locator('[data-span-grab="end"]');
+    const g = await centerOf(grab);
+    await page.mouse.move(g.x, g.y);
+    await page.mouse.down();
+    await page.mouse.move(g.x + 150, g.y + 200, { steps: 12 });
+    await page.mouse.up();
+    // 選ばれたものが増えていない
+    await expect(page.getByText("件選択中", { exact: false })).toHaveCount(0);
+  });
+});

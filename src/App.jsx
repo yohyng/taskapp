@@ -7255,6 +7255,7 @@ function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, c
   // 帯そのものをつかんで、曜日の中に落とすと「その日のタスク」に戻る。
   function grabBody(e) {
     if (!onMoveToDay || !bar.taskId || e.target.closest("[data-span-grab],[data-span-done]")) return;
+    e.preventDefault();
     const from = { x: e.clientX, y: e.clientY };
     let moved = false;
     const move = (ev) => {
@@ -8452,7 +8453,7 @@ function MarqueeSelect({ onSelect }) {
   useEffect(() => {
     function isInteractive(el) {
       return !!el.closest(
-        "[data-draggable],[data-daytask],[data-task-id],[data-tray-id]," +
+        "[data-draggable],[data-daytask],[data-task-id],[data-tray-id],[data-span-bar]," +
         "button,input,textarea,select,a,[contenteditable='true']"
       );
     }
