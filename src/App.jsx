@@ -7234,9 +7234,31 @@ const DAY_LABELS = ["🌙月", "🔥火", "🌊水", "🌳木", "🪙金", "🪐
 
 // 日をまたぐ帯。端をつまんで左右に伸ばすと、始まりと締め切りが動く。
 // 列の幅は帯が入っているグリッドから測る（曜日の列と同じ割り付け）。
-function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, cols, onChange }) {
+function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, cols, onChange, onDone, onMoveToDay }) {
   const ref = useRef(null);
   const editable = bar.kind === "due" && !!bar.taskId && !!onChange;
+
+  // 帯そのものをつかんで、曜日の中に落とすと「その日のタスク」に戻る。
+  function grabBody(e) {
+    if (!onMoveToDay || !bar.taskId || e.target.closest("[data-span-grab],[data-span-done]")) return;
+    const from = { x: e.clientX, y: e.clientY };
+    let moved = false;
+    const move = (ev) => {
+      if (Math.abs(ev.clientX - from.x) + Math.abs(ev.clientY - from.y) > 6) moved = true;
+      if (moved) ref.current?.classList.add("opacity-50");
+    };
+    const up = (ev) => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      ref.current?.classList.remove("opacity-50");
+      if (!moved) return;
+      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-day-col]");
+      const key = el?.getAttribute("data-day-col");
+      if (key) onMoveToDay(bar.taskId, key);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
 
   function grab(edge, e) {
     if (!editable) return;
@@ -7267,10 +7289,12 @@ function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, c
     <div
       ref={ref}
       data-span-bar={bar.taskId || bar.id}
+      onPointerDown={grabBody}
       style={{ gridColumn: `${bar.gridStart} / span ${span}` }}
       title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
       className={classNames(
-        "group/bar relative flex h-6 items-center overflow-hidden px-2.5 text-[11px] font-medium leading-none",
+        "group/bar relative flex h-6 items-center gap-1.5 overflow-hidden px-2.5 text-[11px] font-medium leading-none",
+        onMoveToDay && bar.taskId && "cursor-grab",
         leftRound ? "rounded-l-none" : "rounded-l",
         rightRound ? "rounded-r-none" : "rounded-r",
         bar.isOverdue ? "bg-red-500/25 text-red-200" : tone,
@@ -7285,6 +7309,17 @@ function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, c
         >
           ‖
         </span>
+      )}
+      {onDone && bar.taskId && (
+        <button
+          data-span-done
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); onDone(bar.taskId); }}
+          title="押すと完了にする"
+          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full border border-current opacity-70 transition hover:bg-white/25 hover:opacity-100"
+        >
+          <span className="sr-only">完了にする</span>
+        </button>
       )}
       <span className="truncate">{bar.label}</span>
       {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-", "/")}→` : `〆${bar.dueDate.slice(5).replace("-", "/")}`}</span>}
@@ -7368,6 +7403,11 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     }
   }
 
+  // 帯を曜日の中に落としたとき。締め切りを外して、その日のふつうのタスクに戻す。
+  function moveBarToDay(taskId, dateKey) {
+    upsertTask({ id: taskId, scheduledDate: dateKey, dueDate: "", today: false, thisWeek: false });
+  }
+
   // Builds allBars for any given weekDays array (reused for each week in month view)
   const computeWeekBars = (wDays) => {
     const wKeys = wDays.map(toDateKey);
@@ -7440,6 +7480,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             colOffset={0}
             cols={6}
             onChange={setSpanEdge}
+            onDone={(id) => { const t = tasks.find((x) => x.id === id); if (t) toggleDone(t); }}
+            onMoveToDay={moveBarToDay}
           />
         ))}
       </div>
@@ -7590,6 +7632,8 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
                   colOffset={groupStart}
                   cols={groupSize}
                   onChange={setSpanEdge}
+                  onDone={(id) => { const t = tasks.find((x) => x.id === id); if (t) toggleDone(t); }}
+                  onMoveToDay={moveBarToDay}
                 />
               ))}
             </div>
@@ -7976,6 +8020,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   return (
     <div
       ref={setNodeRef}
+      data-day-col={dateKey}
       className={classNames(
         "flex flex-col rounded-md p-1 transition",
         // 狭い画面では空の曜日に高さを取らせない。縦に積むので、

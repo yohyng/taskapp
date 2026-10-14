@@ -83,3 +83,54 @@ test.describe("終日の帯", () => {
     expect((await storedTasks(page)).length).toBe(2);
   });
 });
+
+test.describe("帯と曜日のいったりきたり", () => {
+  const spanTask = (over = {}) => ({
+    id: "s1", title: "またぐやつ", category: "", project: "", status: "未着手",
+    parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: day(2),
+    stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null, ...over,
+  });
+
+  test("帯になったら、曜日の中からは消える", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask()] });
+    await expect(bar(page)).toBeVisible();
+    // 曜日の列の中には出ていない（上の帯にだけある）
+    await expect(page.locator("[data-day-col] [data-task-id]")).toHaveCount(0);
+  });
+
+  test("7days から日付の上に動かすと、帯に移る", async ({ page }) => {
+    const card = block(page, "d-1"); // 今日に置いてあるタスク
+    const head = page.locator("[data-day-head]").first();
+    const key = await head.getAttribute("data-day-head");
+    await dragTo(page, await centerOf(card), await centerOf(head));
+
+    await expect.poll(async () => (await storedTask(page, "d-1")).dueDate).toBe(key);
+    // 曜日の中からは消えている
+    await expect(page.locator(`[data-day-col] [data-task-id="d-1"]`)).toHaveCount(0);
+    await expect(page.locator(`[data-span-bar="d-1"]`)).toBeVisible();
+  });
+
+  test("帯を曜日の中に落とすと、その日のタスクに戻る", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask()] });
+    const target = page.locator(`[data-day-col]`).nth(3);
+    const key = await target.getAttribute("data-day-col");
+    await dragTo(page, await centerOf(bar(page)), await centerOf(target));
+
+    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).toBe("");
+    expect((await storedTask(page, "s1")).scheduledDate).toBe(key);
+    await expect(page.locator(`[data-day-col="${key}"] [data-task-id="s1"]`)).toBeVisible();
+  });
+
+  test("◯ を押すと完了になる", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask()] });
+    await bar(page).locator("[data-span-done]").click();
+    await expect.poll(async () => (await storedTask(page, "s1")).status).toBe("完了");
+  });
+
+  test("端をつまんだだけでは、曜日に移らない", async ({ page, seed }) => {
+    await seed({ tasks: [spanTask()] });
+    const box = await bar(page).boundingBox();
+    await dragTo(page, await centerOf(bar(page).locator('[data-span-grab="end"]')), { x: box.x + box.width + 200, y: box.y + box.height / 2 });
+    expect((await storedTask(page, "s1")).dueDate).not.toBe("");
+  });
+});

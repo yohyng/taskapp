@@ -100,7 +100,9 @@ export function rootTasksForDay({ tasks, projectRules, dateKey, date, todayKey }
   }
 
   // 1) 明示的に配置されたタスク（rootのみ）
-  tasks.filter((t) => !t.archived && !t.parentId && (
+  // 日をまたぐ帯（終日）になっているものは、上の帯に出ているので曜日の中には出さない。
+  // 両方に出すと、同じものが2か所にあるように見えてしまう。
+  tasks.filter((t) => !t.archived && !t.parentId && !t.dueDate && (
     t.scheduledDate === dateKey ||
     (!t.scheduledDate && dateKey === todayKey && (t.today || (t.thisWeek && !t.today))) ||
     (t.pinnedDate === dateKey && t.scheduledDate !== dateKey)
