@@ -100,6 +100,8 @@ function taskFirstCollision(args) {
   // タスク/TRAYアイテム: カード → 枠 の順で優先（カラム跨ぎ対応）
   const cardHits = pick(["task-in-day", "task-in-today", "task-in-weekly", "task", "tray"]);
   if (cardHits.length > 0) return cardHits;
+  const headHits = pick(["day-header"]);
+  if (headHits.length > 0) return headHits;
   const zoneHits = pick(["project", "today", "weekly", "day-column", "tray-zone"]);
   if (zoneHits.length > 0) return zoneHits;
   return hits;
@@ -1109,7 +1111,10 @@ function App() {
     let patch = null;
     let label = "";
 
-    if (dst.type === "day-column") {
+    if (dst.type === "day-header") {
+      patch = { scheduledDate: dst.date, dueDate: dst.date, today: false, thisWeek: false, parentId: null };
+      label = `${dst.label}の終日`;
+    } else if (dst.type === "day-column") {
       patch = { scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "" };
       label = dst.date === tKey ? "今日" : dst.label;
     } else if (dst.type === "today") {
@@ -1429,6 +1434,16 @@ function App() {
       // 本文から持ってきた場合は、本文の持ち物（ページ・段組み）を外す
       upsertTask({ id: src.id, scheduledDate: dst.date, today: false, thisWeek: false, parentId: null, category: "", project: "", ...OUT_OF_PAGE });
       setToast(dst.date === tKey ? "今日に配置しました" : `${dst.label}に配置しました`);
+      return;
+    }
+
+    // Task → 日付のヘッダー：その日の「終日」の帯にする
+    if (src.type === "task" && dst.type === "day-header") {
+      upsertTask({
+        id: src.id, scheduledDate: dst.date, dueDate: dst.date,
+        today: false, thisWeek: false, parentId: null, ...OUT_OF_PAGE,
+      });
+      setToast(`${dst.label}の終日にしました（帯の端をドラッグで日をまたげます）`);
       return;
     }
 
@@ -7186,6 +7201,79 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
 
 const DAY_LABELS = ["🌙月", "🔥火", "🌊水", "🌳木", "🪙金", "🪐土", "☀️日"];
 
+
+// 日をまたぐ帯。端をつまんで左右に伸ばすと、始まりと締め切りが動く。
+// 列の幅は帯が入っているグリッドから測る（曜日の列と同じ割り付け）。
+function SpanBar({ bar, span, leftRound, rightRound, tone, dayKeys, colOffset, cols, onChange }) {
+  const ref = useRef(null);
+  const editable = bar.kind === "due" && !!bar.taskId && !!onChange;
+
+  function grab(edge, e) {
+    if (!editable) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const grid = ref.current?.parentElement;
+    if (!grid) return;
+    const rect = grid.getBoundingClientRect();
+    const colAt = (x) => {
+      const n = Math.floor(((x - rect.left) / rect.width) * cols);
+      return Math.max(0, Math.min(cols - 1, n)) + colOffset;
+    };
+    const move = (ev) => {
+      const col = colAt(ev.clientX);
+      // 最後の列は土日をまとめているので、終わりを伸ばすときは日曜まで
+      const key = edge === "end" && col >= 5 ? dayKeys[6] : dayKeys[Math.min(col, dayKeys.length - 1)];
+      if (key) onChange(bar.taskId, edge, key);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+
+  return (
+    <div
+      ref={ref}
+      data-span-bar={bar.taskId || bar.id}
+      style={{ gridColumn: `${bar.gridStart} / span ${span}` }}
+      title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
+      className={classNames(
+        "group/bar relative flex h-6 items-center overflow-hidden px-2.5 text-[11px] font-medium leading-none",
+        leftRound ? "rounded-l-none" : "rounded-l",
+        rightRound ? "rounded-r-none" : "rounded-r",
+        bar.isOverdue ? "bg-red-500/25 text-red-200" : tone,
+      )}
+    >
+      {editable && (
+        <span
+          data-span-grab="start"
+          onPointerDown={(e) => grab("start", e)}
+          title="ドラッグで始まりの日を変える"
+          className="absolute inset-y-0 left-0 flex w-2.5 cursor-ew-resize items-center justify-center rounded-l bg-white/0 text-[8px] leading-none opacity-0 transition group-hover/bar:bg-white/20 group-hover/bar:opacity-100 hover:bg-white/35"
+        >
+          ‖
+        </span>
+      )}
+      <span className="truncate">{bar.label}</span>
+      {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-", "/")}→` : `〆${bar.dueDate.slice(5).replace("-", "/")}`}</span>}
+      {bar.kind === "repeat" && bar.rangeEndDay != null && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
+      {bar.kind === "repeat" && bar.rangeEndDay == null && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
+      {editable && (
+        <span
+          data-span-grab="end"
+          onPointerDown={(e) => grab("end", e)}
+          title="ドラッグで終わりの日を変える"
+          className="absolute inset-y-0 right-0 flex w-2.5 cursor-ew-resize items-center justify-center rounded-r bg-white/0 text-[8px] leading-none opacity-0 transition group-hover/bar:bg-white/20 group-hover/bar:opacity-100 hover:bg-white/35"
+        >
+          ‖
+        </span>
+      )}
+    </div>
+  );
+}
+
 function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, removeTask, addTask, toggleDone, categoryTone, setSelectedTaskId, selectedTaskId, setSelectedProject }) {
   const todayKey = toDateKey(new Date());
   const [weekOffset, setWeekOffset] = useState(0);
@@ -7236,6 +7324,20 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
 
   const navigateMonth = (dir) => setWeekOffset((v) => v + dir);
 
+  // 帯の端をドラッグしたとき。始まりは scheduledDate、終わりは dueDate。
+  // 追い越したら、もう片方を連れていく（逆さまの帯を作らない）。
+  function setSpanEdge(taskId, edge, key) {
+    const t = tasks.find((x) => x.id === taskId);
+    if (!t) return;
+    if (edge === "start") {
+      if (t.scheduledDate === key) return;
+      upsertTask({ id: taskId, scheduledDate: key, dueDate: t.dueDate && t.dueDate < key ? key : t.dueDate });
+    } else {
+      if (t.dueDate === key) return;
+      upsertTask({ id: taskId, dueDate: key, scheduledDate: t.scheduledDate && t.scheduledDate > key ? key : t.scheduledDate });
+    }
+  }
+
   // Builds allBars for any given weekDays array (reused for each week in month view)
   const computeWeekBars = (wDays) => {
     const wKeys = wDays.map(toDateKey);
@@ -7252,7 +7354,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         const isOverdue = t.dueDate < todayKey;
         const extendsLeft = !!(t.scheduledDate && t.scheduledDate < wStart);
         const extendsRight = t.dueDate > wEnd;
-        return { kind: "due", id: `${t.id}-${wStart}`, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsLeft, extendsRight, dueDate: t.dueDate };
+        return { kind: "due", id: `${t.id}-${wStart}`, taskId: t.id, label: t.title, category: t.category || "", startCol, endCol, isOverdue, extendsLeft, extendsRight, dueDate: t.dueDate };
       })
       .filter((b) => b.endCol >= b.startCol);
     const ruleBars = [];
@@ -7291,31 +7393,25 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     return [...dueBars, ...ruleBars];
   };
 
-  const renderBarRow = (bars) => {
+  const renderBarRow = (bars, wDays = weekDays) => {
     if (bars.length === 0) return null;
+    const dayKeys = wDays.map(toDateKey);
     return (
-      <div className="mb-1.5 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
-        {bars.map((bar) => {
-          const span = bar.endCol - bar.startCol + 1;
-          return (
-            <div
-              key={bar.id}
-              style={{ gridColumn: `${bar.startCol + 1} / span ${span}` }}
-              title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
-              className={classNames(
-                "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
-                bar.extendsLeft ? "rounded-l-none" : "rounded-l",
-                bar.extendsRight ? "rounded-r-none" : "rounded-r",
-                bar.isOverdue ? "bg-red-500/25 text-red-200" : categoryTone(bar.category).tag
-              )}
-            >
-              <span className="truncate">{bar.label}</span>
-              {bar.kind === "due" && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
-              {bar.kind === "repeat" && bar.rangeEndDay != null && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
-              {bar.kind === "repeat" && bar.rangeEndDay == null && bar.extendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
-            </div>
-          );
-        })}
+      <div className="mb-2 grid gap-x-1 gap-y-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
+        {bars.map((bar) => (
+          <SpanBar
+            key={bar.id}
+            bar={{ ...bar, gridStart: bar.startCol + 1 }}
+            span={bar.endCol - bar.startCol + 1}
+            leftRound={bar.extendsLeft}
+            rightRound={bar.extendsRight}
+            tone={categoryTone(bar.category).tag}
+            dayKeys={dayKeys}
+            colOffset={0}
+            cols={6}
+            onChange={setSpanEdge}
+          />
+        ))}
       </div>
     );
   };
@@ -7420,7 +7516,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
               return (
                 <div key={wStart} className="border-t border-white/[0.06] pt-1.5">
                   <div className="mb-1 text-[10px] text-neutral-600">{wLabel}</div>
-                  {renderBarRow(wBars)}
+                  {renderBarRow(wBars, wDays)}
                   <div className="grid gap-1" style={{ gridTemplateColumns: "repeat(6, minmax(0, 1fr))" }}>
                     {[0, 1, 2, 3, 4].map((i) => <DayColumn key={i} {...dayColPropsFor(wDays, i, true)} />)}
                     <div className="flex flex-col gap-1">
@@ -7439,6 +7535,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
         // 列グループ [groupStart, groupEnd] に対応するバーをスライスして描画
         const renderBarSlice = (groupStart, groupEnd) => {
           const groupSize = groupEnd - groupStart + 1;
+          const dayKeys = weekDays.map(toDateKey);
           const sliceBars = allBars
             .filter((b) => b.endCol >= groupStart && b.startCol <= groupEnd)
             .map((b) => ({
@@ -7450,31 +7547,21 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
             }));
           if (sliceBars.length === 0) return null;
           return (
-            <div className="mb-1 grid gap-x-1 gap-y-0.5" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
-              {sliceBars.map((bar) => {
-                const span = bar.adjEnd - bar.adjStart + 1;
-                const leftRound = bar.extendsLeft || bar.sliceExtendsLeft;
-                const rightRound = bar.extendsRight || bar.sliceExtendsRight;
-                return (
-                  <div
-                    key={bar.id}
-                    style={{ gridColumn: `${bar.adjStart + 1} / span ${span}` }}
-                    title={bar.kind === "due" ? `${bar.label}（締め切り: ${bar.dueDate}）` : `${bar.label}（リピート）`}
-                    className={classNames(
-                      "flex h-4 items-center overflow-hidden px-1.5 text-[9px] font-medium leading-none",
-                      leftRound ? "rounded-l-none" : "rounded-l",
-                      rightRound ? "rounded-r-none" : "rounded-r",
-                      bar.isOverdue ? "bg-red-500/25 text-red-200" : categoryTone(bar.category).tag
-                    )}
-                  >
-                    <span className="truncate">{bar.label}</span>
-                    {bar.kind === "due" && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-70">{bar.extendsRight ? `〜${bar.dueDate.slice(5).replace("-","/")}→` : `〆${bar.dueDate.slice(5).replace("-","/")}`}</span>}
-                    {bar.kind === "repeat" && bar.rangeEndDay != null && !bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-60">{bar.extendsRight ? `〜${bar.rangeEndDay}日→` : `〜${bar.rangeEndDay}日`}</span>}
-                    {bar.kind === "repeat" && bar.rangeEndDay == null && (bar.extendsRight && !bar.sliceExtendsRight) && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
-                    {bar.sliceExtendsRight && <span className="ml-auto shrink-0 pl-1 opacity-50">→</span>}
-                  </div>
-                );
-              })}
+            <div className="mb-1.5 grid gap-x-1 gap-y-1" style={{ gridTemplateColumns: `repeat(${groupSize}, minmax(0, 1fr))` }}>
+              {sliceBars.map((bar) => (
+                <SpanBar
+                  key={bar.id}
+                  bar={{ ...bar, gridStart: bar.adjStart + 1 }}
+                  span={bar.adjEnd - bar.adjStart + 1}
+                  leftRound={bar.extendsLeft || bar.sliceExtendsLeft}
+                  rightRound={bar.extendsRight || bar.sliceExtendsRight}
+                  tone={categoryTone(bar.category).tag}
+                  dayKeys={dayKeys}
+                  colOffset={groupStart}
+                  cols={groupSize}
+                  onChange={setSpanEdge}
+                />
+              ))}
             </div>
           );
         };
@@ -7779,6 +7866,10 @@ function DayProjectGroup({ g, tone, collapsed, onToggle, childrenOf, categoryTon
 // zoneKey: 同じ日を2か所（7days とブロック）に出すので、置き場の名札を分ける。
 function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = false, tasks, allTasks, childrenOf, newTitle, setNewTitle, onAdd, toggleDone, upsertTask, removeTask, categoryTone, setSelectedTaskId, selectedTaskId, projectRules, flatView, setSelectedProject, zoneKey = "week", addTask }) {
   const { setNodeRef, isOver } = useDroppable({ id: `day-col-${zoneKey}-${dateKey}`, data: { type: "day-column", date: dateKey, label } });
+  // 日付のところに落とすと「終日」の帯になる。列の中に落とすのとは別の置き場。
+  const { setNodeRef: headRef, isOver: headOver } = useDroppable({
+    id: `day-head-${zoneKey}-${dateKey}`, data: { type: "day-header", date: dateKey, label },
+  });
   const [collapsedProj, setCollapsedProj] = useState({});
   const [focusEndId, setFocusEndId] = useState(null);
   const addInputRef = useRef(null);
@@ -7864,10 +7955,20 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
       )}
     >
       {/* 日付ヘッダー（シンプルな下線のみ） */}
-      <div data-daycol-head className={classNames("mb-1 flex items-baseline gap-1.5 border-b px-1 pb-1", headColor)}>
+      <div
+        ref={headRef}
+        data-daycol-head
+        data-day-head={dateKey}
+        className={classNames(
+          "mb-1 flex items-baseline gap-1.5 rounded-t border-b px-1 pb-1 transition",
+          headColor,
+          headOver && "bg-sky-400/20 ring-1 ring-sky-300/50",
+        )}
+      >
         <span className="text-sm font-bold">{label}</span>
         <span className="text-[10px] opacity-60">{date.getMonth() + 1}/{date.getDate()}</span>
-        {isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
+        {headOver && <span className="ml-auto text-[9px] text-sky-100">終日にする</span>}
+        {!headOver && isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
       {/* タスク一覧 */}
