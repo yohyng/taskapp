@@ -165,6 +165,73 @@ const BASE_BLOCK_TYPES = {
 const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
+
+// 手元のボードを組み直すときのひな形。画面にあった構成をそのまま持っている。
+// 中身は [題名, {色・種別など}, [子…]] の3つ組。
+const BOARD_TEMPLATE = {
+  done: "芝浦工大レクチャー資料修正",
+  columns: [
+    ["NOMLAB", "#f472b6", [
+      ["オープンラボ関連", {}, [
+        ["１０月中に企画内容固める"],
+      ]],
+      ["現象風", { type: "toggle", color: "#f87171" }, [
+        ["ケーシング新しいもの出力→ケーブルをなかで一周させて引張対策しておく"],
+      ]],
+      ["現象植物", { type: "toggle", color: "#f87171" }, [
+        ["植物の筐体データ作成 ＋軽い見積もり"],
+      ]],
+      ["空間デザイン概論", { type: "toggle", color: "#f87171" }, [
+        ["本棚UIについて言語化しておく→レコメンド七日身体性七日元々の課題かん、情報の受け取り方の時代性として、リアルの情報の受け取り方が違う。なんでノムラがやるのか、リアル空間でのものとの出会い方。"],
+        ["万博学研究会資料作成"],
+        ["ラボディスプレイの画面作成"],
+      ]],
+      ["Shiki", { color: "#f87171" }, [
+        ["1月末オープンラボに間に合うよう制作依頼"],
+        ["11月に制作発注"],
+      ]],
+    ]],
+    ["NOMURA", "#f472b6", [
+      ["画用紙棚脚つける"],
+      ["NTTアーバンに書籍送付"],
+      ["画用紙棚→調査資料費ラボ運営"],
+      ["経費精算", { type: "toggle", color: "#a78bfa" }, [
+        ["AI経費", {}, [
+          ["Gemini/OpenAI/Claude"],
+        ]],
+        ["旅費経費（販管）"],
+        ["ラボ運営費"],
+        ["デザイナート経費"],
+        ["NOMLABプロト経費"],
+      ]],
+      ["歓びと感動学", { type: "toggle", color: "#a78bfa" }, [
+        ["芝浦工大関連", { type: "toggle" }, [
+          ["その後確約やしたら先方連絡"],
+          ["中村さんのやつやらなきゃ→青野さん相談"],
+          ["トークイベント資料青野さんインプット"],
+          ["芝浦工大資料修正→青野さんMTG"],
+        ]],
+      ]],
+    ]],
+    ["DESIGNART", "#4ade80", [
+      ["11月1日までにdesignart のデータトライノーム登録"],
+      ["SNS広告入稿 事務局確認16日 ノムラ入稿19日"],
+      ["実行計画修正しておく"],
+    ]],
+    ["PRIVATE", "#60a5fa", [
+      ["自立支援変更→病院引っ越しのため"],
+      ["結婚式関連", {}, [
+        ["会社の結婚のやつ登録する"],
+        ["お祝い検討しておく→改めて誰からもらったか確認する→1万円分お返しする", {}, [
+          ["https://tanp.jp/products/view/42967"],
+        ]],
+      ]],
+      ["市役所8月13日のやつ確認", {}, [
+        ["マイナンバー世帯合併→なつみのマイナンバーもって市役所"],
+      ]],
+    ]],
+  ],
+};
 const BOARD_NAME_KEY = "taskspace-board-name";
 
 const CUSTOM_TYPE_PREFIX = "custom:";
@@ -2966,6 +3033,42 @@ function App() {
     setPendingEditId(made.id);
   }
 
+
+  // 画像にあったボードの構成を、そのまま組み立てて入れる。
+  // いまあるブロックは消さず、新しい行として足す。
+  function insertBoardTemplate() {
+    const rowKey = `row-${uid()}`;
+    const made = [];
+    if (BOARD_TEMPLATE.done) {
+      made.push(normalizeTask({
+        id: uid(), title: BOARD_TEMPLATE.done, category: "", project: "", status: "完了",
+        plain: true, pageId: BOARD_PAGE_ID, blockType: "task",
+      }));
+    }
+    BOARD_TEMPLATE.columns.forEach(([name, color, items], col) => {
+      const head = normalizeTask({
+        id: uid(), title: name, category: "", project: "", status: "未着手", plain: true,
+        pageId: BOARD_PAGE_ID, blockType: "column", rowKey, col,
+        style: { color, size: 13, weight: 700 },
+      });
+      made.push(head);
+      const walk = (list, parentId) => {
+        for (const [title, opt = {}, children] of list) {
+          const node = normalizeTask({
+            id: uid(), title, category: "", project: "", status: "未着手", plain: true,
+            pageId: BOARD_PAGE_ID, blockType: opt.type || "task", rowKey, col, parentId,
+            style: opt.color ? { color: opt.color } : null,
+          });
+          made.push(node);
+          if (children?.length) walk(children, node.id);
+        }
+      };
+      walk(items, null);
+    });
+    addRawBlocks(made);
+    setToast(`ボードに${BOARD_TEMPLATE.columns.length}列・${made.length}件を入れました（Ctrl+Z で取り消せます）`);
+  }
+
   function addWeekRow() {
     const base = getWeekDays(new Date());
     const rowKey = `row-${uid()}`;
@@ -3213,6 +3316,20 @@ function App() {
                     >
                       <Settings2 className="h-3 w-3" /> ブロックの種別を作る
                     </button>
+                  </div>
+
+                  <div className="mb-3 border-t border-white/10 pt-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">ひな形</div>
+                    <button
+                      onClick={() => { insertBoardTemplate(); setShowSettingsPanel(false); }}
+                      className="mb-1 w-full rounded border border-white/10 bg-white/[0.03] px-2 py-1.5 text-left text-xs text-neutral-400 transition hover:bg-white/[0.07]"
+                    >
+                      ボードにいつもの4列を入れる
+                    </button>
+                    <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                      NOMLAB / NOMURA / DESIGNART / PRIVATE を中身ごと足します。いまある
+                      ブロックは消しません。取り消しもできます。
+                    </div>
                   </div>
 
                   <div className="mb-3 border-t border-white/10 pt-3">
