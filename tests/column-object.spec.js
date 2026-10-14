@@ -15,7 +15,7 @@ const byTitle = async (page, s) => (await storedTasks(page)).find((x) => x.title
 const row = (page, s) => page.locator("[data-board] [data-task-id]").filter({ hasText: s }).first();
 const openMenu = async (page, s) => {
   await row(page, s).hover();
-  await row(page, s).locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+  await row(page, s).locator('span[data-block-grip]').click();
 };
 
 test.describe("列は独立した持ち物", () => {

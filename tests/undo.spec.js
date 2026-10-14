@@ -22,7 +22,7 @@ test.describe("Ctrl+Z で戻せる", () => {
     await seed({ tasks: [t("a", "消される行"), t("b", "のこる行")] });
 
     await row(page, "消される行").hover();
-    await row(page, "消される行").locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+    await row(page, "消される行").locator('span[data-block-grip]').click();
     await page.locator("[data-block-menu]").getByText("削除", { exact: true }).click();
     await expect.poll(async () => await byTitle(page, "消される行")).toBeUndefined();
 
@@ -38,7 +38,7 @@ test.describe("Ctrl+Z で戻せる", () => {
       ],
     });
     await row(page, "NOMLAB").hover();
-    await row(page, "NOMLAB").locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+    await row(page, "NOMLAB").locator('span[data-block-grip]').click();
     await page.locator("[data-block-menu]").getByText("この列を消す", { exact: false }).click();
     await expect.poll(async () => await byTitle(page, "NOMLAB")).toBeUndefined();
 
@@ -51,7 +51,7 @@ test.describe("Ctrl+Z で戻せる", () => {
     await seed({ tasks: [t("c1", "NOMLAB", { blockType: "column", rowKey: "r1", col: 0 })] });
 
     await row(page, "NOMLAB").hover();
-    await row(page, "NOMLAB").locator('span[title="ドラッグで移動／クリックでメニュー"]').click();
+    await row(page, "NOMLAB").locator('span[data-block-grip]').click();
     await page.locator("[data-block-menu]").getByTitle("大きく").click();
     await expect.poll(async () => (await byTitle(page, "NOMLAB")).style?.size).toBeTruthy();
 

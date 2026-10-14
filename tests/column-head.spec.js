@@ -48,3 +48,60 @@ test.describe("列の見出し", () => {
     expect(order).toEqual(["head", "x1", "x2"]);
   });
 });
+
+test.describe("列は動かさない", () => {
+  const cols = {
+    tasks: [
+      b("h0", "ひだりの列", { col: 0, blockType: "column" }),
+      b("a", "ひだりの中身", { col: 0 }),
+      b("h1", "みぎの列", { col: 1, blockType: "column" }),
+    ],
+  };
+  const stored = async (page) => (await (await import("./helpers.js")).storedTasks(page));
+  const row = (page, title) => page.locator("[data-task-id]").filter({ hasText: title }).first();
+
+  test("列の頭はドラッグで掴めない", async ({ page, seed }) => {
+    await seed(cols);
+    const head = row(page, "ひだりの列");
+    await expect(head).toBeVisible();
+    // 掴めるブロックには dnd-kit が触り口を付ける。列の頭には付かない。
+    expect(await head.getAttribute("role")).toBeNull();
+    const content = row(page, "ひだりの中身");
+    expect(await content.getAttribute("role")).toBe("button");
+  });
+
+  test("⠿ はメニュー専用になる", async ({ page, seed }) => {
+    await seed(cols);
+    const head = row(page, "ひだりの列");
+    await head.hover();
+    const grip = head.locator("span[data-block-grip]");
+    await expect(grip).toBeVisible();
+    await expect(grip).toHaveAttribute("title", "クリックでメニュー（列は動かせません）");
+    await grip.click();
+    await expect(head.getByRole("button", { name: "複製" })).toBeVisible();
+  });
+
+  test("列の名前のところで改行しても、列が増えない", async ({ page, seed }) => {
+    await seed(cols);
+    await row(page, "ひだりの列").locator("div.cursor-text, div.cursor-pointer").first().click();
+    await page.keyboard.press("End");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("あたらしい中身");
+    await page.keyboard.press("Escape");
+
+    await expect.poll(async () => (await stored(page)).filter((t) => t.blockType === "column").length).toBe(2);
+    const made = (await stored(page)).find((t) => t.title === "あたらしい中身");
+    expect(made.blockType).toBe("text");
+    expect(made.col).toBe(0); // 同じ列に入る
+  });
+
+  test("空にして改行しても、列のままでいる", async ({ page, seed }) => {
+    await seed(cols);
+    await row(page, "ひだりの列").locator("div.cursor-text, div.cursor-pointer").first().click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("Backspace");
+    await page.keyboard.press("Enter");
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => (await stored(page)).find((t) => t.id === "h0")?.blockType).toBe("column");
+  });
+});

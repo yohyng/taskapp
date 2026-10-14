@@ -4748,7 +4748,10 @@ function useTaskBlock({
   const refocusCard = useRefocusAfterEdit(editing, cardRef);
 
   const isSelected = !!selectedIds?.has(task.id);
-  const dragOff = dragDisabled || focusPickMode;
+  // 列の頭（＋列で作ったもの）は置きっぱなしにする。
+  // うっかり掴んで動くと、せっかく組んだ段組みが崩れてしまう。
+  const isColumnHead = task.blockType === "column";
+  const dragOff = dragDisabled || focusPickMode || isColumnHead;
 
   const { attributes, listeners, setNodeRef: dragRef, isDragging } = useDraggable({
     id: dragId,
@@ -5006,7 +5009,8 @@ function useTaskBlock({
       if (notionMode) {
         // 空のリスト項目で Enter → リストを抜けてテキストに戻る
         const kind = blockTypeOf(task, types);
-        if (!normalizeBlockText(draft) && kind !== "text" && kind !== "task") {
+        // 列の頭だけは、空でも別の種別に変えない（列ごと消えてしまうので）
+        if (!normalizeBlockText(draft) && kind !== "text" && kind !== "task" && kind !== "column") {
           slashCtx?.setBlockType?.(task, "text");
           return;
         }
@@ -5567,7 +5571,8 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
   // トグルは閉じている間、子を隠す
   const isCollapsed = task.blockType === "toggle" && collapsedSet?.has(task.id);
   return (
-    <div style={depth > 0 ? { marginLeft: depth * 24 } : undefined}>
+    // 字下げの幅。⠿ の余白（26px）とは別に付くので、24px だと寄りすぎる。
+    <div style={depth > 0 ? { marginLeft: depth * 16 } : undefined}>
       <TaskBlock
         task={task}
         listNumber={listNumber}
@@ -5743,7 +5748,9 @@ function BlockArea({
         plain: true,
         pageId: task.pageId,
         parentId: task.parentId || null,
-        blockType: kind === "heading1" || kind === "heading2" || kind === "heading3" || kind === "callout" || kind === "quote" ? "text" : kind,
+        // 見出しの類と列の頭は、改行したら中身（ふつうのテキスト）になる
+        blockType: kind === "heading1" || kind === "heading2" || kind === "heading3"
+          || kind === "callout" || kind === "quote" || kind === "column" ? "text" : kind,
         afterId: task.id,
         silent: true,
         // 段組みの中で改行したら、同じ列に留まる。
@@ -6128,8 +6135,12 @@ function BlockGutter({ block, compact, task, onDuplicate }) {
           if (grabbed.current) return;
           setMenu((v) => !v);
         }}
-        title="ドラッグで移動／クリックでメニュー"
-        className="cursor-grab rounded p-px text-neutral-500 hover:text-neutral-200"
+        data-block-grip
+        title={task.blockType === "column" ? "クリックでメニュー（列は動かせません）" : "ドラッグで移動／クリックでメニュー"}
+        className={classNames(
+          "rounded p-px text-neutral-500 hover:text-neutral-200",
+          task.blockType === "column" ? "cursor-pointer" : "cursor-grab",
+        )}
       >
         <GripVertical className="h-3 w-3" />
       </span>
