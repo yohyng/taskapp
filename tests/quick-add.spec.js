@@ -88,3 +88,63 @@ test.describe("スマホの上の帯", () => {
     expect(new Set(bottoms).size).toBe(1);
   });
 });
+
+test.describe("入力欄の大きさを変える", () => {
+  const grip = (page) => page.locator("[data-quick-add-resize]");
+  const area = (page) => dialog(page).locator("textarea");
+  const h = async (page) => Math.round((await area(page).boundingBox()).height);
+
+  test("下の帯を引っぱると、大きくなる", async ({ page }) => {
+    await open(page);
+    const before = await h(page);
+    const g = await grip(page).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 120, { steps: 8 });
+    await page.mouse.up();
+
+    expect(await h(page)).toBeGreaterThan(before + 80);
+  });
+
+  test("上に引っぱれば小さくなる。小さくしすぎない", async ({ page }) => {
+    await open(page);
+    const g = await grip(page).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y - 400, { steps: 8 });
+    await page.mouse.up();
+
+    const now = await h(page);
+    expect(now).toBeLessThan(96);
+    expect(now).toBeGreaterThanOrEqual(72); // 潰れない
+  });
+
+  test("変えた大きさは、閉じても読み直しても残る", async ({ page }) => {
+    await open(page);
+    const g = await grip(page).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 100, { steps: 8 });
+    await page.mouse.up();
+    const grown = await h(page);
+
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    expect(Math.abs((await h(page)) - grown)).toBeLessThan(4);
+  });
+
+  test("ダブルクリックで元に戻る", async ({ page }) => {
+    await open(page);
+    const g = await grip(page).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2 + 100, { steps: 8 });
+    await page.mouse.up();
+    expect(await h(page)).toBeGreaterThan(150);
+
+    await grip(page).dblclick();
+    expect(await h(page)).toBe(96);
+  });
+});

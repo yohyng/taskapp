@@ -167,6 +167,8 @@ const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
 const KEEP_AWAKE_KEY = "taskspace-keep-awake";
+const QUICK_ADD_HEIGHT_KEY = "taskspace-quick-add-height";
+const QUICK_ADD_HEIGHT = 96;
 const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable-v2";
 // PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
 const PJ_BASIS = 260;
@@ -975,6 +977,13 @@ function App() {
   const [quickAddTitle, setQuickAddTitle] = useState("");
   // 追加したタスクをいつに置くか。既定は今日。
   const [quickAddWhen, setQuickAddWhen] = useState(() => toDateKey(new Date()));
+  // 入力欄の高さ。つまんで変えたら覚えておく。
+  const [quickAddHeight, setQuickAddHeight] = useState(() => {
+    try {
+      const saved = Number(localStorage.getItem(QUICK_ADD_HEIGHT_KEY));
+      return saved >= 72 ? saved : QUICK_ADD_HEIGHT;
+    } catch { return QUICK_ADD_HEIGHT; }
+  });
   const [showMovePanel, setShowMovePanel] = useState(false);
   const [zoom, setZoom] = useState(() => parseFloat(localStorage.getItem("taskspace-zoom") || "1"));
   const [fontSize, setFontSize] = useState(() => parseFloat(localStorage.getItem("taskspace-fontsize") || "1.2"));
@@ -4085,8 +4094,8 @@ function App() {
 
               <textarea
                 autoFocus
-                rows={3}
                 value={quickAddTitle}
+                style={{ height: quickAddHeight }}
                 onChange={(e) => setQuickAddTitle(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); }
@@ -4096,6 +4105,39 @@ function App() {
                 placeholder="やること（Enter で追加・Shift+Enter で改行）"
                 className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text placeholder-neutral-600 outline-none focus:border-emerald-400/50"
               />
+              {/* 下の帯をつかんで、入力欄の高さを変える。指でも動かせるように
+                  ブラウザ標準のつまみではなく自前で持つ。 */}
+              <div
+                data-quick-add-resize
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  const from = e.clientY;
+                  const base = quickAddHeight;
+                  const max = Math.max(160, window.innerHeight * 0.6);
+                  const move = (ev) => {
+                    const next = Math.round(Math.min(max, Math.max(72, base + (ev.clientY - from))));
+                    setQuickAddHeight(next);
+                  };
+                  const up = () => {
+                    window.removeEventListener("pointermove", move);
+                    window.removeEventListener("pointerup", up);
+                    setQuickAddHeight((h) => {
+                      try { localStorage.setItem(QUICK_ADD_HEIGHT_KEY, String(h)); } catch { /* 覚えられなくても動く */ }
+                      return h;
+                    });
+                  };
+                  window.addEventListener("pointermove", move);
+                  window.addEventListener("pointerup", up);
+                }}
+                onDoubleClick={() => {
+                  setQuickAddHeight(QUICK_ADD_HEIGHT);
+                  try { localStorage.setItem(QUICK_ADD_HEIGHT_KEY, String(QUICK_ADD_HEIGHT)); } catch { /* noop */ }
+                }}
+                title="ドラッグで大きさを変える／ダブルクリックで戻す"
+                className="mx-auto -mt-1 flex h-5 w-24 cursor-ns-resize touch-none items-center justify-center"
+              >
+                <span className="h-1 w-10 rounded-full bg-white/20" />
+              </div>
 
               <div className="mt-3 flex flex-wrap gap-1.5">
                 {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
