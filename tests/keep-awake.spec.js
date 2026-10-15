@@ -74,3 +74,113 @@ test.describe("画面を保たせる設定", () => {
     await expect(pip(page)).toContainText("できなかった");
   });
 });
+
+// 小窓そのものは、動かしている機械が対応していないと試せない。
+// ただし「映像が始まらずに断られる」という失敗は、本物のキャンバスで再現できる。
+test.describe("小窓に出す映像", () => {
+  test("映像が始まってから小窓を頼む", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__pipCalls = [];
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      // 本物の video / captureStream のまま、小窓に上げるところだけ差し替える
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        window.__pipCalls.push({ w: this.videoWidth, h: this.videoHeight, paused: this.paused });
+        Object.defineProperty(document, "pictureInPictureElement", { configurable: true, value: this });
+      };
+      document.exitPictureInPicture = async () => {};
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+
+    // 中身のある映像を渡せていること（真っ白なまま頼むと実機では断られる）
+    const calls = await page.evaluate(() => window.__pipCalls);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].w).toBeGreaterThan(0);
+    expect(calls[0].h).toBeGreaterThan(0);
+    expect(calls[0].paused).toBe(false);
+  });
+
+  test("断られたら、その理由をそのまま出す", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async () => {
+        throw new Error("Document not focused");
+      };
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    await expect(pip(page)).toContainText("できなかった");
+    await expect(page.getByText("出せませんでした：Document not focused")).toBeVisible();
+  });
+});
+
+test.describe("入れたままにしておける", () => {
+  test("スリープ防止は、読み直しても入ったまま", async ({ page }) => {
+    await boot(page, [fakeWakeLock, true], [fakePip, true]);
+    await wake(page).click();
+    await expect(wake(page)).toContainText("ON");
+
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await expect(wake(page)).toContainText("ON");
+  });
+
+  test("切ったら、読み直しても切れたまま", async ({ page }) => {
+    await boot(page, [fakeWakeLock, true], [fakePip, true]);
+    await wake(page).click();
+    await wake(page).click();
+    await expect(wake(page)).toContainText("OFF");
+
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await expect(wake(page)).toContainText("OFF");
+  });
+
+  test("読み直したあと、画面を保つのを自分で取り直す", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__wakeRequests = 0;
+      Object.defineProperty(navigator, "wakeLock", {
+        configurable: true,
+        value: { request: async () => { window.__wakeRequests++; return { release: async () => {}, addEventListener: () => {} }; } },
+      });
+      localStorage.setItem("taskspace-keep-awake", "1");
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    // 設定を開かなくても、読み込んだ時点で取りにいく
+    await expect.poll(() => page.evaluate(() => window.__wakeRequests)).toBeGreaterThan(0);
+  });
+});
+
+test.describe("設定を閉じても続く", () => {
+  test("小窓を出したまま設定を閉じても、消えない", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__exits = 0;
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        Object.defineProperty(document, "pictureInPictureElement", { configurable: true, value: this });
+      };
+      document.exitPictureInPicture = async () => { window.__exits++; };
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+
+    await openSettings(page);                     // パネルを閉じる
+    await expect(pip(page)).toHaveCount(0);
+    await openSettings(page);                     // 開き直す
+    await expect(pip(page)).toContainText("ON");  // 出たまま
+    expect(await page.evaluate(() => window.__exits)).toBe(0);
+  });
+});

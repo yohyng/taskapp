@@ -166,6 +166,7 @@ const BASE_BLOCK_TYPES = {
 const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
+const KEEP_AWAKE_KEY = "taskspace-keep-awake";
 // PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
 const PJ_BASIS = 260;
 const PJ_MIN = 220;
@@ -3104,6 +3105,11 @@ function App() {
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
+  // 画面を保つ設定。パネルを閉じても効いたままにしたいので、ここで持つ。
+  const keepScreen = useKeepScreen(
+    todayTasks.filter((t) => t.status !== "完了").length,
+  );
+
   const [typeEditor, setTypeEditor] = useState(false);
   // Supabase に列が無くて、この端末にしか残らない項目
   const missingNoticeRef = useRef(false);
@@ -3408,7 +3414,7 @@ function App() {
                     </div>
                   </div>
 
-                  <KeepAwakeSetting todayLeft={todayTasks.filter((t) => t.status !== "完了").length} />
+                  <KeepAwakeSetting keep={keepScreen} />
 
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">ひな形</div>
@@ -8693,11 +8699,14 @@ function KeepAwakeButton() {
 //  1) Wake Lock：見ているあいだ画面を消させない。タブを離れると外れる。
 //  2) Picture in Picture：小窓を出す。ほかの画面に移っても残るので、
 //     Wake Lock が効かない機械（タブレットなど）はこちらが頼り。
-function KeepAwakeSetting({ todayLeft = 0 }) {
-  const [awake, setAwake] = useState(false);
+function useKeepScreen(todayLeft = 0) {
+  // 入れたままにしておきたい設定なので覚える。読み直しても効いたままにする。
+  const [awake, setAwake] = useState(() => {
+    try { return localStorage.getItem(KEEP_AWAKE_KEY) === "1"; } catch { return false; }
+  });
   const [awakeFailed, setAwakeFailed] = useState(false);
   const [pip, setPip] = useState(false);
-  const [pipFailed, setPipFailed] = useState(false);
+  const [pipFailed, setPipFailed] = useState("");
   const sentinelRef = useRef(null);
   const videoRef = useRef(null);
   const rafRef = useRef(null);
@@ -8726,18 +8735,21 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
     }
   }, [flavor]);
 
-  // Wake Lock はタブが背面に回ると自動解放されるので、戻ってきたら取り直す
+  // Wake Lock はタブが背面に回ると自動解放される。戻ってきたら取り直す。
+  // 読み込み直後も同じ道を通るので、覚えてある設定がそのまま効く。
   useEffect(() => {
-    if (!awake) return;
-    async function reacquire() {
-      if (document.visibilityState !== "visible" || sentinelRef.current) return;
+    if (!awake || !hasWakeLock) return;
+    let alive = true;
+    async function acquire() {
+      if (!alive || document.visibilityState !== "visible" || sentinelRef.current) return;
       try {
         sentinelRef.current = await navigator.wakeLock.request("screen");
         sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-      } catch { /* 取れなければ諦める */ }
+      } catch { /* 取れなければ諦める。入／切の表示はそのまま */ }
     }
-    document.addEventListener("visibilitychange", reacquire);
-    return () => document.removeEventListener("visibilitychange", reacquire);
+    acquire();
+    document.addEventListener("visibilitychange", acquire);
+    return () => { alive = false; document.removeEventListener("visibilitychange", acquire); };
   }, [awake]);
 
   useEffect(() => () => {
@@ -8745,12 +8757,17 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
     releasePip();
   }, [releasePip]);
 
+  function remember(on) {
+    try { localStorage.setItem(KEEP_AWAKE_KEY, on ? "1" : "0"); } catch { /* 覚えられなくても動く */ }
+  }
+
   async function startAwake() {
     setAwakeFailed(false);
     try {
       sentinelRef.current = await navigator.wakeLock.request("screen");
       sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
       setAwake(true);
+      remember(true);
     } catch {
       setAwakeFailed(true);
     }
@@ -8760,10 +8777,11 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
     try { await sentinelRef.current?.release(); } catch { /* noop */ }
     sentinelRef.current = null;
     setAwake(false);
+    remember(false);
   }
 
   async function startPip() {
-    setPipFailed(false);
+    setPipFailed("");
     const canvas = document.createElement("canvas");
     canvas.width = 320;
     canvas.height = 180;
@@ -8786,20 +8804,37 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
       ctx.fillText("Task Space", 160, 160);
       rafRef.current = requestAnimationFrame(draw);
     }
+    // 1枚目を先に描いてから流し始める。真っ白なまま小窓に出すと、
+    // 中身がまだ無いと言われて断られる。
     draw();
 
     const video = document.createElement("video");
-    video.srcObject = canvas.captureStream(1);
+    // 毎秒1枚だと最初の1枚が来るまで待たされ、その間に断られることがある
+    video.srcObject = canvas.captureStream(30);
     video.muted = true;
+    video.autoplay = true;
     video.playsInline = true;
     video.setAttribute("playsinline", "");
-    // DOM に載っていない video は PiP に上げられない機械がある
-    video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;";
+    // 画面の外に置く。透明にすると「見えない映像」として断る機械がある。
+    video.style.cssText = "position:fixed;left:-9999px;top:0;width:320px;height:180px;";
     document.body.appendChild(video);
     videoRef.current = video;
 
     try {
+      // 押した勢い（ユーザー操作）が残っているうちに再生を始める
       await video.play();
+      // 中身の大きさが分かるまで待つ。分からないうちは小窓に出せない。
+      if (!video.videoWidth) {
+        await new Promise((resolve, reject) => {
+          const ok = () => { clearTimeout(timer); resolve(); };
+          const timer = setTimeout(() => {
+            video.removeEventListener("loadedmetadata", ok);
+            reject(new Error("映像が始まりませんでした"));
+          }, 3000);
+          video.addEventListener("loadedmetadata", ok, { once: true });
+        });
+      }
+
       if (flavor === "webkit") {
         video.webkitSetPresentationMode("picture-in-picture");
         video.addEventListener("webkitpresentationmodechanged", () => {
@@ -8810,9 +8845,10 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
         video.addEventListener("leavepictureinpicture", () => { releasePip(); setPip(false); }, { once: true });
       }
       setPip(true);
-    } catch {
+    } catch (e) {
       releasePip();
-      setPipFailed(true);
+      // 何が起きたか出さないと、直しようがない
+      setPipFailed(e?.message || String(e) || "理由は分かりませんでした");
     }
   }
 
@@ -8820,6 +8856,14 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
     releasePip();
     setPip(false);
   }
+
+  return { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, flavor };
+}
+
+// 設定パネルの中の見た目。状態は App が持っているので、
+// パネルを閉じても小窓やスリープ防止は切れない。
+function KeepAwakeSetting({ keep }) {
+  const { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, flavor } = keep;
 
   const line = (key, label, on, failed, onClick, hint) => (
     <>
@@ -8836,7 +8880,9 @@ function KeepAwakeSetting({ todayLeft = 0 }) {
         <span className="flex items-center gap-1.5"><Airplay className="h-3 w-3 shrink-0" /> {label}</span>
         <span className="shrink-0 text-[10px]">{failed ? "できなかった" : on ? "ON" : "OFF"}</span>
       </button>
-      <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">{hint}</div>
+      <div className={classNames("mb-2 text-[10px] leading-relaxed", failed ? "text-red-300/80" : "text-neutral-600")}>
+        {failed && typeof failed === "string" ? `出せませんでした：${failed}` : hint}
+      </div>
     </>
   );
 
