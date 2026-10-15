@@ -8556,145 +8556,6 @@ function pipFlavor() {
   return null;
 }
 
-function KeepAwakeButton() {
-  const [active, setActive] = useState(false);
-  const [failed, setFailed] = useState(false);
-  const sentinelRef = useRef(null);
-  const videoRef = useRef(null);
-  const rafRef = useRef(null);
-  const flavor = useMemo(pipFlavor, []);
-  const supported = hasWakeLock || !!flavor;
-
-  const releasePip = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    const v = videoRef.current;
-    if (v) {
-      try {
-        if (flavor === "webkit" && v.webkitPresentationMode === "picture-in-picture") {
-          v.webkitSetPresentationMode("inline");
-        } else if (document.pictureInPictureElement === v) {
-          document.exitPictureInPicture();
-        }
-      } catch { /* すでに閉じている */ }
-      v.pause();
-      v.remove();
-      videoRef.current = null;
-    }
-  }, [flavor]);
-
-  // Wake Lock はタブが背面に回ると自動解放されるので、復帰時に取り直す
-  useEffect(() => {
-    if (!active || !hasWakeLock) return;
-    async function reacquire() {
-      if (document.visibilityState !== "visible" || sentinelRef.current) return;
-      try {
-        sentinelRef.current = await navigator.wakeLock.request("screen");
-        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-      } catch { /* 取得できなければ諦める */ }
-    }
-    document.addEventListener("visibilitychange", reacquire);
-    return () => document.removeEventListener("visibilitychange", reacquire);
-  }, [active]);
-
-  useEffect(() => () => {
-    sentinelRef.current?.release().catch(() => {});
-    releasePip();
-  }, [releasePip]);
-
-  async function startPipFallback() {
-    const canvas = document.createElement("canvas");
-    canvas.width = 320;
-    canvas.height = 180;
-    const ctx = canvas.getContext("2d");
-    function draw() {
-      const now = new Date();
-      const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
-        .map((n) => String(n).padStart(2, "0")).join(":");
-      ctx.fillStyle = "#0a0a0a";
-      ctx.fillRect(0, 0, 320, 180);
-      ctx.fillStyle = "#e5e5e5";
-      ctx.font = "bold 56px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(t, 160, 80);
-      ctx.fillStyle = "#525252";
-      ctx.font = "14px sans-serif";
-      ctx.fillText("Task Space", 160, 148);
-      rafRef.current = requestAnimationFrame(draw);
-    }
-    draw();
-
-    const video = document.createElement("video");
-    video.srcObject = canvas.captureStream(1);
-    video.muted = true;
-    video.playsInline = true;
-    video.setAttribute("playsinline", "");
-    // iOS は DOM に載っていない video を PiP に上げられない
-    video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;";
-    document.body.appendChild(video);
-    videoRef.current = video;
-
-    await video.play();
-    if (flavor === "webkit") {
-      video.webkitSetPresentationMode("picture-in-picture");
-      video.addEventListener("webkitpresentationmodechanged", () => {
-        if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setActive(false); }
-      });
-    } else {
-      await video.requestPictureInPicture();
-      video.addEventListener("leavepictureinpicture", () => { releasePip(); setActive(false); }, { once: true });
-    }
-  }
-
-  async function start() {
-    setFailed(false);
-    if (hasWakeLock) {
-      try {
-        sentinelRef.current = await navigator.wakeLock.request("screen");
-        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-        setActive(true);
-        return;
-      } catch { /* Wake Lock が拒否されたら PiP を試す */ }
-    }
-    if (!flavor) { setFailed(true); return; }
-    try {
-      await startPipFallback();
-      setActive(true);
-    } catch {
-      releasePip();
-      setFailed(true);
-    }
-  }
-
-  async function stop() {
-    try { await sentinelRef.current?.release(); } catch { /* noop */ }
-    sentinelRef.current = null;
-    releasePip();
-    setActive(false);
-  }
-
-  if (!supported) return null;
-
-  return (
-    <button
-      onClick={active ? stop : start}
-      title={
-        failed ? "スリープ防止を開始できませんでした"
-        : active ? "スリープ防止：ON（クリックで解除）"
-        : "スリープ防止：OFF（クリックで開始）"
-      }
-      className={classNames(
-        "rounded-md border px-2 py-1.5 text-xs transition flex items-center gap-1",
-        failed ? "border-red-400/40 bg-red-400/10 text-red-300"
-        : active ? "border-sky-400/40 bg-sky-400/10 text-sky-300"
-        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]"
-      )}
-    >
-      <Airplay className="h-3.5 w-3.5" />
-    </button>
-  );
-}
-
 // 画面を保たせる設定。やり方は2つあり、別々に入／切できる。
 //  1) Wake Lock：見ているあいだ画面を消させない。タブを離れると外れる。
 //  2) Picture in Picture：小窓を出す。ほかの画面に移っても残るので、
@@ -8780,8 +8641,11 @@ function useKeepScreen(todayLeft = 0) {
     remember(false);
   }
 
-  async function startPip() {
-    setPipFailed("");
+  // 小窓は「押した直後」でないと開けない。await をひとつでも挟むと
+  // その資格が切れて "not triggered by a user activation" で断られる。
+  // そこで映像は先に作って流しておき、押した瞬間は頼むだけにする。
+  const prepare = useCallback(() => {
+    if (videoRef.current || !flavor) return videoRef.current;
     const canvas = document.createElement("canvas");
     canvas.width = 320;
     canvas.height = 180;
@@ -8804,66 +8668,90 @@ function useKeepScreen(todayLeft = 0) {
       ctx.fillText("Task Space", 160, 160);
       rafRef.current = requestAnimationFrame(draw);
     }
-    // 1枚目を先に描いてから流し始める。真っ白なまま小窓に出すと、
-    // 中身がまだ無いと言われて断られる。
-    draw();
+    draw(); // 1枚描いてから流す。空のまま渡すと中身が無いと断られる
 
     const video = document.createElement("video");
-    // 毎秒1枚だと最初の1枚が来るまで待たされ、その間に断られることがある
     video.srcObject = canvas.captureStream(30);
     video.muted = true;
     video.autoplay = true;
     video.playsInline = true;
     video.setAttribute("playsinline", "");
-    // 画面の外に置く。透明にすると「見えない映像」として断る機械がある。
+    // 画面の外に置く。透明にすると「見えない映像」として断る機械がある
     video.style.cssText = "position:fixed;left:-9999px;top:0;width:320px;height:180px;";
     document.body.appendChild(video);
     videoRef.current = video;
+    video.play().catch(() => { /* 押したときに取り直す */ });
+    return video;
+  }, [flavor]);
+
+  function watchLeaving(video) {
+    if (flavor === "webkit") {
+      video.addEventListener("webkitpresentationmodechanged", () => {
+        if (video.webkitPresentationMode !== "picture-in-picture") setPip(false);
+      });
+    } else {
+      video.addEventListener("leavepictureinpicture", () => setPip(false), { once: true });
+    }
+  }
+
+  // 押した瞬間に呼ぶ。await を挟まない道を必ず通す。
+  function startPip() {
+    setPipFailed("");
+    const video = prepare();
+    if (!video) { setPipFailed("この機械では小窓を出せません"); return; }
+
+    const fail = (e) => {
+      const msg = e?.message || String(e) || "理由は分かりませんでした";
+      setPipFailed(msg);
+    };
 
     try {
-      // 押した勢い（ユーザー操作）が残っているうちに再生を始める
-      await video.play();
-      // 中身の大きさが分かるまで待つ。分からないうちは小窓に出せない。
-      if (!video.videoWidth) {
-        await new Promise((resolve, reject) => {
-          const ok = () => { clearTimeout(timer); resolve(); };
-          const timer = setTimeout(() => {
-            video.removeEventListener("loadedmetadata", ok);
-            reject(new Error("映像が始まりませんでした"));
-          }, 3000);
-          video.addEventListener("loadedmetadata", ok, { once: true });
-        });
-      }
-
       if (flavor === "webkit") {
+        video.play().catch(() => {});
         video.webkitSetPresentationMode("picture-in-picture");
-        video.addEventListener("webkitpresentationmodechanged", () => {
-          if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setPip(false); }
-        });
-      } else {
-        await video.requestPictureInPicture();
-        video.addEventListener("leavepictureinpicture", () => { releasePip(); setPip(false); }, { once: true });
+        watchLeaving(video);
+        setPip(true);
+        return;
       }
-      setPip(true);
+      // ここで await しない。資格を持ったまま頼む。
+      const req = video.requestPictureInPicture();
+      watchLeaving(video);
+      Promise.resolve(req).then(() => setPip(true)).catch((e) => {
+        // 中身がまだ無いときは、整ってからもう一度だけ試す
+        if (!video.videoWidth) {
+          video.addEventListener("loadedmetadata", () => {
+            video.requestPictureInPicture().then(() => setPip(true)).catch(fail);
+          }, { once: true });
+          return;
+        }
+        fail(e);
+      });
     } catch (e) {
-      releasePip();
-      // 何が起きたか出さないと、直しようがない
-      setPipFailed(e?.message || String(e) || "理由は分かりませんでした");
+      fail(e);
     }
   }
 
   function stopPip() {
-    releasePip();
+    const v = videoRef.current;
+    try {
+      if (flavor === "webkit" && v?.webkitPresentationMode === "picture-in-picture") {
+        v.webkitSetPresentationMode("inline");
+      } else if (document.pictureInPictureElement === v) {
+        document.exitPictureInPicture();
+      }
+    } catch { /* すでに閉じている */ }
     setPip(false);
   }
 
-  return { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, flavor };
+  return { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, prepare, flavor };
 }
 
 // 設定パネルの中の見た目。状態は App が持っているので、
 // パネルを閉じても小窓やスリープ防止は切れない。
 function KeepAwakeSetting({ keep }) {
-  const { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, flavor } = keep;
+  const { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, prepare, flavor } = keep;
+  // 開いた時点で映像を用意しておく。押してから作ると間に合わない。
+  useEffect(() => { prepare(); }, [prepare]);
 
   const line = (key, label, on, failed, onClick, hint) => (
     <>

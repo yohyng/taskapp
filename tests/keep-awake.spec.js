@@ -184,3 +184,49 @@ test.describe("設定を閉じても続く", () => {
     expect(await page.evaluate(() => window.__exits)).toBe(0);
   });
 });
+
+test.describe("押した勢いが切れないこと", () => {
+  // 小窓は「押した直後」でないと開けない。await を挟むと資格が切れて
+  // "not triggered by a user activation" で断られる。
+  test("頼むときに、まだ操作直後とみなされている", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.__activeAtRequest = null;
+      window.__sameTask = null;
+      // クリックと同じ回のうちだけ立っている旗。次の回には倒れる。
+      window.addEventListener("click", () => {
+        window.__inClickTask = true;
+        setTimeout(() => { window.__inClickTask = false; }, 0);
+      }, true);
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        // 実機が見ているのはここ。false だと user activation 切れで断られる。
+        window.__activeAtRequest = navigator.userActivation?.isActive ?? null;
+        window.__sameTask = !!window.__inClickTask;
+        Object.defineProperty(document, "pictureInPictureElement", { configurable: true, value: this });
+      };
+      document.exitPictureInPicture = async () => {};
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+
+    expect(await page.evaluate(() => window.__activeAtRequest)).toBe(true);
+    // 押した回のうちに頼んでいること。間に待ちを挟むと、実機では資格が切れる。
+    expect(await page.evaluate(() => window.__sameTask)).toBe(true);
+  });
+
+  test("映像は、押す前から用意してある", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {};
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    // 設定を開いた時点で、流れている映像がある
+    await expect.poll(() => page.evaluate(() =>
+      [...document.querySelectorAll("video")].some((v) => v.videoWidth > 0))).toBe(true);
+  });
+});
