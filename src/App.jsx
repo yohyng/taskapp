@@ -8644,45 +8644,67 @@ function useKeepScreen(todayLeft = 0) {
   // 小窓は「押した直後」でないと開けない。await をひとつでも挟むと
   // その資格が切れて "not triggered by a user activation" で断られる。
   // そこで映像は先に作って流しておき、押した瞬間は頼むだけにする。
-  const prepare = useCallback(() => {
-    if (videoRef.current || !flavor) return videoRef.current;
-    const canvas = document.createElement("canvas");
-    canvas.width = 320;
-    canvas.height = 180;
-    const ctx = canvas.getContext("2d");
-    function draw() {
-      const now = new Date();
-      const t = [now.getHours(), now.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":");
-      ctx.fillStyle = "#0a0a0a";
-      ctx.fillRect(0, 0, 320, 180);
-      ctx.fillStyle = "#e5e5e5";
-      ctx.font = "bold 64px monospace";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(t, 160, 76);
-      ctx.fillStyle = "#a3a3a3";
-      ctx.font = "16px sans-serif";
-      ctx.fillText(noteRef.current, 160, 132);
-      ctx.fillStyle = "#525252";
-      ctx.font = "12px sans-serif";
-      ctx.fillText("Task Space", 160, 160);
-      rafRef.current = requestAnimationFrame(draw);
-    }
-    draw(); // 1枚描いてから流す。空のまま渡すと中身が無いと断られる
+  const prepare = useCallback((useClip = false) => {
+    if (videoRef.current) return videoRef.current;
 
     const video = document.createElement("video");
-    video.srcObject = canvas.captureStream(30);
     video.muted = true;
     video.autoplay = true;
+    video.loop = true;
     video.playsInline = true;
     video.setAttribute("playsinline", "");
+    video.disablePictureInPicture = false;
     // 画面の外に置く。透明にすると「見えない映像」として断る機械がある
     video.style.cssText = "position:fixed;left:-9999px;top:0;width:320px;height:180px;";
+
+    // Safari は作った映像（MediaStream）を小窓に出せない。
+    // 「この映像は小窓に対応していない」と断られるので、小さな動画を回す。
+    if (useClip || flavor === "webkit") {
+      // 機械によって再生できる形が違う。出せるほうを選ぶ。
+      const mp4 = video.canPlayType('video/mp4; codecs="avc1.42E01E"');
+      video.src = `${import.meta.env.BASE_URL}keep-awake.${mp4 ? "mp4" : "webm"}`;
+      video.dataset.keepAwakeClip = "1";
+    } else {
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 180;
+      const ctx = canvas.getContext("2d");
+      function draw() {
+        const now = new Date();
+        const t = [now.getHours(), now.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":");
+        ctx.fillStyle = "#0a0a0a";
+        ctx.fillRect(0, 0, 320, 180);
+        ctx.fillStyle = "#e5e5e5";
+        ctx.font = "bold 64px monospace";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(t, 160, 76);
+        ctx.fillStyle = "#a3a3a3";
+        ctx.font = "16px sans-serif";
+        ctx.fillText(noteRef.current, 160, 132);
+        ctx.fillStyle = "#525252";
+        ctx.font = "12px sans-serif";
+        ctx.fillText("Task Space", 160, 160);
+        rafRef.current = requestAnimationFrame(draw);
+      }
+      draw(); // 1枚描いてから流す。空のまま渡すと中身が無いと断られる
+      video.srcObject = canvas.captureStream(30);
+    }
+
     document.body.appendChild(video);
     videoRef.current = video;
     video.play().catch(() => { /* 押したときに取り直す */ });
     return video;
   }, [flavor]);
+
+  // 作った映像が断られたときに、小さな動画へ乗り換える
+  function swapToClip() {
+    cancelAnimationFrame(rafRef.current);
+    const old = videoRef.current;
+    if (old) { old.pause(); old.remove(); }
+    videoRef.current = null;
+    return prepare(true);
+  }
 
   function watchLeaving(video) {
     if (flavor === "webkit") {
@@ -8717,14 +8739,14 @@ function useKeepScreen(todayLeft = 0) {
       const req = video.requestPictureInPicture();
       watchLeaving(video);
       Promise.resolve(req).then(() => setPip(true)).catch((e) => {
-        // 中身がまだ無いときは、整ってからもう一度だけ試す
-        if (!video.videoWidth) {
-          video.addEventListener("loadedmetadata", () => {
-            video.requestPictureInPicture().then(() => setPip(true)).catch(fail);
-          }, { once: true });
-          return;
-        }
-        fail(e);
+        // 作った映像を断る機械がある。小さな動画に乗り換えてもう一度。
+        const clip = video.dataset.keepAwakeClip ? video : swapToClip();
+        const ask = () => {
+          clip.play().catch(() => {});
+          clip.requestPictureInPicture().then(() => { watchLeaving(clip); setPip(true); }).catch(() => fail(e));
+        };
+        if (clip.readyState >= 1 && clip.videoWidth) ask();
+        else clip.addEventListener("loadedmetadata", ask, { once: true });
       });
     } catch (e) {
       fail(e);

@@ -230,3 +230,53 @@ test.describe("押した勢いが切れないこと", () => {
       [...document.querySelectorAll("video")].some((v) => v.videoWidth > 0))).toBe(true);
   });
 });
+
+test.describe("作った映像を断る機械でも出せる", () => {
+  // Safari は canvas から作った映像を小窓に出せず、
+  // 「この映像は小窓に対応していない」と断ってくる。
+  const refuseStream = () => {
+    Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+    window.__pipSources = [];
+    HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+      const isClip = !!this.src && !this.srcObject;
+      window.__pipSources.push(isClip ? "clip" : "stream");
+      if (!isClip) throw new Error("The video element does not support the Picture-in-Picture mode");
+      Object.defineProperty(document, "pictureInPictureElement", { configurable: true, value: this });
+    };
+    document.exitPictureInPicture = async () => {};
+  };
+
+  test("断られたら、小さな動画に乗り換えて出す", async ({ page }) => {
+    await page.addInitScript(refuseStream);
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+    expect(await page.evaluate(() => window.__pipSources)).toEqual(["stream", "clip"]);
+  });
+
+  test("乗り換えた先も駄目なら、理由を出す", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        throw new Error("The video element does not support the Picture-in-Picture mode");
+      };
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    await expect(page.getByText("出せませんでした：The video element does not support", { exact: false })).toBeVisible();
+  });
+
+  test("小さな動画は、どちらの形でも置いてある", async ({ page }) => {
+    for (const name of ["keep-awake.mp4", "keep-awake.webm"]) {
+      const res = await page.request.get(`/${name}`);
+      expect(res.status(), name).toBe(200);
+      expect(Number(res.headers()["content-length"] || 1), name).toBeGreaterThan(500);
+    }
+  });
+});
