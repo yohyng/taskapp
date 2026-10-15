@@ -37,25 +37,25 @@ test.describe("画面を保たせる設定", () => {
   test("設定の中にあり、上の帯には出ていない", async ({ page }) => {
     await expect(page.locator("header [data-keep-awake]")).toHaveCount(0);
     await boot(page, [fakeWakeLock, true], [fakePip, true]);
-    await expect(wake(page)).toContainText("画面を自動でスリープさせない");
+    await expect(wake(page)).toContainText("開いているあいだ、画面を消さない");
     await expect(pip(page)).toContainText("小窓");
   });
 
-  test("小窓は、スリープ防止と別に出せる", async ({ page }) => {
+  test("画面を消さないのは、はじめから入っている", async ({ page }) => {
+    await boot(page, [fakeWakeLock, true], [fakePip, true]);
+    await expect(wake(page)).toContainText("ON");
+    // 小窓のほうは、押すまで出さない
+    await expect(pip(page)).toContainText("OFF");
+  });
+
+  test("小窓は、画面を消さないのとは別に出せる", async ({ page }) => {
     await boot(page, [fakeWakeLock, true], [fakePip, true]);
     await pip(page).click();
     await expect(pip(page)).toContainText("ON");
     // もう片方は触らない
-    await expect(wake(page)).toContainText("OFF");
+    await expect(wake(page)).toContainText("ON");
 
     await pip(page).click();
-    await expect(pip(page)).toContainText("OFF");
-  });
-
-  test("スリープ防止だけでも入れられる", async ({ page }) => {
-    await boot(page, [fakeWakeLock, true], [fakePip, true]);
-    await wake(page).click();
-    await expect(wake(page)).toContainText("ON");
     await expect(pip(page)).toContainText("OFF");
   });
 
@@ -66,10 +66,14 @@ test.describe("画面を保たせる設定", () => {
     await expect(pip(page)).toBeVisible();
   });
 
-  test("出せなかったときは、できなかったと出す", async ({ page }) => {
+  test("保てなかったときは、入っているふりをしない", async ({ page }) => {
     await boot(page, [fakeWakeLock, false], [fakePip, false]);
-    await wake(page).click();
+    // 既定で入っているが、機械が渡してくれなければその旨を出す
     await expect(wake(page)).toContainText("できなかった");
+  });
+
+  test("小窓が出せなかったときも、できなかったと出す", async ({ page }) => {
+    await boot(page, [fakeWakeLock, true], [fakePip, false]);
     await pip(page).click();
     await expect(pip(page)).toContainText("できなかった");
   });
@@ -122,9 +126,8 @@ test.describe("小窓に出す映像", () => {
 });
 
 test.describe("入れたままにしておける", () => {
-  test("スリープ防止は、読み直しても入ったまま", async ({ page }) => {
+  test("読み直しても入ったまま", async ({ page }) => {
     await boot(page, [fakeWakeLock, true], [fakePip, true]);
-    await wake(page).click();
     await expect(wake(page)).toContainText("ON");
 
     await page.reload();
@@ -136,7 +139,6 @@ test.describe("入れたままにしておける", () => {
   test("切ったら、読み直しても切れたまま", async ({ page }) => {
     await boot(page, [fakeWakeLock, true], [fakePip, true]);
     await wake(page).click();
-    await wake(page).click();
     await expect(wake(page)).toContainText("OFF");
 
     await page.reload();
@@ -145,14 +147,14 @@ test.describe("入れたままにしておける", () => {
     await expect(wake(page)).toContainText("OFF");
   });
 
-  test("読み直したあと、画面を保つのを自分で取り直す", async ({ page }) => {
+  test("初めて開いたときから、自分で画面を保ちにいく", async ({ page }) => {
     await page.addInitScript(() => {
       window.__wakeRequests = 0;
       Object.defineProperty(navigator, "wakeLock", {
         configurable: true,
         value: { request: async () => { window.__wakeRequests++; return { release: async () => {}, addEventListener: () => {} }; } },
       });
-      localStorage.setItem("taskspace-keep-awake", "1");
+      // 何も覚えていない状態（初めて開いたとき）
     });
     await page.reload();
     await page.waitForSelector("header");
@@ -273,7 +275,7 @@ test.describe("作った映像を断る機械でも出せる", () => {
     // 英語のまま出し続けず、できないことを伝える
     await expect(page.locator("[data-pip-unavailable]")).toBeVisible();
     await expect(pip(page)).toHaveCount(0);
-    // 代わりにスリープ防止を入れておく
+    // 画面を消さないほうは入ったまま
     await expect(wake(page)).toContainText("ON");
   });
 

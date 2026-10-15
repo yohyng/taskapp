@@ -8577,9 +8577,10 @@ function pipModeFor(video) {
 //  2) Picture in Picture：小窓を出す。ほかの画面に移っても残るので、
 //     Wake Lock が効かない機械（タブレットなど）はこちらが頼り。
 function useKeepScreen(todayLeft = 0) {
-  // 入れたままにしておきたい設定なので覚える。読み直しても効いたままにする。
+  // 開いているあいだは画面を消さない、を既定にする。
+  // わざわざ切ったときだけ覚えて、切れたままにする。
   const [awake, setAwake] = useState(() => {
-    try { return localStorage.getItem(KEEP_AWAKE_KEY) === "1"; } catch { return false; }
+    try { return localStorage.getItem(KEEP_AWAKE_KEY) !== "0"; } catch { return true; }
   });
   const [awakeFailed, setAwakeFailed] = useState(false);
   const [pip, setPip] = useState(false);
@@ -8626,11 +8627,21 @@ function useKeepScreen(todayLeft = 0) {
       try {
         sentinelRef.current = await navigator.wakeLock.request("screen");
         sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-      } catch { /* 取れなければ諦める。入／切の表示はそのまま */ }
+        setAwakeFailed(false);
+      } catch {
+        // 黙って失敗すると、入っているつもりで画面が消える。表示で知らせる。
+        setAwakeFailed(true);
+      }
     }
     acquire();
     document.addEventListener("visibilitychange", acquire);
-    return () => { alive = false; document.removeEventListener("visibilitychange", acquire); };
+    // 「操作のあとでないと渡さない」機械もあるので、最初に触ったときにも取りにいく
+    document.addEventListener("pointerdown", acquire);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", acquire);
+      document.removeEventListener("pointerdown", acquire);
+    };
   }, [awake]);
 
   useEffect(() => () => {
@@ -8833,9 +8844,9 @@ function KeepAwakeSetting({ keep }) {
     <div className="mb-3 border-t border-white/10 pt-3">
       <div className="mb-1.5 text-[11px] text-neutral-500">画面</div>
       {hasWakeLock && line(
-        "wake", "画面を自動でスリープさせない", awake, awakeFailed,
+        "wake", "開いているあいだ、画面を消さない", awake, awakeFailed,
         awake ? stopAwake : startAwake,
-        "この画面を見ているあいだ、消えないようにします。ほかの画面に移ると外れます。",
+        "このアプリを開いているあいだ、画面が自動で消えないようにします。既定で入っています。ほかの画面に移ると一旦外れ、戻ってくると自動で入り直します。",
       )}
       {flavor && !pipUnavailable && line(
         "pip", "小窓（ピクチャインピクチャ）を出す", pip, pipFailed,
