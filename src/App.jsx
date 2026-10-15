@@ -3264,7 +3264,7 @@ function App() {
             <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
           </div>
 
-          <div className="flex w-full flex-wrap items-center justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
+          <div className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             <button
               onClick={() => setQuickAddOpen(true)}
               title="タスクを追加"
@@ -3277,7 +3277,8 @@ function App() {
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
             <button onClick={redo} disabled={!history.future.length} title="Redo (Ctrl+Shift+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Redo2 className="h-3.5 w-3.5" /></button>
-            <div className="relative">
+            {/* 設定だけ入れ物に包まれているので、包みも伸ばさないと高さが揃わない */}
+            <div className="relative flex">
               <button
                 onClick={() => setShowSettingsPanel((v) => !v)}
                 className={classNames("rounded-md border px-2 py-1.5 text-xs transition", showSettingsPanel ? "border-white/25 bg-white/10 ts-text" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}

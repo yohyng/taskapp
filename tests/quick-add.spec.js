@@ -78,11 +78,13 @@ test.describe("スマホの上の帯", () => {
     const add = await page.getByRole("button", { name: "タスクを追加" }).boundingBox();
     const others = await page.locator("header button").evaluateAll((els) =>
       els.filter((e) => !e.hasAttribute("data-quick-add"))
-        .map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), w: Math.round(r.width) }; }));
+        .map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width) }; }));
     // ＋ はほかのボタンより目に見えて広い
     expect(add.width).toBeGreaterThan(Math.max(...others.map((o) => o.w)) * 2);
-    // 全部が同じ段に並ぶ（高さの違いぶんのズレは許す）
+    // 上下がぴったり揃う（高さ違いで段差に見えない）
     const tops = [...others.map((o) => o.top), Math.round(add.y)];
-    expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(6);
+    const bottoms = [...others.map((o) => o.bottom), Math.round(add.y + add.height)];
+    expect(new Set(tops).size).toBe(1);
+    expect(new Set(bottoms).size).toBe(1);
   });
 });

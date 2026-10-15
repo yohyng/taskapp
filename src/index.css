@@ -75,13 +75,12 @@ body {
    よく押す「タスクを追加」だけ横に広げ、ほかは控えめにする。 */
 @media (pointer: coarse) {
   header button {
-    min-height: 34px;
+    /* 高さは「タスクを追加」と揃える。ここだけ低いと、横に並んだときに
+       上下がズレて見える。細さは幅のほうで稼ぐ。 */
+    min-height: 40px;
     min-width: 34px;
     padding-left: 0.4rem;
     padding-right: 0.4rem;
-  }
-  header button[data-quick-add] {
-    min-height: 40px;
   }
   /* ページの帯も指で押す。文字だけの行は薄くて狙いにくい。 */
   aside button {
