@@ -167,7 +167,7 @@ const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
 const KEEP_AWAKE_KEY = "taskspace-keep-awake";
-const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable";
+const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable-v2";
 // PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
 const PJ_BASIS = 260;
 const PJ_MIN = 220;
@@ -8549,11 +8549,26 @@ function MarqueeSelect({ onSelect }) {
 // iOS Safari は標準の PiP API を持たず webkitSetPresentationMode のみなので、
 // Wake Lock が無い環境向けに PiP をフォールバックとして残す。
 const hasWakeLock = typeof navigator !== "undefined" && "wakeLock" in navigator;
+// WebKit（iPad/iPhone は Chrome も中身は WebKit）は昔からの
+// webkitSetPresentationMode しか通らない。標準の API を名乗っていても、
+// 作った映像（MediaStream）は「対応していない」と断ってくる。
+// なので、webkit のやり方が使えるならそちらを先に選ぶ。
 function pipFlavor() {
   if (typeof document === "undefined") return null;
-  if (document.pictureInPictureEnabled) return "standard";
   const v = document.createElement("video");
   if (typeof v.webkitSetPresentationMode === "function") return "webkit";
+  if (document.pictureInPictureEnabled) return "standard";
+  return null;
+}
+
+// 実際の映像で、どのやり方が使えるかを見る
+function pipModeFor(video) {
+  if (typeof video.webkitSetPresentationMode === "function"
+      && (typeof video.webkitSupportsPresentationMode !== "function"
+          || video.webkitSupportsPresentationMode("picture-in-picture"))) {
+    return "webkit";
+  }
+  if (document.pictureInPictureEnabled && !video.disablePictureInPicture) return "standard";
   return null;
 }
 
@@ -8668,7 +8683,9 @@ function useKeepScreen(todayLeft = 0) {
       // 機械によって再生できる形が違う。出せるほうを選ぶ。
       const mp4 = video.canPlayType('video/mp4; codecs="avc1.42E01E"');
       video.src = `${import.meta.env.BASE_URL}keep-awake.${mp4 ? "mp4" : "webm"}`;
+      video.preload = "auto";
       video.dataset.keepAwakeClip = "1";
+      video.load();
     } else {
       const canvas = document.createElement("canvas");
       canvas.width = 320;
@@ -8743,7 +8760,8 @@ function useKeepScreen(todayLeft = 0) {
     };
 
     try {
-      if (flavor === "webkit") {
+      // 押した瞬間に、その映像で通るやり方を選ぶ
+      if (pipModeFor(video) === "webkit") {
         video.play().catch(() => {});
         video.webkitSetPresentationMode("picture-in-picture");
         watchLeaving(video);

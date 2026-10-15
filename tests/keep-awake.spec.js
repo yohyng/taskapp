@@ -322,3 +322,51 @@ test.describe("作った映像を断る機械でも出せる", () => {
     }
   });
 });
+
+// iPad は Chrome でも中身が WebKit。標準の API を名乗っていても
+// 作った映像は断られるので、昔からの webkit のやり方＋小さな動画を使う。
+test.describe("iPad のような機械", () => {
+  const asWebKit = () => {
+    window.__calls = [];
+    // 標準の API も名乗っているが、作った映像は断る（WebKit の挙動）
+    Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+    HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+      window.__calls.push("standard");
+      throw new Error("The video element does not support the Picture-in-Picture mode");
+    };
+    HTMLVideoElement.prototype.webkitSupportsPresentationMode = function (m) { return m === "picture-in-picture"; };
+    HTMLVideoElement.prototype.webkitSetPresentationMode = function (m) {
+      window.__calls.push(`webkit:${m}:${this.src ? "clip" : "stream"}`);
+      this.webkitPresentationMode = m;
+    };
+  };
+
+  test("webkit のやり方で、小さな動画を小窓に出す", async ({ page }) => {
+    await page.addInitScript(asWebKit);
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+
+    // 標準の API は使わず、はじめから webkit ＋ 動画ファイル
+    expect(await page.evaluate(() => window.__calls)).toEqual(["webkit:picture-in-picture:clip"]);
+  });
+
+  test("閉じると OFF に戻る", async ({ page }) => {
+    await page.addInitScript(asWebKit);
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await pip(page).click();
+    await expect(pip(page)).toContainText("ON");
+
+    await page.evaluate(() => {
+      const v = [...document.querySelectorAll("video")].at(-1);
+      v.webkitPresentationMode = "inline";
+      v.dispatchEvent(new Event("webkitpresentationmodechanged"));
+    });
+    await expect(pip(page)).toContainText("OFF");
+  });
+});
