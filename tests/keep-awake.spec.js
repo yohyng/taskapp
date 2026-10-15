@@ -257,7 +257,27 @@ test.describe("作った映像を断る機械でも出せる", () => {
     expect(await page.evaluate(() => window.__pipSources)).toEqual(["stream", "clip"]);
   });
 
-  test("乗り換えた先も駄目なら、理由を出す", async ({ page }) => {
+  test("どうやっても駄目な機械では、代わりの手を案内する", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        throw new Error("The video element does not support the Picture-in-Picture mode");
+      };
+    });
+    await page.addInitScript(fakeWakeLock, true);
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+
+    await pip(page).click();
+    // 英語のまま出し続けず、できないことを伝える
+    await expect(page.locator("[data-pip-unavailable]")).toBeVisible();
+    await expect(pip(page)).toHaveCount(0);
+    // 代わりにスリープ防止を入れておく
+    await expect(wake(page)).toContainText("ON");
+  });
+
+  test("できないと分かったら、次からボタンを出さない", async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
       HTMLVideoElement.prototype.requestPictureInPicture = async function () {
@@ -267,9 +287,31 @@ test.describe("作った映像を断る機械でも出せる", () => {
     await page.reload();
     await page.waitForSelector("header");
     await openSettings(page);
+    await pip(page).click();
+    await expect(page.locator("[data-pip-unavailable]")).toBeVisible();
+
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
+    await expect(page.locator("[data-pip-unavailable]")).toBeVisible();
+    await expect(pip(page)).toHaveCount(0);
+  });
+
+  test("それ以外の理由なら、理由をそのまま出す", async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(document, "pictureInPictureEnabled", { configurable: true, value: true });
+      HTMLVideoElement.prototype.requestPictureInPicture = async function () {
+        throw new Error("Document not focused");
+      };
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await openSettings(page);
 
     await pip(page).click();
-    await expect(page.getByText("出せませんでした：The video element does not support", { exact: false })).toBeVisible();
+    await expect(page.getByText("出せませんでした：Document not focused")).toBeVisible();
+    // こちらは直せる見込みがあるので、ボタンは残す
+    await expect(pip(page)).toBeVisible();
   });
 
   test("小さな動画は、どちらの形でも置いてある", async ({ page }) => {

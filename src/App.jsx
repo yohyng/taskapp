@@ -167,6 +167,7 @@ const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
 const KEEP_AWAKE_KEY = "taskspace-keep-awake";
+const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable";
 // PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
 const PJ_BASIS = 260;
 const PJ_MIN = 220;
@@ -8568,6 +8569,10 @@ function useKeepScreen(todayLeft = 0) {
   const [awakeFailed, setAwakeFailed] = useState(false);
   const [pip, setPip] = useState(false);
   const [pipFailed, setPipFailed] = useState("");
+  // 小窓に対応していない機械だと分かったら、出し方を変える
+  const [pipUnavailable, setPipUnavailable] = useState(() => {
+    try { return localStorage.getItem(PIP_UNAVAILABLE_KEY) === "1"; } catch { return false; }
+  });
   const sentinelRef = useRef(null);
   const videoRef = useRef(null);
   const rafRef = useRef(null);
@@ -8722,8 +8727,18 @@ function useKeepScreen(todayLeft = 0) {
     const video = prepare();
     if (!video) { setPipFailed("この機械では小窓を出せません"); return; }
 
+    // 小窓そのものに対応していない機械（Android の Chrome など）は、
+    // 何度押しても同じ。英語の文言を出し続けても仕方がないので、
+    // 使えないことを覚えて、代わりの手を案内する。
     const fail = (e) => {
       const msg = e?.message || String(e) || "理由は分かりませんでした";
+      if (/does not support|not supported|DisabledBySystem/i.test(msg)) {
+        setPipUnavailable(true);
+        try { localStorage.setItem(PIP_UNAVAILABLE_KEY, "1"); } catch { /* 覚えられなくても動く */ }
+        // スリープ防止は使えることが多いので、そちらに切り替えておく
+        if (hasWakeLock && !awake) startAwake();
+        return;
+      }
       setPipFailed(msg);
     };
 
@@ -8765,13 +8780,13 @@ function useKeepScreen(todayLeft = 0) {
     setPip(false);
   }
 
-  return { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, prepare, flavor };
+  return { awake, awakeFailed, pip, pipFailed, pipUnavailable, startAwake, stopAwake, startPip, stopPip, prepare, flavor };
 }
 
 // 設定パネルの中の見た目。状態は App が持っているので、
 // パネルを閉じても小窓やスリープ防止は切れない。
 function KeepAwakeSetting({ keep }) {
-  const { awake, awakeFailed, pip, pipFailed, startAwake, stopAwake, startPip, stopPip, prepare, flavor } = keep;
+  const { awake, awakeFailed, pip, pipFailed, pipUnavailable, startAwake, stopAwake, startPip, stopPip, prepare, flavor } = keep;
   // 開いた時点で映像を用意しておく。押してから作ると間に合わない。
   useEffect(() => { prepare(); }, [prepare]);
 
@@ -8804,10 +8819,18 @@ function KeepAwakeSetting({ keep }) {
         awake ? stopAwake : startAwake,
         "この画面を見ているあいだ、消えないようにします。ほかの画面に移ると外れます。",
       )}
-      {flavor && line(
+      {flavor && !pipUnavailable && line(
         "pip", "小窓（ピクチャインピクチャ）を出す", pip, pipFailed,
         pip ? stopPip : startPip,
         "時計と今日の残りを小窓で出しておきます。ほかの画面に移っても残るので、スリープ防止が効かない機械はこちらを。小窓を閉じると解除されます。",
+      )}
+      {flavor && pipUnavailable && (
+        <div data-pip-unavailable className="mb-2 rounded border border-white/10 bg-white/[0.02] px-2 py-1.5 text-[10px] leading-relaxed text-neutral-500">
+          この機械は小窓（ピクチャインピクチャ）に対応していませんでした。
+          {hasWakeLock
+            ? "上の「画面を自動でスリープさせない」を入れてあります。こちらは効くはずです。"
+            : "画面が消えるときは、機械の側で画面が消えるまでの時間を延ばしてください。"}
+        </div>
       )}
       {!hasWakeLock && !flavor && (
         <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
