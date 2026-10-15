@@ -3408,7 +3408,7 @@ function App() {
                     </div>
                   </div>
 
-                  <KeepAwakeSetting />
+                  <KeepAwakeSetting todayLeft={todayTasks.filter((t) => t.status !== "完了").length} />
 
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">ひな形</div>
@@ -8689,15 +8689,25 @@ function KeepAwakeButton() {
   );
 }
 
-// 画面を自動でスリープさせない設定。設定パネルの中に置く。
-function KeepAwakeSetting() {
-  const [active, setActive] = useState(false);
-  const [failed, setFailed] = useState(false);
+// 画面を保たせる設定。やり方は2つあり、別々に入／切できる。
+//  1) Wake Lock：見ているあいだ画面を消させない。タブを離れると外れる。
+//  2) Picture in Picture：小窓を出す。ほかの画面に移っても残るので、
+//     Wake Lock が効かない機械（タブレットなど）はこちらが頼り。
+function KeepAwakeSetting({ todayLeft = 0 }) {
+  const [awake, setAwake] = useState(false);
+  const [awakeFailed, setAwakeFailed] = useState(false);
+  const [pip, setPip] = useState(false);
+  const [pipFailed, setPipFailed] = useState(false);
   const sentinelRef = useRef(null);
   const videoRef = useRef(null);
   const rafRef = useRef(null);
+  const noteRef = useRef("");
   const flavor = useMemo(pipFlavor, []);
-  const supported = hasWakeLock || !!flavor;
+
+  // 小窓に出す文字は、持ち直さずに書き換える（描画は毎フレーム読む）
+  useEffect(() => {
+    noteRef.current = todayLeft > 0 ? `今日 のこり ${todayLeft}` : "今日はおしまい";
+  }, [todayLeft]);
 
   const releasePip = useCallback(() => {
     cancelAnimationFrame(rafRef.current);
@@ -8716,44 +8726,64 @@ function KeepAwakeSetting() {
     }
   }, [flavor]);
 
-  // Wake Lock はタブが背面に回ると自動解放されるので、復帰時に取り直す
+  // Wake Lock はタブが背面に回ると自動解放されるので、戻ってきたら取り直す
   useEffect(() => {
-    if (!active || !hasWakeLock) return;
+    if (!awake) return;
     async function reacquire() {
       if (document.visibilityState !== "visible" || sentinelRef.current) return;
       try {
         sentinelRef.current = await navigator.wakeLock.request("screen");
         sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-      } catch { /* 取得できなければ諦める */ }
+      } catch { /* 取れなければ諦める */ }
     }
     document.addEventListener("visibilitychange", reacquire);
     return () => document.removeEventListener("visibilitychange", reacquire);
-  }, [active]);
+  }, [awake]);
 
   useEffect(() => () => {
     sentinelRef.current?.release().catch(() => {});
     releasePip();
   }, [releasePip]);
 
-  async function startPipFallback() {
+  async function startAwake() {
+    setAwakeFailed(false);
+    try {
+      sentinelRef.current = await navigator.wakeLock.request("screen");
+      sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
+      setAwake(true);
+    } catch {
+      setAwakeFailed(true);
+    }
+  }
+
+  async function stopAwake() {
+    try { await sentinelRef.current?.release(); } catch { /* noop */ }
+    sentinelRef.current = null;
+    setAwake(false);
+  }
+
+  async function startPip() {
+    setPipFailed(false);
     const canvas = document.createElement("canvas");
     canvas.width = 320;
     canvas.height = 180;
     const ctx = canvas.getContext("2d");
     function draw() {
       const now = new Date();
-      const t = [now.getHours(), now.getMinutes(), now.getSeconds()]
-        .map((n) => String(n).padStart(2, "0")).join(":");
+      const t = [now.getHours(), now.getMinutes()].map((n) => String(n).padStart(2, "0")).join(":");
       ctx.fillStyle = "#0a0a0a";
       ctx.fillRect(0, 0, 320, 180);
       ctx.fillStyle = "#e5e5e5";
-      ctx.font = "bold 56px monospace";
+      ctx.font = "bold 64px monospace";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(t, 160, 80);
+      ctx.fillText(t, 160, 76);
+      ctx.fillStyle = "#a3a3a3";
+      ctx.font = "16px sans-serif";
+      ctx.fillText(noteRef.current, 160, 132);
       ctx.fillStyle = "#525252";
-      ctx.font = "14px sans-serif";
-      ctx.fillText("Task Space", 160, 148);
+      ctx.font = "12px sans-serif";
+      ctx.fillText("Task Space", 160, 160);
       rafRef.current = requestAnimationFrame(draw);
     }
     draw();
@@ -8763,75 +8793,67 @@ function KeepAwakeSetting() {
     video.muted = true;
     video.playsInline = true;
     video.setAttribute("playsinline", "");
-    // iOS は DOM に載っていない video を PiP に上げられない
+    // DOM に載っていない video は PiP に上げられない機械がある
     video.style.cssText = "position:fixed;left:-9999px;width:1px;height:1px;opacity:0;";
     document.body.appendChild(video);
     videoRef.current = video;
 
-    await video.play();
-    if (flavor === "webkit") {
-      video.webkitSetPresentationMode("picture-in-picture");
-      video.addEventListener("webkitpresentationmodechanged", () => {
-        if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setActive(false); }
-      });
-    } else {
-      await video.requestPictureInPicture();
-      video.addEventListener("leavepictureinpicture", () => { releasePip(); setActive(false); }, { once: true });
-    }
-  }
-
-  async function start() {
-    setFailed(false);
-    if (hasWakeLock) {
-      try {
-        sentinelRef.current = await navigator.wakeLock.request("screen");
-        sentinelRef.current.addEventListener("release", () => { sentinelRef.current = null; });
-        setActive(true);
-        return;
-      } catch { /* Wake Lock が拒否されたら PiP を試す */ }
-    }
-    if (!flavor) { setFailed(true); return; }
     try {
-      await startPipFallback();
-      setActive(true);
+      await video.play();
+      if (flavor === "webkit") {
+        video.webkitSetPresentationMode("picture-in-picture");
+        video.addEventListener("webkitpresentationmodechanged", () => {
+          if (video.webkitPresentationMode !== "picture-in-picture") { releasePip(); setPip(false); }
+        });
+      } else {
+        await video.requestPictureInPicture();
+        video.addEventListener("leavepictureinpicture", () => { releasePip(); setPip(false); }, { once: true });
+      }
+      setPip(true);
     } catch {
       releasePip();
-      setFailed(true);
+      setPipFailed(true);
     }
   }
 
-  async function stop() {
-    try { await sentinelRef.current?.release(); } catch { /* noop */ }
-    sentinelRef.current = null;
+  function stopPip() {
     releasePip();
-    setActive(false);
+    setPip(false);
   }
+
+  const line = (key, label, on, failed, onClick, hint) => (
+    <>
+      <button
+        data-keep-awake={key}
+        onClick={onClick}
+        className={classNames(
+          "mb-1 flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs transition",
+          failed ? "border-red-400/40 bg-red-400/10 text-red-200"
+          : on ? "border-sky-400/40 bg-sky-400/10 text-sky-200"
+          : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
+        )}
+      >
+        <span className="flex items-center gap-1.5"><Airplay className="h-3 w-3 shrink-0" /> {label}</span>
+        <span className="shrink-0 text-[10px]">{failed ? "できなかった" : on ? "ON" : "OFF"}</span>
+      </button>
+      <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">{hint}</div>
+    </>
+  );
 
   return (
     <div className="mb-3 border-t border-white/10 pt-3">
       <div className="mb-1.5 text-[11px] text-neutral-500">画面</div>
-      {supported ? (
-        <>
-          <button
-            data-keep-awake
-            onClick={active ? stop : start}
-            className={classNames(
-              "mb-1 flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs transition",
-              failed ? "border-red-400/40 bg-red-400/10 text-red-200"
-              : active ? "border-sky-400/40 bg-sky-400/10 text-sky-200"
-              : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
-            )}
-          >
-            <span className="flex items-center gap-1.5"><Airplay className="h-3 w-3" /> 画面を自動でスリープさせない</span>
-            <span className="text-[10px]">{failed ? "できなかった" : active ? "ON" : "OFF"}</span>
-          </button>
-          <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
-            {flavor === "webkit" || !hasWakeLock
-              ? "小さな時計を Picture in Picture で出しておくことで、画面が消えないようにします。閉じると解除されます。"
-              : "見ているあいだ、画面が消えないようにします。タブを離れると自動で解除されます。"}
-          </div>
-        </>
-      ) : (
+      {hasWakeLock && line(
+        "wake", "画面を自動でスリープさせない", awake, awakeFailed,
+        awake ? stopAwake : startAwake,
+        "この画面を見ているあいだ、消えないようにします。ほかの画面に移ると外れます。",
+      )}
+      {flavor && line(
+        "pip", "小窓（ピクチャインピクチャ）を出す", pip, pipFailed,
+        pip ? stopPip : startPip,
+        "時計と今日の残りを小窓で出しておきます。ほかの画面に移っても残るので、スリープ防止が効かない機械はこちらを。小窓を閉じると解除されます。",
+      )}
+      {!hasWakeLock && !flavor && (
         <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
           この機械では、画面のスリープを止められません。
         </div>
