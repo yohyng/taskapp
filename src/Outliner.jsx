@@ -72,8 +72,15 @@ export function OutlineProvider({ children }) {
         gone.forEach((id) => tombRef.current.add(id));
         writeTomb(tombRef.current);
       }
-      saveOutlineRows(changed, gone).then(() => {
+      saveOutlineRows(changed, gone).then((err) => {
         if (isOutlineTableMissing()) { setSyncNote("missing-table"); return; }
+        if (err) {
+          // 断られたときに黙っていると、同期しているつもりで消える。
+          // いちばん多いのは、新しい表に RLS がかかっていて書けない場合。
+          setSyncNote(`error:${err}`);
+          return;
+        }
+        setSyncNote((cur) => (cur.startsWith("error:") ? "" : cur));
         const next = new Map(syncedRef.current);
         gone.forEach((id) => next.delete(id));
         changed.forEach((r) => next.set(r.id, JSON.stringify(r)));
@@ -464,6 +471,23 @@ export default function Outliner() {
           onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }}
         />
       </div>
+
+      {syncNote.startsWith("error:") && (
+        <div data-outline-sync-error className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
+          <div className="mb-1 font-semibold">この端末にしか残っていません</div>
+          <div className="mb-1 text-red-100/80">Supabase に送れませんでした：{syncNote.slice(6)}</div>
+          <div className="mb-1 text-red-100/70">
+            新しい表に RLS（行レベルセキュリティ）がかかっていると、書き込みが断られます。
+            タスクの表と同じ扱いにするなら、SQL Editor で次を実行してください。
+          </div>
+          <pre className="mb-1 overflow-auto whitespace-pre-wrap break-all rounded bg-black/30 p-2 text-[10px] text-red-50/90">
+alter table outline_nodes disable row level security;
+          </pre>
+          <button onClick={dismissSync} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15">
+            閉じる
+          </button>
+        </div>
+      )}
 
       {syncNote === "missing-table" && (
         <div data-outline-sql className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
