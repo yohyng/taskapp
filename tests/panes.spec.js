@@ -133,3 +133,90 @@ test.describe("狭い画面", () => {
     expect(got[0].x).toBe(got[1].x);
   });
 });
+
+test.describe("枠の幅を変える", () => {
+  test.use({ viewport: { width: 1400, height: 900 } });
+
+  const handle = (page) => page.locator("[data-pane-handle]").first();
+  // つまみは枠と同じ高さ（画面より長い）ので、掴む高さは画面の中に取る
+  const drag = async (page, dx) => {
+    const h = await handle(page).boundingBox();
+    const y = h.y + 200;
+    await page.mouse.move(h.x + h.width / 2, y);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 + dx, y, { steps: 10 });
+    await page.mouse.up();
+  };
+
+  test("つまみは、枠が2つ以上のときだけ出る", async ({ page }) => {
+    await expect(page.locator("[data-pane-handle]")).toHaveCount(0);
+    await addPane(page);
+    await expect(page.locator("[data-pane-handle]")).toHaveCount(1);
+    await addPane(page);
+    await expect(page.locator("[data-pane-handle]")).toHaveCount(2);
+  });
+
+  test("右に引くと、左の枠が広がる", async ({ page }) => {
+    await addPane(page);
+    const [before] = await boxes(page);
+    await drag(page, 250);
+    const [after, right] = await boxes(page);
+    expect(after.w).toBeGreaterThan(before.w + 200);
+    expect(right.w).toBeLessThan(before.w - 200);
+  });
+
+  test("引きすぎても、枠が潰れない", async ({ page }) => {
+    await addPane(page);
+    await drag(page, -5000);
+    const [left] = await boxes(page);
+    expect(left.w).toBeGreaterThan(80);
+  });
+
+  test("変えた幅は、読み直しても残る", async ({ page }) => {
+    await addPane(page);
+    await drag(page, 250);
+    const [wide] = await boxes(page);
+
+    await page.reload();
+    await page.waitForSelector("header");
+    const [again] = await boxes(page);
+    expect(Math.abs(again.w - wide.w)).toBeLessThan(8);
+  });
+
+  test("ダブルクリックで均等に戻る", async ({ page }) => {
+    await addPane(page);
+    await drag(page, 250);
+    await handle(page).dblclick();
+    const [a, b] = await boxes(page);
+    expect(Math.abs(a.w - b.w)).toBeLessThan(6);
+  });
+});
+
+test.describe("枠の幅に合わせて中身も変わる", () => {
+  test.use({ viewport: { width: 1500, height: 900 } });
+  const weekCols = (page) => page.locator("[data-week-cols]").getAttribute("data-week-cols");
+
+  test("広い枠では7日を横一列に並べる", async ({ page }) => {
+    expect(await weekCols(page)).toBe("6");
+  });
+
+  test("枠を半分にすると、曜日を折り返す", async ({ page }) => {
+    await addPane(page);
+    // 画面は広いままでも、枠が狭ければ列を減らす
+    await expect.poll(() => weekCols(page)).not.toBe("6");
+  });
+
+  test("つまみで広げ直すと、また横一列に戻る", async ({ page }) => {
+    await addPane(page);
+    await expect.poll(() => weekCols(page)).not.toBe("6");
+
+    const h = await page.locator("[data-pane-handle]").first().boundingBox();
+    const y = h.y + 200;
+    await page.mouse.move(h.x + 1, y);
+    await page.mouse.down();
+    await page.mouse.move(h.x + 420, y, { steps: 10 });
+    await page.mouse.up();
+
+    await expect.poll(() => weekCols(page)).toBe("6");
+  });
+});

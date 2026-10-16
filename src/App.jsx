@@ -863,6 +863,24 @@ export function restoreLocalOrder(remote, local) {
   return [...known, ...fresh];
 }
 
+// 自分がどれだけの幅をもらえているかを測る。
+// 画面の幅で決めると、枠（ペイン）に分けたときに合わなくなる。
+function useOwnWidth() {
+  const ref = useRef(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(([entry]) => {
+      setWidth(Math.round(entry.contentRect.width));
+    });
+    ro.observe(el);
+    setWidth(Math.round(el.getBoundingClientRect().width));
+    return () => ro.disconnect();
+  }, []);
+  return [ref, width];
+}
+
 function focusAdjacentBlock(fromEl, dir) {
   const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
   const i = all.indexOf(fromEl);
@@ -3131,10 +3149,11 @@ function App() {
         return saved.slice(0, MAX_PANES).map((p, i) => ({
           id: p?.id || `pane-${i}`,
           mode: p?.mode === "outline" ? "outline" : "tasks",
+          weight: Number(p?.weight) > 0 ? Number(p.weight) : 1,
         }));
       }
     } catch { /* 壊れていたら作り直す */ }
-    return [{ id: "pane-0", mode: "tasks" }];
+    return [{ id: "pane-0", mode: "tasks", weight: 1 }];
   });
   const rememberPanes = (next) => {
     try { localStorage.setItem(PANES_KEY, JSON.stringify(next)); } catch { /* noop */ }
@@ -3147,12 +3166,47 @@ function App() {
       // ただしタスクは1枠だけなので、その場合はアウトラインにする。
       const last = prev[prev.length - 1]?.mode || "tasks";
       const mode = last === "tasks" && prev.some((p) => p.mode === "tasks") ? "outline" : last;
-      return rememberPanes([...prev, { id: `pane-${uid()}`, mode }]);
+      // 増やしたら、いったん均等に分け直す
+      return rememberPanes([...prev, { id: `pane-${uid()}`, mode }].map((p) => ({ ...p, weight: 1 })));
     });
   }
   function closePane(id) {
-    setPanes((prev) => (prev.length <= 1 ? prev : rememberPanes(prev.filter((p) => p.id !== id))));
+    setPanes((prev) => (prev.length <= 1
+      ? prev
+      : rememberPanes(prev.filter((p) => p.id !== id).map((p) => ({ ...p, weight: 1 })))));
   }
+  // 枠と枠のあいだをつまんで、左右の取り分を付け替える
+  const panesRef = useRef(null);
+  function startPaneResize(e, index) {
+    e.preventDefault();
+    const row = panesRef.current;
+    if (!row) return;
+    const total = row.getBoundingClientRect().width;
+    const from = e.clientX;
+    const base = panes.map((p) => p.weight ?? 1);
+    const sum = base[index - 1] + base[index];
+    const move = (ev) => {
+      // 動かした距離を、2つの枠が分け合っている取り分に換算する
+      const share = ((ev.clientX - from) / total) * panes.length;
+      const left = Math.max(0.25, Math.min(sum - 0.25, base[index - 1] + share));
+      setPanes((prev) => prev.map((p, i) => {
+        if (i === index - 1) return { ...p, weight: left };
+        if (i === index) return { ...p, weight: sum - left };
+        return p;
+      }));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setPanes((prev) => rememberPanes(prev));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  function evenPanes() {
+    setPanes((prev) => rememberPanes(prev.map((p) => ({ ...p, weight: 1 }))));
+  }
+
   function setPaneMode(id, mode) {
     setPanes((prev) => rememberPanes(prev.map((p) => (p.id === id ? { ...p, mode } : p))));
   }
@@ -4002,9 +4056,10 @@ function App() {
         {/* 枠を横に並べる。狭い画面では縦に積む（横に割ると読めないので）。 */}
         <div
           data-panes
+          ref={panesRef}
           className={classNames(
             "flex flex-col gap-2",
-            panes.length > 1 && "lg:flex-row lg:items-start",
+            panes.length > 1 && "lg:flex-row lg:items-stretch",
           )}
         >
           {panes.map((pane, i) => {
@@ -4012,21 +4067,35 @@ function App() {
             // ドラッグの行き先が重なって動かなくなるため）
             const dupTask = pane.mode === "tasks" && panes.findIndex((p) => p.mode === "tasks") !== i;
             return (
-              <div
-                key={pane.id}
-                data-pane={pane.mode}
-                data-pane-id={pane.id}
-                className={classNames(
-                  "min-w-0 flex-1",
-                  panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
-                )}
-              >
-                {dupTask ? (
-                  <div data-pane-dup className="p-4 text-[11px] leading-relaxed text-neutral-600">
-                    タスクは1つの枠にだけ出せます。この枠はアウトラインに切り替えてください。
+              <React.Fragment key={pane.id}>
+                {i > 0 && panes.length > 1 && (
+                  // 枠と枠のあいだのつまみ。狭い画面では縦に積むので出さない。
+                  <div
+                    data-pane-handle={i}
+                    onPointerDown={(e) => startPaneResize(e, i)}
+                    onDoubleClick={evenPanes}
+                    title="ドラッグで幅を変える／ダブルクリックで均等に戻す"
+                    className="group/handle hidden w-2 shrink-0 cursor-col-resize touch-none items-center justify-center lg:flex"
+                  >
+                    <span className="h-10 w-[3px] rounded-full bg-white/10 transition group-hover/handle:bg-sky-400/60" />
                   </div>
-                ) : pane.mode === "tasks" ? taskBody : <Outliner />}
-              </div>
+                )}
+                <div
+                  data-pane={pane.mode}
+                  data-pane-id={pane.id}
+                  style={panes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
+                  className={classNames(
+                    "ts-pane min-w-0 flex-1",
+                    panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
+                  )}
+                >
+                  {dupTask ? (
+                    <div data-pane-dup className="p-4 text-[11px] leading-relaxed text-neutral-600">
+                      タスクは1つの枠にだけ出せます。この枠はアウトラインに切り替えてください。
+                    </div>
+                  ) : pane.mode === "tasks" ? taskBody : <Outliner />}
+                </div>
+              </React.Fragment>
             );
           })}
         </div>
@@ -7563,12 +7632,13 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
 
   const [forceHorizontal, setForceHorizontal] = useState(false);
   const [flatView, setFlatView] = useState(false);
-  const [colsPerRow, setColsPerRow] = useState(() => window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
-  useEffect(() => {
-    const update = () => setColsPerRow(window.innerWidth >= 1024 ? 6 : window.innerWidth >= 768 ? 3 : window.innerWidth >= 640 ? 2 : 1);
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
+  // 何列ずつ並べるかは、画面ではなく「この枠の幅」で決める
+  const [weekRef, weekWidth] = useOwnWidth();
+  const colsPerRow = weekWidth === 0 ? 6
+    : weekWidth >= 1000 ? 6
+    : weekWidth >= 740 ? 3
+    : weekWidth >= 520 ? 2
+    : 1;
 
   const [forceMonth, setForceMonth] = useState(false);
 
@@ -7711,7 +7781,7 @@ function SevenDayView({ tasks, projectRules, taskMap, childrenOf, upsertTask, re
     : `${firstDay.getMonth() + 1}/${firstDay.getDate()} - ${lastDay.getMonth() + 1}/${lastDay.getDate()}`;
 
   return (
-    <section className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
+    <section ref={weekRef} data-week-cols={colsPerRow} className="rounded-lg border border-white/10 bg-white/[0.025] p-2">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-1.5">
         <div className="flex items-center gap-2">
           <button
