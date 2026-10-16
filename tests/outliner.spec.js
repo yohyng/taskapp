@@ -1,8 +1,8 @@
 import { test, expect } from "./helpers.js";
 
-const tab = (page, key) => page.locator(`[data-app-tab="${key}"]`);
+// 枠（ペイン）の中身を切り替えて、アウトラインを出す
+const setMode = (page, key, i = 0) => page.locator("[data-pane-mode]").nth(i).selectOption(key);
 const outline = (page) => page.locator("[data-outliner]");
-const rows = (page) => page.locator("[data-row]");
 // 画面に出ている行を「深さぶんの字下げ＋文字」で読む
 const shape = (page) => page.evaluate(() =>
   [...document.querySelectorAll("[data-row]")].map((e) => {
@@ -10,20 +10,20 @@ const shape = (page) => page.evaluate(() =>
     const text = t?.tagName === "TEXTAREA" ? t.value : (t?.textContent || "").trim();
     return "  ".repeat(Number(e.getAttribute("data-depth"))) + text;
   }));
-const open = async (page) => { await tab(page, "outline").click(); await expect(outline(page)).toBeVisible(); };
+const open = async (page) => { await setMode(page, "outline"); await expect(outline(page)).toBeVisible(); };
 const write = async (page, text) => { await page.keyboard.type(text); };
 
-test.describe("ページの切り替え", () => {
-  test("タブでアウトラインに移れる", async ({ page }) => {
+test.describe("枠の中身の切り替え", () => {
+  test("枠の中身をアウトラインにできる", async ({ page }) => {
     await expect(outline(page)).toHaveCount(0);
     await open(page);
-    // タスク側は隠れている
-    await expect(page.locator("[data-task-id]").first()).toBeHidden();
+    // タスク側は出ていない
+    await expect(page.locator("[data-task-id]")).toHaveCount(0);
   });
 
-  test("戻るとタスクがそのまま出ている", async ({ page }) => {
+  test("戻すとタスクがそのまま出ている", async ({ page }) => {
     await open(page);
-    await tab(page, "tasks").click();
+    await setMode(page, "tasks");
     await expect(outline(page)).toHaveCount(0);
     await expect(page.locator("[data-task-id]").first()).toBeVisible();
   });
@@ -39,11 +39,9 @@ test.describe("ページの切り替え", () => {
 test.describe("アウトラインを書く", () => {
   // 空の1行だけから始める（初回の案内文に邪魔されないように）
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript(() => {
-      if (!localStorage.getItem("taskspace-outline-v1")) {
-        localStorage.setItem("taskspace-outline-v1", JSON.stringify([{ id: "one", text: "" }]));
-      }
-    });
+    // この窓では毎回ここから始める（読み直しの試験は別の窓で見る）
+    await page.addInitScript(() =>
+      localStorage.setItem("taskspace-outline-v1", JSON.stringify([{ id: "one", text: "" }])));
     await page.reload();
     await page.waitForSelector("header");
     await open(page);

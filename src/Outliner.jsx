@@ -9,6 +9,25 @@ import {
 
 const OUTLINE_KEY = "taskspace-outline-v1";
 
+// 木はひとつ。枠（ペイン）をいくつ開いても、同じものを見ている。
+// 枠ごとに違うのは「どこにズームしているか」だけ。
+const OutlineContext = React.createContext(null);
+
+export function OutlineProvider({ children }) {
+  const [nodes, setNodes] = useState(load);
+  useEffect(() => {
+    try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
+  }, [nodes]);
+  const value = useMemo(() => ({ nodes, setNodes }), [nodes]);
+  return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
+}
+
+function useOutline() {
+  const ctx = React.useContext(OutlineContext);
+  if (ctx) return ctx;
+  throw new Error("OutlineProvider の中で使ってください");
+}
+
 // Quietliner と同じ見本（色の値もそのまま）
 const TEXT_COLORS = [
   { label: "そのまま", value: null },
@@ -62,17 +81,13 @@ function load() {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const [nodes, setNodes] = useState(load);
+  const { nodes, setNodes } = useOutline();
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
   // 編集に入ったときのカーソル位置。-1 は末尾。
   const caretRef = useRef(null);
   const menuRef = useRef(null);
-
-  useEffect(() => {
-    try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
-  }, [nodes]);
 
   // メニューの外を押したら閉じる
   useEffect(() => {

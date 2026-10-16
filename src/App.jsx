@@ -13,7 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import Outliner from "./Outliner";
+import Outliner, { OutlineProvider } from "./Outliner";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -168,7 +168,8 @@ const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
 const KEEP_AWAKE_KEY = "taskspace-keep-awake";
-const APP_TAB_KEY = "taskspace-app-tab";
+const PANES_KEY = "taskspace-panes-v1";
+const MAX_PANES = 4;
 const QUICK_ADD_HEIGHT_KEY = "taskspace-quick-add-height";
 const QUICK_ADD_HEIGHT = 96;
 const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable-v2";
@@ -3122,10 +3123,39 @@ function App() {
     todayTasks.filter((t) => t.status !== "完了").length,
   );
 
-  // どのページを見ているか
-  const [appTab, setAppTab] = useState(() => {
-    try { return localStorage.getItem(APP_TAB_KEY) === "outline" ? "outline" : "tasks"; } catch { return "tasks"; }
+  // 枠（ペイン）。1つなら全画面、2つなら横に二分割…と分け合う。
+  const [panes, setPanes] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(PANES_KEY) || "null");
+      if (Array.isArray(saved) && saved.length) {
+        return saved.slice(0, MAX_PANES).map((p, i) => ({
+          id: p?.id || `pane-${i}`,
+          mode: p?.mode === "outline" ? "outline" : "tasks",
+        }));
+      }
+    } catch { /* 壊れていたら作り直す */ }
+    return [{ id: "pane-0", mode: "tasks" }];
   });
+  const rememberPanes = (next) => {
+    try { localStorage.setItem(PANES_KEY, JSON.stringify(next)); } catch { /* noop */ }
+    return next;
+  };
+  function addPane() {
+    setPanes((prev) => {
+      if (prev.length >= MAX_PANES) return prev;
+      // 増やした枠は、いま開いている最後の枠と同じ中身で始める。
+      // ただしタスクは1枠だけなので、その場合はアウトラインにする。
+      const last = prev[prev.length - 1]?.mode || "tasks";
+      const mode = last === "tasks" && prev.some((p) => p.mode === "tasks") ? "outline" : last;
+      return rememberPanes([...prev, { id: `pane-${uid()}`, mode }]);
+    });
+  }
+  function closePane(id) {
+    setPanes((prev) => (prev.length <= 1 ? prev : rememberPanes(prev.filter((p) => p.id !== id))));
+  }
+  function setPaneMode(id, mode) {
+    setPanes((prev) => rememberPanes(prev.map((p) => (p.id === id ? { ...p, mode } : p))));
+  }
 
   const [typeEditor, setTypeEditor] = useState(false);
   // Supabase に列が無くて、この端末にしか残らない項目
@@ -3273,11 +3303,294 @@ function App() {
     </div>
   );
 
+  // タスク画面の中身。枠（ペイン）のどこに置くか選べるよう、変数にしておく。
+  const taskBody = (
+    <>
+        {viewMode === "list" && use5col && (
+          <>
+          {(
+            <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
+              {boardBlocks}
+            </div>
+          )}
+          <div
+            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
+            className={classNames("grid gap-2 items-start pb-2", (selectedTask || selectedProject) && "md:pr-[384px]")}
+          >
+            {/* TRAY column。しまってあるときは出さない（中身はそのまま） */}
+            {!hiddenPanels.has("tray") && (
+            <div className="min-w-0">
+              <div className="rounded-lg border border-white/10 bg-white/[0.02]">
+                <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
+                  <span className="text-sm font-bold text-neutral-200">TRAY</span>
+                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.archived && !t.stock && !t.pageId).length + inboxItems.length}</span>
+                </div>
+                <div className="flex flex-col gap-0.5 px-2 py-2">
+                  {(() => {
+                    // TRAY は「まだどこにも置いていないもの」だけ。
+                    // 日付が付いていれば 7days に、pageId があればボードに出ているので、
+                    // ここに重ねて出すと同じものが2か所に見える。
+                    const rootTrayTasks = tasks.filter(t => !t.archived && !t.stock && !t.pageId && !t.scheduledDate && !t.parentId);
+                    return rootTrayTasks.map((task, idx) => (
+                      <TrayTask
+                        key={task.id}
+                        task={task}
+                        listNumber={numberedIndex(rootTrayTasks, idx)}
+                        depth={0}
+                        toggleDone={toggleDone}
+                        upsertTask={upsertTask}
+                        removeTask={removeTask}
+                        setSelectedTaskId={setSelectedTaskId}
+                        selectedTaskId={selectedTaskId}
+                        childrenOf={childrenOf}
+                        selectMode={selectMode}
+                        selectedIds={selectedIds}
+                        onToggleSelect={onToggleSelect}
+                        onIndent={() => {
+                          if (idx === 0) return;
+                          const prev = rootTrayTasks[idx - 1];
+                          upsertTask({ id: task.id, parentId: prev.id });
+                        }}
+                        onOutdent={() => {
+                          if (!task.parentId) return;
+                          upsertTask({ id: task.id, parentId: null });
+                        }}
+                      />
+                    ));
+                  })()}
+                  {inboxItems.map((item) => (
+                    <div
+                      key={item.id}
+                      data-tray-id={item.id}
+                      onClick={() => onToggleTraySelect(item.id)}
+                      onDoubleClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})}
+                      className={classNames(
+                        "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]",
+                      )}
+                    >
+                      <span className="mt-0.5 shrink-0 text-[9px] text-neutral-600 font-bold">n</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="break-words text-neutral-300">{item.title}</div>
+                        <div className="text-[9px] text-neutral-600">{item.source}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            )}
+            {/* STOCK views。しまっているときは丸ごと出さない */}
+            {!hiddenPanels.has("stock") && stockViews.map((view) => (
+              <div key={view.id} className="min-w-0">
+                <StockColumn
+                  view={view}
+                  tasks={stockRootsByView.get(view.id) || []}
+                  childrenOf={childrenOf}
+                  categoryTone={categoryTone}
+                  toggleDone={toggleDone}
+                  upsertTask={upsertTask}
+                  removeTask={removeTask}
+                  selectedTaskId={selectedTaskId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  selectMode={selectMode}
+                  onUnstock={(id) => upsertTask({ id, stock: false, stockViewId: null })}
+                  onUpdateView={(patch) => updateStockView(view.id, patch)}
+                  onRemoveView={() => removeStockView(view.id)}
+                  canRemove={stockViews.length > 1}
+                />
+              </div>
+            ))}
+            {!hiddenPanels.has("stock") && (
+              <div className="min-w-0">
+                <button
+                  onClick={addStockView}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-3 text-xs text-neutral-500 transition hover:border-white/30 hover:bg-white/[0.04] hover:text-neutral-300"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  STOCKビューを追加
+                </button>
+              </div>
+            )}
+          </div>
+          {/* 5列モードでもカレンダーは下に残す */}
+          <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+            <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+          </div>
+          </>
+        )}
+
+        {viewMode === "list" && !use5col && (
+        <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          {(() => {
+            // Group consecutive board-type sections into a shared auto-fit grid
+            const BOARD_KEYS = new Set(["tray", "today", "weekly"]);
+            const chunks = [];
+            for (const key of panelOrder) {
+              // しまってある段は組み立てない（中身はそのまま残る）
+              if (hiddenPanels.has(key)) continue;
+              if (BOARD_KEYS.has(key)) {
+                if (chunks.length && chunks[chunks.length - 1].type === "board-group") {
+                  chunks[chunks.length - 1].keys.push(key);
+                } else {
+                  chunks.push({ type: "board-group", keys: [key] });
+                }
+              } else {
+                chunks.push({ type: "standalone", key });
+              }
+            }
+
+            const trayEl = (
+              <InboxTray
+                label={sectionLabels.tray}
+                items={inboxItems}
+                updateInboxItem={updateInboxItem}
+                removeInboxItem={removeInboxItem}
+                moveInboxItem={moveInboxItem}
+                addInboxItem={addInboxItem}
+                acceptInboxItem={acceptInboxItem}
+                selectMode={selectMode}
+                selectedTrayIds={selectedTrayIds}
+                onToggleTraySelect={onToggleTraySelect}
+              />
+            );
+            const todayEl = (
+              <TodayColumn
+                label={sectionLabels.today}
+                wrapClass=""
+                todayTasks={todayTasks}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek} toggleToday={toggleToday}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+                handleDropOnToday={handleDropOnToday}
+                moveTodayTask={moveTodayTask}
+                acceptInboxItem={acceptInboxItem}
+                returnTaskToTray={returnTaskToTray}
+                defaultCategory={quickCategory}
+                defaultProject={quickProject}
+                addTask={addTask}
+                selectMode={selectMode}
+              />
+            );
+            const weeklyEl = (extraClass = "") => (
+              <WeeklyColumn
+                label={sectionLabels.weekly}
+                className={classNames("flex", extraClass)}
+                collapsed={collapsed}
+                setCollapsed={setCollapsed}
+                weeklyRoots={weeklyRoots}
+                weeklyFlat={weeklyFlat}
+                setWeeklyFlat={setWeeklyFlat}
+                childrenOf={childrenOf}
+                taskMap={taskMap}
+                categoryTone={categoryTone}
+                upsertTask={upsertTask}
+                removeTask={removeTask}
+                toggleDone={toggleDone}
+                toggleWeek={toggleWeek} toggleToday={toggleToday}
+                selectedTaskId={selectedTaskId}
+                setSelectedTaskId={setSelectedTaskId}
+                handleDropOnTask={handleDropOnTask}
+                handleDropOnWeekly={handleDropOnWeekly}
+                moveWeeklyTask={moveWeeklyTask}
+                addTask={addTask}
+                addInboxItem={addInboxItem}
+                returnTaskToTray={returnTaskToTray}
+                selectMode={selectMode}
+              />
+            );
+
+            function renderBoardSection(key) {
+              if (key === "tray") return <div key="tray" className="min-w-[200px] flex-1">{trayEl}</div>;
+              if (key === "today") return <div key="today" className="min-w-[200px] flex-1">{todayEl}</div>;
+              if (key === "weekly") return <div key="weekly" className="min-w-[200px] flex-1">{weeklyEl()}</div>;
+              return null;
+            }
+
+            return chunks.map((chunk, ci) => {
+              if (chunk.type === "board-group") {
+                const isVisibleMobile = mobileView === "board";
+                const hasWeekly = chunk.keys.includes("weekly");
+                // Stack tray+today in one column if adjacent
+                const colItems = [];
+                const keys = chunk.keys;
+                let ki = 0;
+                while (ki < keys.length) {
+                  if (keys[ki] === "tray" && keys[ki + 1] === "today") {
+                    colItems.push({ type: "stack", first: "tray", second: "today" });
+                    ki += 2;
+                  } else if (keys[ki] === "today" && keys[ki + 1] === "tray") {
+                    colItems.push({ type: "stack", first: "today", second: "tray" });
+                    ki += 2;
+                  } else {
+                    colItems.push({ type: "single", key: keys[ki] });
+                    ki++;
+                  }
+                }
+
+                return (
+                  <div key={`group-${ci}`} className={classNames(isVisibleMobile ? "flex" : "hidden md:flex", "flex-wrap gap-2 md:flex-nowrap md:items-start")}>
+                    {colItems.map((col, j) => {
+                      if (col.type === "stack") {
+                        const firstEl = col.first === "tray" ? trayEl : todayEl;
+                        const secondEl = col.second === "tray" ? trayEl : todayEl;
+                        return (
+                          <div key={`stack-${j}`} className="flex min-w-[200px] flex-1 flex-col gap-2">
+                            {firstEl}
+                            {secondEl}
+                          </div>
+                        );
+                      }
+                      return renderBoardSection(col.key);
+                    })}
+                    {/* mobile weekly タブでも weekly を表示 */}
+                    {!isVisibleMobile && hasWeekly && mobileView === "weekly" && (
+                      <div className="flex-1 md:hidden">{weeklyEl()}</div>
+                    )}
+                  </div>
+                );
+              }
+              // standalone section
+              const { key } = chunk;
+              if (key === "7days") return (
+                <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
+                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
+              {boardBlocks}
+                </div>
+              );
+              if (key === "calendar") return (
+                <div key="calendar" className={mobileView === "calendar" ? "block" : "hidden md:block"}>
+                  <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
+                </div>
+              );
+              return null;
+            });
+          })()}
+        </div>
+        )}
+
+        <div className={classNames("", (selectedTask || selectedProject) && "md:pr-[384px]")}>
+          <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
+        </div>
+
+        <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
+    </>
+  );
+
   return (
     <BlockTypesContext.Provider value={blockTypesValue}>
     <SelectionContext.Provider value={selectionValue}>
     <SlashContext.Provider value={slashValue}>
     <BlockEditContext.Provider value={blockEditValue}>
+    <OutlineProvider>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     <div className="min-h-screen ts-bg ts-text" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
@@ -3287,21 +3600,41 @@ function App() {
             <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
           </div>
 
-          {/* ページの切り替え。中身はどちらも出しっぱなしで、見せる側だけ変える。 */}
-          <div data-app-tabs className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
-            {[["tasks", "タスク"], ["outline", "アウトライン"]].map(([key, label]) => (
-              <button
-                key={key}
-                data-app-tab={key}
-                onClick={() => { setAppTab(key); try { localStorage.setItem(APP_TAB_KEY, key); } catch { /* noop */ } }}
-                className={classNames(
-                  "rounded-md px-2.5 py-1 text-xs transition",
-                  appTab === key ? "bg-white/15 ts-text" : "text-neutral-500 hover:bg-white/[0.07]",
+          {/* 枠（ペイン）。1つなら全画面、増やすと横に並べて分け合う。 */}
+          <div data-panes-bar className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
+            {panes.map((pane, i) => (
+              <div key={pane.id} data-pane-chip={pane.id} className="flex items-center">
+                <select
+                  data-pane-mode={pane.id}
+                  value={pane.mode}
+                  onChange={(e) => setPaneMode(pane.id, e.target.value)}
+                  className="rounded-md bg-transparent px-1.5 py-1 text-xs ts-text outline-none [&>option]:bg-neutral-900"
+                >
+                  <option value="tasks">タスク</option>
+                  <option value="outline">アウトライン</option>
+                </select>
+                {panes.length > 1 && (
+                  <button
+                    data-pane-close={pane.id}
+                    onClick={() => closePane(pane.id)}
+                    title="この枠を閉じる"
+                    className="rounded p-0.5 text-neutral-600 transition hover:bg-white/10 hover:text-neutral-200"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
                 )}
-              >
-                {label}
-              </button>
+                {i < panes.length - 1 && <span className="mx-0.5 h-4 w-px bg-white/10" />}
+              </div>
             ))}
+            <button
+              data-pane-add
+              onClick={addPane}
+              disabled={panes.length >= MAX_PANES}
+              title="枠を増やす（横に並びます）"
+              className="rounded-md px-1.5 py-1 text-xs text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-30"
+            >
+              ＋枠
+            </button>
           </div>
 
           <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
@@ -3666,288 +3999,39 @@ function App() {
           </div>
         </header>
 
-        {appTab === "outline" && <Outliner />}
-
-        <div className={appTab === "tasks" ? "contents" : "hidden"}>
-        {viewMode === "list" && use5col && (
-          <>
-          {(
-            <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-              <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
-              {boardBlocks}
-            </div>
+        {/* 枠を横に並べる。狭い画面では縦に積む（横に割ると読めないので）。 */}
+        <div
+          data-panes
+          className={classNames(
+            "flex flex-col gap-2",
+            panes.length > 1 && "lg:flex-row lg:items-start",
           )}
-          <div
-            style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}
-            className={classNames("grid gap-2 items-start pb-2", (selectedTask || selectedProject) && "md:pr-[384px]")}
-          >
-            {/* TRAY column。しまってあるときは出さない（中身はそのまま） */}
-            {!hiddenPanels.has("tray") && (
-            <div className="min-w-0">
-              <div className="rounded-lg border border-white/10 bg-white/[0.02]">
-                <div className="sticky top-0 flex items-baseline justify-between gap-2 border-b border-white/10 ts-bg-veil px-2 py-1.5 backdrop-blur">
-                  <span className="text-sm font-bold text-neutral-200">TRAY</span>
-                  <span className="text-[10px] text-neutral-500">{tasks.filter(t => !t.archived && !t.stock && !t.pageId).length + inboxItems.length}</span>
-                </div>
-                <div className="flex flex-col gap-0.5 px-2 py-2">
-                  {(() => {
-                    // TRAY は「まだどこにも置いていないもの」だけ。
-                    // 日付が付いていれば 7days に、pageId があればボードに出ているので、
-                    // ここに重ねて出すと同じものが2か所に見える。
-                    const rootTrayTasks = tasks.filter(t => !t.archived && !t.stock && !t.pageId && !t.scheduledDate && !t.parentId);
-                    return rootTrayTasks.map((task, idx) => (
-                      <TrayTask
-                        key={task.id}
-                        task={task}
-                        listNumber={numberedIndex(rootTrayTasks, idx)}
-                        depth={0}
-                        toggleDone={toggleDone}
-                        upsertTask={upsertTask}
-                        removeTask={removeTask}
-                        setSelectedTaskId={setSelectedTaskId}
-                        selectedTaskId={selectedTaskId}
-                        childrenOf={childrenOf}
-                        selectMode={selectMode}
-                        selectedIds={selectedIds}
-                        onToggleSelect={onToggleSelect}
-                        onIndent={() => {
-                          if (idx === 0) return;
-                          const prev = rootTrayTasks[idx - 1];
-                          upsertTask({ id: task.id, parentId: prev.id });
-                        }}
-                        onOutdent={() => {
-                          if (!task.parentId) return;
-                          upsertTask({ id: task.id, parentId: null });
-                        }}
-                      />
-                    ));
-                  })()}
-                  {inboxItems.map((item) => (
-                    <div
-                      key={item.id}
-                      data-tray-id={item.id}
-                      onClick={() => onToggleTraySelect(item.id)}
-                      onDoubleClick={() => acceptInboxItem(item.id, "", "", { plain: true }, {})}
-                      className={classNames(
-                        "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition cursor-pointer hover:bg-white/[0.06]",
-                      )}
-                    >
-                      <span className="mt-0.5 shrink-0 text-[9px] text-neutral-600 font-bold">n</span>
-                      <div className="min-w-0 flex-1">
-                        <div className="break-words text-neutral-300">{item.title}</div>
-                        <div className="text-[9px] text-neutral-600">{item.source}</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </div>
-            )}
-            {/* STOCK views。しまっているときは丸ごと出さない */}
-            {!hiddenPanels.has("stock") && stockViews.map((view) => (
-              <div key={view.id} className="min-w-0">
-                <StockColumn
-                  view={view}
-                  tasks={stockRootsByView.get(view.id) || []}
-                  childrenOf={childrenOf}
-                  categoryTone={categoryTone}
-                  toggleDone={toggleDone}
-                  upsertTask={upsertTask}
-                  removeTask={removeTask}
-                  selectedTaskId={selectedTaskId}
-                  setSelectedTaskId={setSelectedTaskId}
-                  selectMode={selectMode}
-                  onUnstock={(id) => upsertTask({ id, stock: false, stockViewId: null })}
-                  onUpdateView={(patch) => updateStockView(view.id, patch)}
-                  onRemoveView={() => removeStockView(view.id)}
-                  canRemove={stockViews.length > 1}
-                />
-              </div>
-            ))}
-            {!hiddenPanels.has("stock") && (
-              <div className="min-w-0">
-                <button
-                  onClick={addStockView}
-                  className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-white/15 px-3 py-3 text-xs text-neutral-500 transition hover:border-white/30 hover:bg-white/[0.04] hover:text-neutral-300"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                  STOCKビューを追加
-                </button>
-              </div>
-            )}
-          </div>
-          {/* 5列モードでもカレンダーは下に残す */}
-          <div className={classNames("block ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-            <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
-          </div>
-          </>
-        )}
-
-        {viewMode === "list" && !use5col && (
-        <div className={classNames("flex flex-col gap-2 ", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-          {(() => {
-            // Group consecutive board-type sections into a shared auto-fit grid
-            const BOARD_KEYS = new Set(["tray", "today", "weekly"]);
-            const chunks = [];
-            for (const key of panelOrder) {
-              // しまってある段は組み立てない（中身はそのまま残る）
-              if (hiddenPanels.has(key)) continue;
-              if (BOARD_KEYS.has(key)) {
-                if (chunks.length && chunks[chunks.length - 1].type === "board-group") {
-                  chunks[chunks.length - 1].keys.push(key);
-                } else {
-                  chunks.push({ type: "board-group", keys: [key] });
-                }
-              } else {
-                chunks.push({ type: "standalone", key });
-              }
-            }
-
-            const trayEl = (
-              <InboxTray
-                label={sectionLabels.tray}
-                items={inboxItems}
-                updateInboxItem={updateInboxItem}
-                removeInboxItem={removeInboxItem}
-                moveInboxItem={moveInboxItem}
-                addInboxItem={addInboxItem}
-                acceptInboxItem={acceptInboxItem}
-                selectMode={selectMode}
-                selectedTrayIds={selectedTrayIds}
-                onToggleTraySelect={onToggleTraySelect}
-              />
-            );
-            const todayEl = (
-              <TodayColumn
-                label={sectionLabels.today}
-                wrapClass=""
-                todayTasks={todayTasks}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnToday={handleDropOnToday}
-                moveTodayTask={moveTodayTask}
-                acceptInboxItem={acceptInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                defaultCategory={quickCategory}
-                defaultProject={quickProject}
-                addTask={addTask}
-                selectMode={selectMode}
-              />
-            );
-            const weeklyEl = (extraClass = "") => (
-              <WeeklyColumn
-                label={sectionLabels.weekly}
-                className={classNames("flex", extraClass)}
-                collapsed={collapsed}
-                setCollapsed={setCollapsed}
-                weeklyRoots={weeklyRoots}
-                weeklyFlat={weeklyFlat}
-                setWeeklyFlat={setWeeklyFlat}
-                childrenOf={childrenOf}
-                taskMap={taskMap}
-                categoryTone={categoryTone}
-                upsertTask={upsertTask}
-                removeTask={removeTask}
-                toggleDone={toggleDone}
-                toggleWeek={toggleWeek} toggleToday={toggleToday}
-                selectedTaskId={selectedTaskId}
-                setSelectedTaskId={setSelectedTaskId}
-                handleDropOnTask={handleDropOnTask}
-                handleDropOnWeekly={handleDropOnWeekly}
-                moveWeeklyTask={moveWeeklyTask}
-                addTask={addTask}
-                addInboxItem={addInboxItem}
-                returnTaskToTray={returnTaskToTray}
-                selectMode={selectMode}
-              />
-            );
-
-            function renderBoardSection(key) {
-              if (key === "tray") return <div key="tray" className="min-w-[200px] flex-1">{trayEl}</div>;
-              if (key === "today") return <div key="today" className="min-w-[200px] flex-1">{todayEl}</div>;
-              if (key === "weekly") return <div key="weekly" className="min-w-[200px] flex-1">{weeklyEl()}</div>;
-              return null;
-            }
-
-            return chunks.map((chunk, ci) => {
-              if (chunk.type === "board-group") {
-                const isVisibleMobile = mobileView === "board";
-                const hasWeekly = chunk.keys.includes("weekly");
-                // Stack tray+today in one column if adjacent
-                const colItems = [];
-                const keys = chunk.keys;
-                let ki = 0;
-                while (ki < keys.length) {
-                  if (keys[ki] === "tray" && keys[ki + 1] === "today") {
-                    colItems.push({ type: "stack", first: "tray", second: "today" });
-                    ki += 2;
-                  } else if (keys[ki] === "today" && keys[ki + 1] === "tray") {
-                    colItems.push({ type: "stack", first: "today", second: "tray" });
-                    ki += 2;
-                  } else {
-                    colItems.push({ type: "single", key: keys[ki] });
-                    ki++;
-                  }
-                }
-
-                return (
-                  <div key={`group-${ci}`} className={classNames(isVisibleMobile ? "flex" : "hidden md:flex", "flex-wrap gap-2 md:flex-nowrap md:items-start")}>
-                    {colItems.map((col, j) => {
-                      if (col.type === "stack") {
-                        const firstEl = col.first === "tray" ? trayEl : todayEl;
-                        const secondEl = col.second === "tray" ? trayEl : todayEl;
-                        return (
-                          <div key={`stack-${j}`} className="flex min-w-[200px] flex-1 flex-col gap-2">
-                            {firstEl}
-                            {secondEl}
-                          </div>
-                        );
-                      }
-                      return renderBoardSection(col.key);
-                    })}
-                    {/* mobile weekly タブでも weekly を表示 */}
-                    {!isVisibleMobile && hasWeekly && mobileView === "weekly" && (
-                      <div className="flex-1 md:hidden">{weeklyEl()}</div>
-                    )}
+        >
+          {panes.map((pane, i) => {
+            // タスク画面は1つの枠にだけ出せる（同じものを2枚描くと、
+            // ドラッグの行き先が重なって動かなくなるため）
+            const dupTask = pane.mode === "tasks" && panes.findIndex((p) => p.mode === "tasks") !== i;
+            return (
+              <div
+                key={pane.id}
+                data-pane={pane.mode}
+                data-pane-id={pane.id}
+                className={classNames(
+                  "min-w-0 flex-1",
+                  panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
+                )}
+              >
+                {dupTask ? (
+                  <div data-pane-dup className="p-4 text-[11px] leading-relaxed text-neutral-600">
+                    タスクは1つの枠にだけ出せます。この枠はアウトラインに切り替えてください。
                   </div>
-                );
-              }
-              // standalone section
-              const { key } = chunk;
-              if (key === "7days") return (
-                <div key="7days" className={mobileView === "7days" ? "block" : show7Days ? "hidden md:block" : "hidden"}>
-                  <SevenDayView tasks={filteredTasks} projectRules={projectRules} taskMap={taskMap} childrenOf={childrenOf} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} toggleDone={toggleDone} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} selectedTaskId={selectedTaskId} setSelectedProject={setSelectedProject} />
-              {boardBlocks}
-                </div>
-              );
-              if (key === "calendar") return (
-                <div key="calendar" className={mobileView === "calendar" ? "block" : "hidden md:block"}>
-                  <CalendarView month={calendarMonth} setMonth={setCalendarMonth} tasks={filteredTasks} projectRules={projectRules} categoryTone={categoryTone} setSelectedTaskId={setSelectedTaskId} setSelectedProject={setSelectedProject} />
-                </div>
-              );
-              return null;
-            });
-          })()}
-        </div>
-        )}
-
-        <div className={classNames("", (selectedTask || selectedProject) && "md:pr-[384px]")}>
-          <ArchiveSection tasks={tasks} upsertTask={upsertTask} removeTask={removeTask} categoryTone={categoryTone} />
+                ) : pane.mode === "tasks" ? taskBody : <Outliner />}
+              </div>
+            );
+          })}
         </div>
 
-        <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
-        </div>
-
-        {appTab === "tasks" && <MarqueeSelect onSelect={handleMarqueeSelect} />}
+        {panes.some((p) => p.mode === "tasks") && <MarqueeSelect onSelect={handleMarqueeSelect} />}
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
@@ -4232,6 +4316,7 @@ function App() {
       {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold ts-text shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
+    </OutlineProvider>
     </BlockEditContext.Provider>
     </SlashContext.Provider>
     </SelectionContext.Provider>
