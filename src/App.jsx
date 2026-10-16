@@ -4067,7 +4067,8 @@ function App() {
             role="dialog"
             aria-modal="true"
             onPointerDown={(e) => e.stopPropagation()}
-            className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-sm"
+            // 後ろは暗くしない。押したら閉じる受け皿としてだけ置く。
+            className="fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"
             onClick={(e) => { if (e.target === e.currentTarget) { setQuickAddOpen(false); setQuickAddTitle(""); } }}
           >
             <form
@@ -4082,7 +4083,7 @@ function App() {
                 setQuickAddTitle("");
                 setToast(`「${title}」を追加しました`);
               }}
-              className="w-full max-w-md rounded-2xl border border-white/15 ts-surface p-4 shadow-2xl"
+              className="w-full max-w-md rounded-2xl border border-white/20 ts-surface p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
             >
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold ts-text">タスクを追加</span>

@@ -182,3 +182,16 @@ test.describe("ポップアップの操作が、後ろに漏れない", () => {
     await expect(page.getByText("件選択中", { exact: false })).toHaveCount(0);
   });
 });
+
+test("後ろを暗くしない", async ({ page }) => {
+  await open(page);
+  const bg = await dialog(page).evaluate((e) => getComputedStyle(e).backgroundColor);
+  // 透明（rgba(0,0,0,0) か none）であること
+  expect(["rgba(0, 0, 0, 0)", "transparent"]).toContain(bg);
+  // 窓そのものは透けない
+  const panel = await dialog(page).locator("form").evaluate((e) => getComputedStyle(e).backgroundColor);
+  expect(panel).not.toContain("rgba(0, 0, 0, 0)");
+  // 背景を押せば、これまで通り閉じる
+  await dialog(page).click({ position: { x: 5, y: 5 } });
+  await expect(dialog(page)).toBeHidden();
+});
