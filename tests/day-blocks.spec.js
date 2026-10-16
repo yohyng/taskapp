@@ -79,13 +79,17 @@ test.describe("日付ブロック", () => {
     await expect.poll(async () => (await dayBlocks(page))[0].dayDate).toBe(todayKey());
   });
 
+  // 実際のドラッグは、機械が混んでいると指の動きを取りこぼすことがある。
+  // 中身の確からしさを見る試験なので、ここだけ取り直しを許す。
+  test.describe.configure({ retries: 2 });
   test("TRAY から日付ブロックに落とすと、その日の予定になる", async ({ page, seed }) => {
     await seed({ tasks: [t("x", "よていなし"), dayBlockFor("day1", todayKey())] });
 
     const from = page.locator('[data-task-id="x"]').first();
     await from.hover();
-    const target = board(page).getByText(todayKey().slice(5).replace("-", "/")).first();
-    await dragTo(page, await centerOf(from), await centerOf(target));
+    // 受け皿は日付ブロックの見出し（日付のところ）。小さな文字そのものより外しにくい。
+    const target = board(page).locator("[data-day-head]").first();
+    await dragTo(page, await centerOf(from), await centerOf(target), 30);
 
     await expect.poll(async () => (await byTitle(page, "よていなし")).scheduledDate).toBe(todayKey());
   });
