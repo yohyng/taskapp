@@ -1,6 +1,6 @@
 import { test, expect, storedTasks, todayKey } from "./helpers.js";
 
-const open = (page) => page.getByRole("button", { name: "タスクを追加" }).click();
+const open = (page) => page.locator("[data-quick-add]").click();
 const dialog = (page) => page.locator("[data-quick-add-dialog]");
 const titled = async (page, t) => (await storedTasks(page)).find((x) => x.title === t);
 
@@ -41,7 +41,7 @@ test.describe("タスク追加のポップアップ", () => {
     await open(page);
     await dialog(page).getByRole("button", { name: "日付なし" }).click();
     await dialog(page).locator("textarea").fill("いつかやる");
-    await dialog(page).getByRole("button", { name: "追加" }).click();
+    await dialog(page).locator("[data-add-task]").click();
     await expect.poll(async () => (await titled(page, "いつかやる"))?.scheduledDate).toBe("");
   });
 
@@ -67,7 +67,8 @@ test.describe("タスク追加のポップアップ", () => {
 
   test("空のままでは追加できない", async ({ page }) => {
     await open(page);
-    await expect(dialog(page).getByRole("button", { name: "追加" })).toBeDisabled();
+    await expect(dialog(page).locator("[data-add-task]")).toBeDisabled();
+    await expect(dialog(page).locator("[data-add-memo]")).toBeDisabled();
   });
 });
 
@@ -75,7 +76,7 @@ test.describe("スマホの上の帯", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
   test("ボタンが1段に収まり、＋だけ横に広い", async ({ page }) => {
-    const add = await page.getByRole("button", { name: "タスクを追加" }).boundingBox();
+    const add = await page.locator("[data-quick-add]").boundingBox();
     // 見るのは操作ボタンの列（ページのタブは別の段にある）
     const others = await page.locator("[data-header-actions] button").evaluateAll((els) =>
       els.filter((e) => !e.hasAttribute("data-quick-add"))
@@ -195,4 +196,100 @@ test("後ろを暗くしない", async ({ page }) => {
   // 背景を押せば、これまで通り閉じる
   await dialog(page).click({ position: { x: 5, y: 5 } });
   await expect(dialog(page)).toBeHidden();
+});
+
+test.describe("メモに書きとめる", () => {
+  const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const outlineOf = (page) => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("taskspace-outline-v1") || "[]"));
+
+  test("ヘッダーのボタンは「ノート」", async ({ page }) => {
+    await expect(page.locator("[data-quick-add]")).toContainText("ノート");
+  });
+
+  test("メモに追加すると、今日の日付の下に入る", async ({ page }) => {
+    await open(page);
+    await dialog(page).locator("textarea").fill("おもいついたこと");
+    await dialog(page).locator("[data-add-memo]").click();
+
+    await expect.poll(async () => {
+      const tree = await outlineOf(page);
+      const day = tree.find((x) => x.text === today());
+      return day?.children?.map((c) => c.text);
+    }).toEqual(["おもいついたこと"]);
+  });
+
+  test("同じ日に続けて書くと、同じ日付の下に並ぶ", async ({ page }) => {
+    await open(page);
+    await dialog(page).locator("textarea").fill("ひとつめ");
+    await dialog(page).locator("[data-add-memo]").click();
+    await dialog(page).locator("textarea").fill("ふたつめ");
+    await dialog(page).locator("[data-add-memo]").click();
+
+    await expect.poll(async () => {
+      const tree = await outlineOf(page);
+      return tree.filter((x) => x.text === today()).length;
+    }).toBe(1);
+    const tree = await outlineOf(page);
+    expect(tree.find((x) => x.text === today()).children.map((c) => c.text))
+      .toEqual(["ひとつめ", "ふたつめ"]);
+  });
+
+  test("メモはタスクを増やさない", async ({ page }) => {
+    const before = (await storedTasks(page)).length;
+    await open(page);
+    await dialog(page).locator("textarea").fill("メモだけ");
+    await dialog(page).locator("[data-add-memo]").click();
+    await expect(dialog(page).locator("textarea")).toHaveValue("");
+    expect((await storedTasks(page)).length).toBe(before);
+  });
+
+  test("タスクに追加すると、これまで通りタスクになる", async ({ page }) => {
+    const before = (await storedTasks(page)).length;
+    await open(page);
+    await dialog(page).locator("textarea").fill("やること");
+    await dialog(page).locator("[data-add-task]").click();
+    await expect.poll(async () => (await storedTasks(page)).length).toBe(before + 1);
+    expect((await outlineOf(page)).some((x) => x.text === today())).toBe(false);
+  });
+
+  test("Enter は前に使ったほうを繰り返す", async ({ page }) => {
+    await open(page);
+    await dialog(page).locator("textarea").fill("メモにする");
+    await dialog(page).locator("[data-add-memo]").click();
+
+    // 次は Enter だけでメモになる
+    await dialog(page).locator("textarea").fill("これもメモ");
+    await page.keyboard.press("Enter");
+    await expect.poll(async () => {
+      const tree = await outlineOf(page);
+      return tree.find((x) => x.text === today())?.children?.map((c) => c.text);
+    }).toEqual(["メモにする", "これもメモ"]);
+  });
+
+  test("選んだほうは覚えていて、開き直しても同じ", async ({ page }) => {
+    await open(page);
+    await dialog(page).locator("textarea").fill("めも");
+    await dialog(page).locator("[data-add-memo]").click();
+    await page.keyboard.press("Escape");
+
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await expect(dialog(page)).toContainText("いまはメモ");
+  });
+
+  test("書いたメモは、アウトラインに出る", async ({ page }) => {
+    await open(page);
+    await dialog(page).locator("textarea").fill("画面にも出る");
+    await dialog(page).locator("[data-add-memo]").click();
+    await page.keyboard.press("Escape");
+
+    await page.locator("[data-pane-mode]").first().selectOption("outline");
+    await expect(page.getByText("画面にも出る")).toBeVisible();
+    await expect(page.locator("[data-outliner]").getByText(today())).toBeVisible();
+  });
 });

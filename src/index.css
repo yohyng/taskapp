@@ -101,6 +101,10 @@ body {
   .ts-gutter {
     opacity: 0.45 !important;
   }
+  /* アウトラインの畳むつまみも、触る機械では出しっぱなしにする */
+  [data-fold] {
+    opacity: 0.7 !important;
+  }
 }
 
 /* 指で触る機械むけの間隔。

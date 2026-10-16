@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload } from "lucide-react";
+import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2 } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
   extractImportItems, appendImported, buildExport, moveSubtreeTo,
@@ -26,6 +26,10 @@ const writeTomb = (set) => {
 
 export function OutlineProvider({ children }) {
   const [nodes, setNodes] = useState(load);
+  // いまの木を、更新の外からも読めるようにしておく（履歴を積むため）
+  const nodesRef = useRef(nodes);
+  const [hist, setHist] = useState({ past: [], future: [] });
+  const coalesceRef = useRef({ key: null, at: 0 });
   const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
   const readyRef = useRef(false);                 // 読み込み前は送らない
   const syncedRef = useRef(new Map());            // 向こうと同じだと分かっている行
@@ -36,6 +40,54 @@ export function OutlineProvider({ children }) {
   useEffect(() => {
     try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
   }, [nodes]);
+
+  // 書き換えはここを通す。前の姿を履歴に積む。
+  // 字を打っているあいだは1手にまとめる（1文字ずつ戻るのは使いにくい）。
+  const apply = useCallback((updater, opts = {}) => {
+    const prev = nodesRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    if (next === prev) return;
+    nodesRef.current = next;
+    setNodes(next);
+    const now = Date.now();
+    const c = coalesceRef.current;
+    const same = opts.coalesce && c.key === opts.coalesce && now - c.at < 900;
+    coalesceRef.current = { key: opts.coalesce || null, at: now };
+    if (same) return;
+    setHist((h) => ({ past: [...h.past, prev].slice(-100), future: [] }));
+  }, []);
+
+  // 同期で入ってきたぶんは、履歴に積まない（自分の操作ではないので）
+  const applyRaw = useCallback((updater) => {
+    const prev = nodesRef.current;
+    const next = typeof updater === "function" ? updater(prev) : updater;
+    nodesRef.current = next;
+    setNodes(next);
+  }, []);
+
+  const undo = useCallback(() => {
+    setHist((h) => {
+      if (!h.past.length) return h;
+      const prev = h.past[h.past.length - 1];
+      const now = nodesRef.current;
+      nodesRef.current = prev;
+      setNodes(prev);
+      coalesceRef.current = { key: null, at: 0 };
+      return { past: h.past.slice(0, -1), future: [...h.future, now].slice(-100) };
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setHist((h) => {
+      if (!h.future.length) return h;
+      const next = h.future[h.future.length - 1];
+      const now = nodesRef.current;
+      nodesRef.current = next;
+      setNodes(next);
+      coalesceRef.current = { key: null, at: 0 };
+      return { past: [...h.past, now].slice(-100), future: h.future.slice(0, -1) };
+    });
+  }, []);
 
   // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
   useEffect(() => {
@@ -48,7 +100,7 @@ export function OutlineProvider({ children }) {
         return;
       }
       const remote = buildTree(rows);
-      setNodes((mine) => {
+      applyRaw((mine) => {
         const merged = mergeOutline(mine, remote, tombRef.current);
         // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
         syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
@@ -90,11 +142,38 @@ export function OutlineProvider({ children }) {
     return () => clearTimeout(timerRef.current);
   }, [nodes]);
 
-  const value = useMemo(() => ({ nodes, setNodes, syncNote, dismissSync: () => setSyncNote("") }), [nodes, syncNote]);
+  // アウトラインを触っていたときの Ctrl+Z は、こちらで受ける。
+  // タスク側の取り消しと取り合いにならないよう、先に捕まえて止める。
+  const inOutlineRef = useRef(false);
+  useEffect(() => {
+    const mark = (e) => { inOutlineRef.current = !!e.target?.closest?.("[data-outliner]"); };
+    const onKey = (e) => {
+      if (!(e.metaKey || e.ctrlKey) || !inOutlineRef.current) return;
+      const key = e.key.toLowerCase();
+      if (key !== "z" && key !== "y") return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (key === "y" || e.shiftKey) redo(); else undo();
+    };
+    window.addEventListener("pointerdown", mark, true);
+    window.addEventListener("focusin", mark, true);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("pointerdown", mark, true);
+      window.removeEventListener("focusin", mark, true);
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, [undo, redo]);
+
+  const value = useMemo(() => ({
+    nodes, setNodes: apply, setNodesRaw: applyRaw,
+    undo, redo, canUndo: hist.past.length > 0, canRedo: hist.future.length > 0,
+    syncNote, dismissSync: () => setSyncNote(""),
+  }), [nodes, apply, applyRaw, undo, redo, hist, syncNote]);
   return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
 }
 
-function useOutline() {
+export function useOutline() {
   const ctx = React.useContext(OutlineContext);
   if (ctx) return ctx;
   throw new Error("OutlineProvider の中で使ってください");
@@ -163,7 +242,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, syncNote, dismissSync } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync } = useOutline();
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
@@ -226,9 +305,12 @@ export default function Outliner() {
     });
   }, [zoomNode]);
 
-  function patch(id, p) {
-    setNodes((prev) => updateNode(prev, id, p));
+  function patch(id, p, opts) {
+    setNodes((prev) => updateNode(prev, id, p), opts);
   }
+
+  // 連続して打っているあいだは、取り消しの1手にまとめる
+  const typeText = (id, text) => patch(id, { text }, { coalesce: `text:${id}` });
 
   function exportJson() {
     const text = JSON.stringify(buildExport(nodes), null, 2);
@@ -447,6 +529,24 @@ export default function Outliner() {
           )}
         </div>
         <button
+          data-outline-undo
+          onClick={undo}
+          disabled={!canUndo}
+          title="元に戻す（⌘Z）"
+          className="shrink-0 rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-25"
+        >
+          <Undo2 className="h-3 w-3" />
+        </button>
+        <button
+          data-outline-redo
+          onClick={redo}
+          disabled={!canRedo}
+          title="やり直す（⌘⇧Z）"
+          className="shrink-0 rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-25"
+        >
+          <Redo2 className="h-3 w-3" />
+        </button>
+        <button
           data-outline-import
           onClick={() => fileRef.current?.click()}
           title="Quietliner などの JSON を読み込む（後ろに足します）"
@@ -561,7 +661,7 @@ alter table outline_nodes disable row level security;
           data-zoom-title
           rows={1}
           value={zoomNode.text}
-          onChange={(e) => patch(zoomNode.id, { text: e.target.value })}
+          onChange={(e) => typeText(zoomNode.id, e.target.value)}
           onKeyDown={onTitleKeyDown}
           placeholder="無題"
           className="mb-2 w-full resize-none bg-transparent px-1 text-xl font-semibold ts-text outline-none placeholder:text-neutral-700"
@@ -606,8 +706,9 @@ alter table outline_nodes disable row level security;
                 className={classNames(
                   "mt-[5px] shrink-0 rounded p-px text-neutral-500 transition hover:text-neutral-200",
                   !hasKids && "invisible",
-                  // 触る機械ではホバーが無いので、畳んであるものは出しておく
-                  hasKids && !node.collapsed && "opacity-0 group-hover/row:opacity-100 focus:opacity-100",
+                  // 畳むつまみは、薄くても出しておく。ホバーで出すだけだと
+                  // 触る機械では一生見えず、閉じられないままになる。
+                  hasKids && !node.collapsed && "opacity-30 group-hover/row:opacity-100 focus:opacity-100",
                 )}
               >
                 {node.collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -641,7 +742,7 @@ alter table outline_nodes disable row level security;
                   value={node.text}
                   style={textStyle}
                   onChange={(e) => {
-                    patch(node.id, { text: e.target.value });
+                    typeText(node.id, e.target.value);
                     e.target.style.height = "auto";
                     e.target.style.height = `${e.target.scrollHeight}px`;
                   }}

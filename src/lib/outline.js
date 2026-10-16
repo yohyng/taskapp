@@ -485,3 +485,18 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set()) {
   }
   return buildTree([...byId.values()]);
 }
+
+// その日のメモを足す。日付の行が無ければ作って、いちばん上に置く
+// （新しい日が手元に来るように）。中では後ろに足していく。
+export function addMemoUnderDate(nodes, dateLabel, text) {
+  const made = makeNode(text);
+  const at = nodes.findIndex((n) => String(n.text || "").trim() === dateLabel);
+  if (at >= 0) {
+    const next = clone(nodes);
+    next[at].collapsed = false;
+    next[at].children = [...(next[at].children || []), made];
+    return { nodes: next, id: made.id, dayId: next[at].id };
+  }
+  const day = { ...makeNode(dateLabel), children: [made] };
+  return { nodes: [day, ...nodes], id: made.id, dayId: day.id };
+}

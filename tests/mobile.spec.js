@@ -171,7 +171,7 @@ test.describe("指での操作", () => {
     expect(small).toEqual([]);
   });
 
-  test("「タスクを追加」だけは大きく、横に広い", async ({ page }) => {
+  test("「ノート」だけは大きく、横に広い", async ({ page }) => {
     await open(page, [t("a", "もじ")]);
     const add = await page.locator("header button[data-quick-add]").boundingBox();
     expect(add.height).toBeGreaterThanOrEqual(40);

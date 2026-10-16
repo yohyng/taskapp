@@ -10,7 +10,7 @@ async function makeType(page, { label = "メモ帳", marker = "", md = "", size 
   await toPages(page);
   await page.locator('button[title*="Settings"], button[title="Columns / Category Settings"]').first().click();
   await page.getByRole("button", { name: "ブロックの種別を作る" }).click();
-  // ヘッダーの「タスクを追加」と紛れるのでダイアログ内に限定する
+  // ヘッダーの「ノート」と紛れるのでダイアログ内に限定する
   const dialog = page.locator("div.fixed.inset-0").filter({ hasText: "ブロックを作る" });
   await dialog.getByRole("button", { name: "追加", exact: true }).click();
 

@@ -13,7 +13,8 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import Outliner, { OutlineProvider } from "./Outliner";
+import Outliner, { useOutline } from "./Outliner";
+import { addMemoUnderDate } from "./lib/outline";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -21,6 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   ChevronDown,
   CheckSquare,
+  NotebookPen,
   ChevronUp,
   ChevronRight,
   ChevronLeft,
@@ -171,6 +173,7 @@ const KEEP_AWAKE_KEY = "taskspace-keep-awake";
 const PANES_KEY = "taskspace-panes-v1";
 const MAX_PANES = 4;
 const QUICK_ADD_HEIGHT_KEY = "taskspace-quick-add-height";
+const QUICK_ADD_KIND_KEY = "taskspace-quick-add-kind";
 const QUICK_ADD_HEIGHT = 96;
 const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable-v2";
 // PJ の箱のおおよその幅。これを下回ると下の段へ折り返す。
@@ -3136,6 +3139,38 @@ function App() {
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
+  // メモはアウトライン側に書く。木はアプリ全体でひとつ。
+  const { nodes: outlineNodes, setNodes: setOutlineNodes } = useOutline();
+  const [quickAddKind, setQuickAddKind] = useState(() => {
+    try { return localStorage.getItem(QUICK_ADD_KIND_KEY) === "memo" ? "memo" : "task"; } catch { return "task"; }
+  });
+  function rememberKind(kind) {
+    setQuickAddKind(kind);
+    try { localStorage.setItem(QUICK_ADD_KIND_KEY, kind); } catch { /* noop */ }
+  }
+  function submitQuickAdd(kind) {
+    const title = quickAddTitle.trim();
+    if (!title) return;
+    rememberKind(kind);
+    if (kind === "memo") {
+      addMemo(title);
+    } else {
+      addTask({
+        title, category: "", project: "", plain: true,
+        scheduledDate: quickAddWhen === "none" ? "" : quickAddWhen,
+      });
+      setToast(`「${title}」を追加しました`);
+    }
+    setQuickAddTitle("");
+  }
+
+  // きょうの日付の行に、メモを足す
+  function addMemo(text) {
+    const label = toDateKey(new Date());
+    setOutlineNodes((prev) => addMemoUnderDate(prev, label, text).nodes);
+    setToast(`${label} のメモに書きとめました`);
+  }
+
   // 画面を保つ設定。パネルを閉じても効いたままにしたいので、ここで持つ。
   const keepScreen = useKeepScreen(
     todayTasks.filter((t) => t.status !== "完了").length,
@@ -3644,7 +3679,6 @@ function App() {
     <SelectionContext.Provider value={selectionValue}>
     <SlashContext.Provider value={slashValue}>
     <BlockEditContext.Provider value={blockEditValue}>
-    <OutlineProvider>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     {/* 画面の高さに収める。はみ出した分は、下の枠それぞれの中で転がす。 */}
     <div data-app-root className="flex h-[100dvh] flex-col overflow-hidden ts-bg ts-text" style={{ fontFamily: appFontCss }}>
@@ -3695,12 +3729,12 @@ function App() {
           <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             <button
               onClick={() => setQuickAddOpen(true)}
-              title="タスクを追加"
+              title="タスクかメモを書きとめる"
               data-quick-add
               className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 sm:flex-none"
             >
-              <Plus className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">タスクを追加</span>
+              <NotebookPen className="h-3.5 w-3.5 shrink-0" />
+              <span className="truncate">ノート</span>
             </button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
@@ -4257,19 +4291,12 @@ function App() {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                const title = quickAddTitle.trim();
-                if (!title) return;
-                addTask({
-                  title, category: "", project: "", plain: true,
-                  scheduledDate: quickAddWhen === "none" ? "" : quickAddWhen,
-                });
-                setQuickAddTitle("");
-                setToast(`「${title}」を追加しました`);
+                submitQuickAdd(quickAddKind);
               }}
               className="w-full max-w-md rounded-2xl border border-white/20 ts-surface p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold ts-text">タスクを追加</span>
+                <span className="text-sm font-semibold ts-text">書きとめる</span>
                 <button
                   type="button"
                   onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }}
@@ -4328,7 +4355,7 @@ function App() {
                 <span className="h-1 w-10 rounded-full bg-white/20" />
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-1.5">
+              <div className={classNames("mt-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
                 {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
                   <button
                     key={label}
@@ -4348,11 +4375,32 @@ function App() {
 
               <div className="mt-4 flex items-center gap-2">
                 <button
-                  type="submit"
+                  type="button"
+                  data-add-task
                   disabled={!quickAddTitle.trim()}
-                  className="flex-1 rounded-xl border border-emerald-400/40 bg-emerald-500/20 px-3 py-2.5 text-sm font-medium text-emerald-100 transition hover:bg-emerald-500/30 disabled:opacity-30"
+                  onClick={() => submitQuickAdd("task")}
+                  className={classNames(
+                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
+                    quickAddKind === "task"
+                      ? "border-emerald-400/50 bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35"
+                      : "border-emerald-400/20 bg-emerald-500/10 text-emerald-200/70 hover:bg-emerald-500/20",
+                  )}
                 >
-                  追加
+                  タスクに追加
+                </button>
+                <button
+                  type="button"
+                  data-add-memo
+                  disabled={!quickAddTitle.trim()}
+                  onClick={() => submitQuickAdd("memo")}
+                  className={classNames(
+                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
+                    quickAddKind === "memo"
+                      ? "border-sky-400/50 bg-sky-500/25 text-sky-100 hover:bg-sky-500/35"
+                      : "border-sky-400/20 bg-sky-500/10 text-sky-200/70 hover:bg-sky-500/20",
+                  )}
+                >
+                  メモに追加
                 </button>
                 <button
                   type="button"
@@ -4362,7 +4410,12 @@ function App() {
                   閉じる
                 </button>
               </div>
-              <div className="mt-2 text-[10px] text-neutral-600">続けて打てば、そのまま何件でも足せます。</div>
+              <div className="mt-2 text-[10px] leading-relaxed text-neutral-600">
+                {quickAddKind === "memo"
+                  ? `メモは アウトライン の「${toDateKey(new Date())}」の下に入ります。`
+                  : "タスクは選んだ日に入ります。"}
+                {" "}Enter は前に使ったほう（いまは{quickAddKind === "memo" ? "メモ" : "タスク"}）。続けて打てば何件でも。
+              </div>
             </form>
           </div>
         )}
@@ -4388,7 +4441,6 @@ function App() {
       {activeDrag?.type === "project" && <div className="whitespace-nowrap rounded-md border border-white/30 bg-neutral-800/95 px-2 py-1.5 text-xs font-semibold ts-text shadow-2xl opacity-95">{activeDrag.project}</div>}
     </DragOverlay>
     </DndContext>
-    </OutlineProvider>
     </BlockEditContext.Provider>
     </SlashContext.Provider>
     </SelectionContext.Provider>

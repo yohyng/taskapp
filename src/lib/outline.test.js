@@ -492,3 +492,36 @@ describe('手元と向こうを突き合わせる', () => {
     expect(texts(mergeOutline(tree, tree))).toEqual(['おや', '  こ'])
   })
 })
+
+import { addMemoUnderDate } from './outline.js'
+
+describe('その日のメモ', () => {
+  it('日付の行が無ければ作って、いちばん上に置く', () => {
+    const got = addMemoUnderDate([n('さきにあった')], '2026-10-16', 'おもいつき')
+    expect(texts(got.nodes)).toEqual(['2026-10-16', '  おもいつき', 'さきにあった'])
+  })
+
+  it('同じ日が既にあれば、その中の後ろに足す', () => {
+    const base = addMemoUnderDate([], '2026-10-16', 'ひとつめ').nodes
+    const got = addMemoUnderDate(base, '2026-10-16', 'ふたつめ')
+    expect(texts(got.nodes)).toEqual(['2026-10-16', '  ひとつめ', '  ふたつめ'])
+  })
+
+  it('畳んであっても開いて入れる', () => {
+    let base = addMemoUnderDate([], '2026-10-16', 'ひとつめ').nodes
+    base = toggleCollapse(base, base[0].id)
+    const got = addMemoUnderDate(base, '2026-10-16', 'ふたつめ')
+    expect(findNode(got.nodes, got.dayId).collapsed).toBe(false)
+  })
+
+  it('別の日は、別の行になる', () => {
+    const base = addMemoUnderDate([], '2026-10-15', 'きのう').nodes
+    const got = addMemoUnderDate(base, '2026-10-16', 'きょう')
+    expect(texts(got.nodes)).toEqual(['2026-10-16', '  きょう', '2026-10-15', '  きのう'])
+  })
+
+  it('足した行の id を返す', () => {
+    const got = addMemoUnderDate([], '2026-10-16', 'めも')
+    expect(findNode(got.nodes, got.id).text).toBe('めも')
+  })
+})

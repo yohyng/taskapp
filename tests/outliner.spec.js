@@ -461,3 +461,108 @@ test.describe("ドラッグで動かす", () => {
     expect(await shape(page)).toEqual(["A", "  A1", "  A2", "B", "C", "  C1"]);
   });
 });
+
+test.describe("元に戻す・やり直す", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "A", children: [{ id: "a1", text: "A1" }] },
+      { id: "b", text: "B" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const undo = (page) => page.locator("[data-outline-undo]");
+  const redo = (page) => page.locator("[data-outline-redo]");
+
+  test("はじめは押せない", async ({ page }) => {
+    await expect(undo(page)).toBeDisabled();
+    await expect(redo(page)).toBeDisabled();
+  });
+
+  test("消した行が戻る", async ({ page }) => {
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-delete]").click();
+    expect(await shape(page)).toEqual(["A", "  A1"]);
+
+    await undo(page).click();
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+
+  test("字下げが戻る", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.press("Tab");
+    expect(await shape(page)).toEqual(["A", "  A1", "  B"]);
+
+    await page.keyboard.press("ControlOrMeta+z");
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+
+  test("打った文字は、ひとまとめで戻る", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.press("End");
+    await page.keyboard.type("ぶんしょう");
+    expect(await shape(page)).toEqual(["A", "  A1", "Bぶんしょう"]);
+
+    // 1文字ずつではなく、打ったぶんがまとめて戻る
+    await page.keyboard.press("ControlOrMeta+z");
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+
+  test("やり直せる", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("ControlOrMeta+z");
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+
+    await page.keyboard.press("ControlOrMeta+Shift+z");
+    expect(await shape(page)).toEqual(["A", "  A1", "  B"]);
+  });
+
+  test("タスク側の取り消しを巻き添えにしない", async ({ page }) => {
+    const before = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("notion-like-taskdb-prototype-v4")).tasks.length);
+
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("ControlOrMeta+z");
+
+    const after = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("notion-like-taskdb-prototype-v4")).tasks.length);
+    expect(after).toBe(before);
+  });
+
+  test("ドラッグした移動も戻る", async ({ page }) => {
+    const dot = await page.locator('[data-zoom="b"]').boundingBox();
+    const to = await page.locator('[data-row="a1"]').boundingBox();
+    // 右にずらしながら落として、A の子にする
+    await page.mouse.move(dot.x + 3, dot.y + 3);
+    await page.mouse.down();
+    await page.mouse.move(dot.x + 27, to.y + to.height - 2, { steps: 8 });
+    await page.mouse.up();
+    expect(await shape(page)).toEqual(["A", "  A1", "  B"]);
+
+    await undo(page).click();
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+});
+
+test.describe("畳むつまみ", () => {
+  test("ホバーしなくても見えている", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "おや", children: [{ id: "a1", text: "こ" }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    const fold = page.locator('[data-fold="a"]');
+    await expect(fold).toBeVisible();
+    const op = await fold.evaluate((e) => parseFloat(getComputedStyle(e).opacity));
+    expect(op).toBeGreaterThan(0.2);
+
+    await fold.click();
+    expect(await shape(page)).toEqual(["おや"]);
+  });
+});
