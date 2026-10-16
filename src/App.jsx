@@ -4064,6 +4064,9 @@ function App() {
         {quickAddOpen && (
           <div
             data-quick-add-dialog
+            role="dialog"
+            aria-modal="true"
+            onPointerDown={(e) => e.stopPropagation()}
             className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 pt-[12vh] backdrop-blur-sm"
             onClick={(e) => { if (e.target === e.currentTarget) { setQuickAddOpen(false); setQuickAddTitle(""); } }}
           >
@@ -4111,6 +4114,8 @@ function App() {
                 data-quick-add-resize
                 onPointerDown={(e) => {
                   e.preventDefault();
+                  // 後ろの一覧に伝わると、範囲選択やブロックの移動が始まってしまう
+                  e.stopPropagation();
                   const from = e.clientY;
                   const base = quickAddHeight;
                   const max = Math.max(160, window.innerHeight * 0.6);
@@ -8515,6 +8520,9 @@ function MarqueeSelect({ onSelect }) {
     function isInteractive(el) {
       return !!el.closest(
         "[data-draggable],[data-daytask],[data-task-id],[data-tray-id],[data-span-bar]," +
+        // 前に出ているもの（ポップアップやメニュー）の上は、本文の空き地ではない。
+        // ここを拾っていないと、後ろの一覧まで範囲選択が走る。
+        "[data-quick-add-dialog],[data-block-menu],[data-format-bar],[role='dialog']," +
         "button,input,textarea,select,a,[contenteditable='true']"
       );
     }

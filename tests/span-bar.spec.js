@@ -1,9 +1,11 @@
-import { test, expect, storedTask, storedTasks, block, dragTo, centerOf, todayKey } from "./helpers.js";
+import { test, expect, storedTask, storedTasks, block, dragTo, centerOf } from "./helpers.js";
 
 // 日をまたぐ帯（終日）。日付のところに落として作り、端をつまんで伸ばす。
-const day = (offset) => {
+// 画面に出ている週の i 日目（0=月 … 6=日）。きょうが何曜日でも同じ場所を指せる。
+const weekKey = (i) => {
   const d = new Date();
-  d.setDate(d.getDate() + offset);
+  const back = (d.getDay() + 6) % 7; // 月曜まで戻る
+  d.setDate(d.getDate() - back + i);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 };
 const bar = (page) => page.locator("[data-span-bar]").first();
@@ -26,7 +28,7 @@ test.describe("終日の帯", () => {
     await seed({
       tasks: [{
         id: "s1", title: "ずっとやるやつ", category: "", project: "", status: "未着手",
-        parentId: null, archived: false, plain: true, scheduledDate: day(0), dueDate: day(2),
+        parentId: null, archived: false, plain: true, scheduledDate: weekKey(1), dueDate: weekKey(3),
         stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null,
       }],
     });
@@ -40,7 +42,7 @@ test.describe("終日の帯", () => {
     await seed({
       tasks: [{
         id: "s1", title: "のばすやつ", category: "", project: "", status: "未着手",
-        parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: todayKey(),
+        parentId: null, archived: false, plain: true, scheduledDate: weekKey(0), dueDate: weekKey(0),
         stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null,
       }],
     });
@@ -49,8 +51,8 @@ test.describe("終日の帯", () => {
     await dragTo(page, await centerOf(grab), { x: before.x + before.width + 300, y: before.y + before.height / 2 });
 
     // 締め切りが後ろへ動き、帯も長くなる
-    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(todayKey());
-    expect((await storedTask(page, "s1")).dueDate > todayKey()).toBe(true);
+    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(weekKey(0));
+    expect((await storedTask(page, "s1")).dueDate > weekKey(0)).toBe(true);
     const after = await bar(page).boundingBox();
     expect(after.width).toBeGreaterThan(before.width);
   });
@@ -59,7 +61,7 @@ test.describe("終日の帯", () => {
     await seed({
       tasks: [{
         id: "s1", title: "ちぢめるやつ", category: "", project: "", status: "未着手",
-        parentId: null, archived: false, plain: true, scheduledDate: day(2), dueDate: day(4),
+        parentId: null, archived: false, plain: true, scheduledDate: weekKey(2), dueDate: weekKey(4),
         stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null,
       }],
     });
@@ -74,13 +76,13 @@ test.describe("終日の帯", () => {
   test("ほかのタスクは巻き込まない", async ({ page, seed }) => {
     await seed({
       tasks: [
-        { id: "s1", title: "のばすやつ", category: "", project: "", status: "未着手", parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: todayKey(), stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null },
-        { id: "s2", title: "となり", category: "", project: "", status: "未着手", parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: "", stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null },
+        { id: "s1", title: "のばすやつ", category: "", project: "", status: "未着手", parentId: null, archived: false, plain: true, scheduledDate: weekKey(0), dueDate: weekKey(0), stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null },
+        { id: "s2", title: "となり", category: "", project: "", status: "未着手", parentId: null, archived: false, plain: true, scheduledDate: weekKey(0), dueDate: "", stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null },
       ],
     });
     const box = await bar(page).boundingBox();
     await dragTo(page, await centerOf(bar(page).locator('[data-span-grab="end"]')), { x: box.x + box.width + 250, y: box.y + box.height / 2 });
-    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(todayKey());
+    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(weekKey(0));
     expect((await storedTask(page, "s2")).dueDate).toBe("");
     expect((await storedTasks(page)).length).toBe(2);
   });
@@ -89,7 +91,7 @@ test.describe("終日の帯", () => {
 test.describe("帯と曜日のいったりきたり", () => {
   const spanTask = (over = {}) => ({
     id: "s1", title: "またぐやつ", category: "", project: "", status: "未着手",
-    parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: day(2),
+    parentId: null, archived: false, plain: true, scheduledDate: weekKey(1), dueDate: weekKey(3),
     stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null, ...over,
   });
 
@@ -144,10 +146,11 @@ test.describe("帯と曜日のいったりきたり", () => {
   });
 
   test("完了しても、端をつまんで日は変えられる", async ({ page, seed }) => {
-    await seed({ tasks: [spanTask({ status: "完了" })] });
+    // 週のはじめに置く。きょうが週末でも、右に伸ばす余地がある。
+    await seed({ tasks: [spanTask({ status: "完了", scheduledDate: weekKey(0), dueDate: weekKey(1) })] });
     const box = await bar(page).boundingBox();
     await dragTo(page, await centerOf(bar(page).locator('[data-span-grab="end"]')), { x: box.x + box.width + 200, y: box.y + box.height / 2 });
-    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(day(2));
+    await expect.poll(async () => (await storedTask(page, "s1")).dueDate).not.toBe(weekKey(1));
   });
 
   test("端をつまんだだけでは、曜日に移らない", async ({ page, seed }) => {
@@ -161,7 +164,7 @@ test.describe("帯と曜日のいったりきたり", () => {
 test.describe("帯のドラッグが、ほかの操作とぶつからない", () => {
   const spanTask = {
     id: "s1", title: "またぐやつ", category: "", project: "", status: "未着手",
-    parentId: null, archived: false, plain: true, scheduledDate: todayKey(), dueDate: day(2),
+    parentId: null, archived: false, plain: true, scheduledDate: weekKey(1), dueDate: weekKey(3),
     stock: false, style: null, pageId: null, rowKey: null, col: 0, colWidth: null,
   };
 

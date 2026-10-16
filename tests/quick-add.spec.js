@@ -148,3 +148,37 @@ test.describe("入力欄の大きさを変える", () => {
     expect(await h(page)).toBe(96);
   });
 });
+
+test.describe("ポップアップの操作が、後ろに漏れない", () => {
+  const grip = (page) => page.locator("[data-quick-add-resize]");
+  // 範囲選択の矩形が出ているか
+  const marquee = (page) => page.evaluate(() =>
+    [...document.querySelectorAll("div")].some((e) => {
+      const st = getComputedStyle(e);
+      return st.position === "fixed" && /sky|border-sky/.test(e.className) &&
+        e.getBoundingClientRect().height > 40 && e.getBoundingClientRect().width > 40;
+    }));
+
+  test("大きさを変えても、後ろの範囲選択が走らない", async ({ page }) => {
+    await open(page);
+    const g = await grip(page).boundingBox();
+    await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(g.x + g.width / 2 + 150, g.y + 220, { steps: 10 });
+    expect(await marquee(page)).toBe(false);
+    await page.mouse.up();
+    // 後ろのタスクが選ばれていない
+    await expect(page.getByText("件選択中", { exact: false })).toHaveCount(0);
+  });
+
+  test("ポップアップの余白をドラッグしても、後ろは動かない", async ({ page }) => {
+    await open(page);
+    const box = await dialog(page).locator("form").boundingBox();
+    await page.mouse.move(box.x + 10, box.y + box.height - 6);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 200, box.y + box.height + 260, { steps: 10 });
+    expect(await marquee(page)).toBe(false);
+    await page.mouse.up();
+    await expect(page.getByText("件選択中", { exact: false })).toHaveCount(0);
+  });
+});
