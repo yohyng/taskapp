@@ -1,11 +1,41 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2 } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows,
-  insertAfter, indent, outdent, toggleCollapse, mergeIntoPrevious, updateNode,
+  insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
+  moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
+  countChars, hasStoredBody, truncateTitle,
 } from "./lib/outline";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
+
+// Quietliner と同じ見本（色の値もそのまま）
+const TEXT_COLORS = [
+  { label: "そのまま", value: null },
+  { label: "赤", value: "#e03535" },
+  { label: "橙", value: "#d97322" },
+  { label: "黄", value: "#b88b0f" },
+  { label: "緑", value: "#1a8c40" },
+  { label: "青", value: "#2355a8" },
+  { label: "紫", value: "#7b3fbf" },
+  { label: "灰", value: "#767676" },
+];
+const BG_COLORS = [
+  { label: "なし", value: null },
+  { label: "赤", value: "rgba(255,80,80,0.10)" },
+  { label: "橙", value: "rgba(255,160,50,0.12)" },
+  { label: "黄", value: "rgba(255,220,50,0.13)" },
+  { label: "緑", value: "rgba(50,200,100,0.10)" },
+  { label: "青", value: "rgba(50,130,255,0.10)" },
+  { label: "紫", value: "rgba(180,80,255,0.10)" },
+  { label: "灰", value: "rgba(120,120,120,0.09)" },
+];
+// 見出しの大きさ。Quietliner の倍率に合わせてある。
+const HEADING = {
+  1: { fontSize: "1.55em", fontWeight: 650, lineHeight: 1.28 },
+  2: { fontSize: "1.28em", fontWeight: 610, lineHeight: 1.32 },
+  3: { fontSize: "1.1em", fontWeight: 560 },
+};
 
 function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
@@ -16,6 +46,7 @@ function defaultOutline() {
     ensureNode({ text: "Quietliner", children: [
       { text: "Enter で次の行、Shift+Enter で行の中の改行" },
       { text: "Tab で字下げ、Shift+Tab で戻す" },
+      { text: "Alt+↑↓ で行ごと入れ替え、Ctrl/⌘+Enter で完了" },
       { text: "行頭の ● を押すと、その行の中に入る（ズーム）" },
     ] }),
   ];
@@ -29,92 +60,170 @@ function load() {
   return defaultOutline();
 }
 
-// アウトライン。Quietliner の操作感を、まずこの範囲で。
+// アウトライン（Quietliner）。
 export default function Outliner() {
   const [nodes, setNodes] = useState(load);
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
-  // 編集に入った直後に、カーソルをどこへ置くか
+  const [menuId, setMenuId] = useState(null);
+  // 編集に入ったときのカーソル位置。-1 は末尾。
   const caretRef = useRef(null);
-  const areaRef = useRef(null);
+  const menuRef = useRef(null);
 
   useEffect(() => {
     try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
   }, [nodes]);
 
-  // ズームしている行の中だけを出す
+  // メニューの外を押したら閉じる
+  useEffect(() => {
+    if (!menuId) return;
+    function onDown(e) {
+      if (!menuRef.current?.contains(e.target)) setMenuId(null);
+    }
+    window.addEventListener("pointerdown", onDown);
+    return () => window.removeEventListener("pointerdown", onDown);
+  }, [menuId]);
+
   const zoomPath = useMemo(() => (zoomId ? pathTo(nodes, zoomId) : null), [nodes, zoomId]);
-  // ズーム先が消えていたら、ホームとして描く（戻すのは描画の外で）
   const zoomNode = zoomPath?.at(-1) || null;
   const shown = zoomNode ? zoomNode.children : nodes;
   const rows = useMemo(() => visibleRows(shown), [shown]);
 
-  const edit = useCallback((id, caret = null) => {
+  const edit = useCallback((id, caret = -1) => {
     caretRef.current = caret;
     setEditingId(id);
   }, []);
 
+  // ズームしているときは、その子の並びだけを差し替える
+  const applyShown = useCallback((makeNext) => {
+    setNodes((prev) => {
+      if (!zoomNode) return makeNext(prev);
+      const here = pathTo(prev, zoomNode.id)?.at(-1);
+      if (!here) return prev;
+      return updateNode(prev, zoomNode.id, { children: makeNext(here.children) });
+    });
+  }, [zoomNode]);
+
+  function patch(id, p) {
+    setNodes((prev) => updateNode(prev, id, p));
+  }
+
   function addAtEnd() {
     const made = makeNode("");
-    setNodes((prev) => {
-      if (!zoomNode) return [...prev, made];
-      return updateNode(prev, zoomNode.id, { children: [...zoomNode.children, made] });
-    });
+    applyShown((list) => [...list, made]);
     edit(made.id, 0);
   }
 
-  // 上下の行へ移る
   function moveFocus(id, dir) {
     const at = rows.findIndex((r) => r.node.id === id);
     const next = rows[at + dir];
-    if (next) edit(next.node.id, dir > 0 ? 0 : next.node.text.length);
+    if (next) edit(next.node.id, dir > 0 ? 0 : -1);
   }
 
   function onKeyDown(e, node) {
     const el = e.currentTarget;
-    const atStart = el.selectionStart === 0 && el.selectionEnd === 0;
-    const atEnd = el.selectionStart === el.value.length && el.selectionEnd === el.value.length;
+    const value = el.value;
+    const selStart = el.selectionStart;
+    const selEnd = el.selectionEnd;
+    const collapsed = selStart === selEnd;
+    const meta = e.ctrlKey || e.metaKey;
+    if (e.nativeEvent.isComposing) return; // かな漢字変換の途中は触らない
 
+    // Ctrl/⌘+Enter で完了を切り替える
+    if (meta && e.key === "Enter") {
+      e.preventDefault();
+      patch(node.id, { completed: !node.completed });
+      return;
+    }
+    // Ctrl/⌘+. で畳む／開く
+    if (meta && e.key === ".") {
+      if (!node.children?.length) return;
+      e.preventDefault();
+      patch(node.id, { collapsed: !node.collapsed });
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // カーソルのところで割る。後ろ半分は新しい行へ。
-      const before = el.value.slice(0, el.selectionStart);
-      const after = el.value.slice(el.selectionEnd);
-      const made = { ...makeNode(after) };
-      setNodes((prev) => insertAfter(updateNode(prev, node.id, { text: before }), node.id, made));
+      const before = value.slice(0, selStart);
+      const after = value.slice(selEnd);
+      const made = makeNode(after);
+      applyShown((list) => insertAfter(updateNode(list, node.id, { text: before }), node.id, made));
       edit(made.id, 0);
       return;
     }
     if (e.key === "Tab") {
       e.preventDefault();
-      const caret = el.selectionStart;
-      setNodes((prev) => (e.shiftKey ? outdent(prev, node.id) : indent(prev, node.id)));
-      edit(node.id, caret);
+      applyShown((list) => (e.shiftKey ? outdent(list, node.id) : indent(list, node.id)));
+      edit(node.id, selStart);
       return;
     }
-    if (e.key === "Backspace" && atStart && el.selectionStart === el.selectionEnd) {
-      const got = mergeIntoPrevious(zoomNode ? shown : nodes, node.id);
-      if (!got.focusId) return; // いちばん上、または子を持っている行
+    // Alt+↑↓ で、兄弟のあいだを行ごと動かす
+    if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
       e.preventDefault();
-      setNodes((prev) => {
-        if (!zoomNode) return got.nodes;
-        return updateNode(prev, zoomNode.id, { children: got.nodes });
-      });
+      applyShown((list) => moveSibling(list, node.id, e.key === "ArrowUp" ? -1 : 1));
+      edit(node.id, selStart);
+      return;
+    }
+    if (e.key === "Backspace" && collapsed && selStart === 0) {
+      // 空の行は消す。子がいれば、その場所に繰り上げる。
+      if (value.length === 0) {
+        e.preventDefault();
+        const got = node.children?.length
+          ? deleteNodeKeepChildren(shown, node.id)
+          : deleteNodeSafe(shown, node.id);
+        applyShown(() => got.nodes);
+        if (got.focusId) edit(got.focusId, -1);
+        return;
+      }
+      const got = mergeIntoPrevious(shown, node.id);
+      if (!got.focusId) return;
+      e.preventDefault();
+      applyShown(() => got.nodes);
       edit(got.focusId, got.caret);
       return;
     }
-    if (e.key === "ArrowUp" && atStart) { e.preventDefault(); moveFocus(node.id, -1); return; }
-    if (e.key === "ArrowDown" && atEnd) { e.preventDefault(); moveFocus(node.id, 1); return; }
+    // 行末の Delete で、次の行を引き上げる
+    if (e.key === "Delete" && collapsed && selStart === value.length) {
+      const got = mergeNext(shown, node.id);
+      if (got.caret == null) return;
+      e.preventDefault();
+      applyShown(() => got.nodes);
+      edit(node.id, got.caret);
+      return;
+    }
+    if (e.key === "ArrowUp" && collapsed && selStart === 0) { e.preventDefault(); moveFocus(node.id, -1); return; }
+    if (e.key === "ArrowDown" && collapsed && selEnd === value.length) { e.preventDefault(); moveFocus(node.id, 1); return; }
+    if (e.key === "ArrowLeft" && collapsed && selStart === 0) { e.preventDefault(); moveFocus(node.id, -1); return; }
+    if (e.key === "ArrowRight" && collapsed && selEnd === value.length) { e.preventDefault(); moveFocus(node.id, 1); return; }
     if (e.key === "Escape") { e.preventDefault(); setEditingId(null); }
   }
 
-  function setText(id, text) {
-    setNodes((prev) => updateNode(prev, id, { text }));
+  // ズームの題。Enter でいちばん上の子を作り、↓ で中に降りる。
+  function onTitleKeyDown(e) {
+    if (e.nativeEvent.isComposing) return;
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      const made = makeNode("");
+      setNodes((prev) => insertChild(prev, zoomNode.id, made));
+      edit(made.id, 0);
+      return;
+    }
+    if (e.key === "ArrowDown" && rows[0]) { e.preventDefault(); edit(rows[0].node.id, 0); }
+  }
+
+  function textareaRef(el, node) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+    if (el.dataset.placed === node.id) return;
+    el.dataset.placed = node.id;
+    const caret = caretRef.current;
+    const at = caret == null || caret < 0 ? el.value.length : Math.min(caret, el.value.length);
+    el.setSelectionRange(at, at);
   }
 
   return (
     <div data-outliner className="mx-auto w-full max-w-3xl px-1 py-2">
-      {/* いまどこにいるか。押すとその高さまで戻る。 */}
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500">
         <button
           data-crumb
@@ -128,42 +237,61 @@ export default function Outliner() {
             <span className="opacity-40">/</span>
             <button
               data-crumb
+              title={node.text}
               onClick={() => setZoomId(node.id)}
               className={classNames(
-                "max-w-[12rem] truncate rounded px-1.5 py-0.5 transition hover:bg-white/[0.07]",
+                "rounded px-1.5 py-0.5 transition hover:bg-white/[0.07]",
                 i === zoomPath.length - 1 && "ts-text",
               )}
             >
-              {node.text || "（無題）"}
+              {truncateTitle(node.text)}
             </button>
           </React.Fragment>
         ))}
       </div>
 
       {zoomNode && (
-        <h2 data-zoom-title className="mb-2 px-1 text-xl font-semibold ts-text">
-          {zoomNode.text || "（無題）"}
-        </h2>
+        <textarea
+          key={zoomNode.id}
+          data-zoom-title
+          rows={1}
+          value={zoomNode.text}
+          onChange={(e) => patch(zoomNode.id, { text: e.target.value })}
+          onKeyDown={onTitleKeyDown}
+          placeholder="無題"
+          className="mb-2 w-full resize-none bg-transparent px-1 text-xl font-semibold ts-text outline-none placeholder:text-neutral-700"
+        />
       )}
 
       <div className="flex flex-col">
         {rows.map(({ node, depth }) => {
           const hasKids = !!node.children?.length;
+          const chars = countChars(node);
+          const heading = HEADING[node.headingLevel] || null;
+          const textStyle = {
+            ...(heading || {}),
+            ...(node.textColor ? { color: node.textColor } : {}),
+          };
           return (
             <div
               key={node.id}
               data-row={node.id}
               data-depth={depth}
-              className="group/row flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]"
-              style={{ marginLeft: depth * 18 }}
+              data-completed={node.completed ? "true" : "false"}
+              data-heading={node.headingLevel || ""}
+              style={{ marginLeft: depth * 20, background: node.bgColor || undefined }}
+              className="group/row relative flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]"
             >
               <button
                 data-fold={node.id}
                 onClick={() => setNodes((prev) => toggleCollapse(prev, node.id))}
-                title={hasKids ? (node.collapsed ? "開く" : "畳む") : ""}
+                title={hasKids ? (node.collapsed ? "展開" : "折りたたむ") : ""}
+                disabled={!hasKids}
                 className={classNames(
-                  "mt-[3px] shrink-0 rounded p-px text-neutral-500 transition hover:text-neutral-200",
+                  "mt-[5px] shrink-0 rounded p-px text-neutral-500 transition hover:text-neutral-200",
                   !hasKids && "invisible",
+                  // 触る機械ではホバーが無いので、畳んであるものは出しておく
+                  hasKids && !node.collapsed && "opacity-0 group-hover/row:opacity-100 focus:opacity-100",
                 )}
               >
                 {node.collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
@@ -172,10 +300,11 @@ export default function Outliner() {
               <button
                 data-zoom={node.id}
                 onClick={() => { setZoomId(node.id); setEditingId(null); }}
-                title="この中に入る"
+                title="クリックでズーム"
                 className={classNames(
-                  "mt-[7px] grid h-3 w-3 shrink-0 place-items-center rounded-full transition",
-                  node.collapsed ? "bg-white/25 ring-4 ring-white/10" : "bg-white/40 hover:ring-4 hover:ring-white/10",
+                  "mt-[8px] grid h-[7px] w-[7px] shrink-0 place-items-center rounded-full transition",
+                  node.collapsed ? "bg-white/70 ring-[5px] ring-white/15" : "bg-white/55 hover:ring-[5px] hover:ring-white/15",
+                  hasStoredBody(node) && !node.collapsed && "ring-[3px] ring-white/10",
                 )}
               >
                 <span className="sr-only">ズーム</span>
@@ -186,36 +315,145 @@ export default function Outliner() {
                   autoFocus
                   data-outline-input
                   data-row-text
-                  ref={(el) => {
-                    if (!el || areaRef.current === el) return;
-                    areaRef.current = el;
-                    const caret = caretRef.current;
-                    if (caret != null) el.setSelectionRange(caret, caret);
-                    el.style.height = "auto";
-                    el.style.height = `${el.scrollHeight}px`;
-                  }}
+                  ref={(el) => textareaRef(el, node)}
                   rows={1}
                   value={node.text}
+                  style={textStyle}
                   onChange={(e) => {
-                    setText(node.id, e.target.value);
+                    patch(node.id, { text: e.target.value });
                     e.target.style.height = "auto";
                     e.target.style.height = `${e.target.scrollHeight}px`;
                   }}
                   onKeyDown={(e) => onKeyDown(e, node)}
                   onBlur={() => setEditingId((cur) => (cur === node.id ? null : cur))}
-                  className="min-w-0 flex-1 resize-none bg-transparent px-1 py-0 text-[14px] leading-relaxed ts-text outline-none"
+                  className={classNames(
+                    "min-w-0 flex-1 resize-none bg-transparent px-1 py-0 text-[14px] leading-relaxed ts-text outline-none",
+                    node.completed && "line-through opacity-50",
+                  )}
                 />
               ) : (
                 <div
                   data-row-text
-                  onClick={() => edit(node.id, node.text.length)}
+                  onClick={() => edit(node.id, -1)}
+                  style={textStyle}
                   className={classNames(
-                    "min-w-0 flex-1 cursor-text whitespace-pre-wrap break-words px-1 text-[14px] leading-relaxed",
+                    "min-w-0 flex-1 cursor-text whitespace-pre-wrap break-words px-1 py-0 text-[14px] leading-relaxed",
                     node.text ? "ts-text" : "text-neutral-600",
                     node.completed && "line-through opacity-50",
                   )}
                 >
                   {node.text || "空の行"}
+                </div>
+              )}
+
+              <div className="flex shrink-0 items-center gap-0.5 self-start pt-0.5">
+                {node.favorite && <Star className="h-3 w-3 shrink-0 fill-amber-300 text-amber-300" />}
+                <span
+                  data-chars
+                  title="この中にある文字の数"
+                  className="min-w-[1.5rem] text-right text-[10px] tabular-nums text-neutral-700 opacity-0 transition group-hover/row:opacity-100"
+                >
+                  {chars > 0 ? chars : ""}
+                </span>
+                <button
+                  data-row-menu={node.id}
+                  onClick={() => setMenuId((v) => (v === node.id ? null : node.id))}
+                  title="この行の設定"
+                  className="rounded p-0.5 text-neutral-600 opacity-0 transition hover:bg-white/10 hover:text-neutral-200 group-hover/row:opacity-100"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </button>
+              </div>
+
+              {menuId === node.id && (
+                <div
+                  ref={menuRef}
+                  data-row-menu-panel
+                  className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border border-white/15 ts-surface p-1 shadow-2xl"
+                >
+                  <button onClick={() => { setMenuId(null); setZoomId(node.id); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">⊙ ズームイン</button>
+                  <button onClick={() => { setMenuId(null); patch(node.id, { completed: !node.completed }); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">
+                    <Check className="h-3 w-3" /> {node.completed ? "完了を解除" : "完了にする"}
+                  </button>
+                  <button onClick={() => { setMenuId(null); patch(node.id, { favorite: !node.favorite }); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">
+                    <Star className="h-3 w-3" /> {node.favorite ? "お気に入り解除" : "お気に入り"}
+                  </button>
+                  {hasKids && (
+                    <button onClick={() => { setMenuId(null); setNodes((prev) => toggleCollapse(prev, node.id)); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">
+                      {node.collapsed ? "▶ 展開" : "▼ 折りたたむ"}
+                    </button>
+                  )}
+
+                  <div className="my-1 border-t border-white/10" />
+                  <div className="px-2 py-0.5 text-[10px] text-neutral-600">見出し</div>
+                  <div className="flex gap-1 px-1.5 pb-1">
+                    {[null, 1, 2, 3].map((level) => (
+                      <button
+                        key={level ?? "body"}
+                        data-heading-chip={level ?? "body"}
+                        onClick={() => patch(node.id, { headingLevel: level })}
+                        className={classNames(
+                          "flex-1 rounded border px-1 py-1 text-[10px] transition",
+                          (node.headingLevel || null) === level
+                            ? "border-white/30 bg-white/15 ts-text"
+                            : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                        )}
+                      >
+                        {level === null ? "本文" : `H${level}`}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="px-2 py-0.5 text-[10px] text-neutral-600">文字色</div>
+                  <div className="flex flex-wrap gap-1 px-1.5 pb-1">
+                    {TEXT_COLORS.map(({ label, value }) => (
+                      <button
+                        key={label}
+                        title={label}
+                        data-text-color={value || "none"}
+                        onClick={() => patch(node.id, { textColor: value })}
+                        style={value ? { background: value } : undefined}
+                        className={classNames(
+                          "h-5 w-5 rounded border text-[9px] text-neutral-400",
+                          (node.textColor || null) === value ? "border-white/60" : "border-white/15",
+                        )}
+                      >
+                        {!value && "✕"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="px-2 py-0.5 text-[10px] text-neutral-600">背景色</div>
+                  <div className="flex flex-wrap gap-1 px-1.5 pb-1">
+                    {BG_COLORS.map(({ label, value }) => (
+                      <button
+                        key={label}
+                        title={label}
+                        data-bg-color={value || "none"}
+                        onClick={() => patch(node.id, { bgColor: value })}
+                        style={value ? { background: value } : undefined}
+                        className={classNames(
+                          "h-5 w-5 rounded border text-[9px] text-neutral-400",
+                          (node.bgColor || null) === value ? "border-white/60" : "border-white/15",
+                        )}
+                      >
+                        {!value && "✕"}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="my-1 border-t border-white/10" />
+                  <button
+                    data-row-delete
+                    onClick={() => {
+                      setMenuId(null);
+                      const got = deleteNodeSafe(shown, node.id);
+                      applyShown(() => got.nodes);
+                    }}
+                    className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-red-300/80 hover:bg-red-400/10"
+                  >
+                    <Trash2 className="h-3 w-3" /> 削除
+                  </button>
                 </div>
               )}
             </div>

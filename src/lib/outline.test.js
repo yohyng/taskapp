@@ -137,3 +137,131 @@ describe('書き換え', () => {
     expect(got[0].text).toBe('B')
   })
 })
+
+import {
+  insertChild, moveSibling, deleteNodeSafe, deleteNodeKeepChildren, mergeNext,
+  countChars, hasStoredBody, collectFavorites, extractTags, collectAllTags, truncateTitle,
+} from './outline.js'
+
+describe('子の先頭に入れる', () => {
+  it('ズームの題で改行したら、いちばん上の子になる', () => {
+    const tree = [n('親', [n('先客')])]
+    const got = insertChild(tree, idOf(tree, '親'), makeNode('新入り'))
+    expect(texts(got)).toEqual(['親', '  新入り', '  先客'])
+  })
+
+  it('畳んでいても開いて入れる', () => {
+    let tree = [n('親', [n('子')])]
+    tree = toggleCollapse(tree, idOf(tree, '親'))
+    const got = insertChild(tree, idOf(tree, '親'), makeNode('新'))
+    expect(texts(got)).toEqual(['親', '  新', '  子'])
+  })
+})
+
+describe('兄弟のあいだで動かす', () => {
+  it('上の兄弟と入れ替わる（木ごと）', () => {
+    const tree = [n('A'), n('B', [n('B1')])]
+    expect(texts(moveSibling(tree, idOf(tree, 'B'), -1))).toEqual(['B', '  B1', 'A'])
+  })
+
+  it('端では動かない', () => {
+    const tree = [n('A'), n('B')]
+    expect(moveSibling(tree, idOf(tree, 'A'), -1)).toBe(tree)
+    expect(moveSibling(tree, idOf(tree, 'B'), 1)).toBe(tree)
+  })
+
+  it('親をまたいでは動かない', () => {
+    const tree = [n('A', [n('A1')]), n('B')]
+    expect(moveSibling(tree, idOf(tree, 'A1'), 1)).toBe(tree)
+  })
+})
+
+describe('消したあとの行き先', () => {
+  it('前の行に移る', () => {
+    const tree = [n('A'), n('B'), n('C')]
+    const got = deleteNodeSafe(tree, idOf(tree, 'B'))
+    expect(texts(got.nodes)).toEqual(['A', 'C'])
+    expect(got.focusId).toBe(idOf(tree, 'A'))
+  })
+
+  it('いちばん上を消したら、次の行に移る', () => {
+    const tree = [n('A'), n('B')]
+    const got = deleteNodeSafe(tree, idOf(tree, 'A'))
+    expect(got.focusId).toBe(idOf(tree, 'B'))
+  })
+
+  it('最後の1行を消しても、空の行が残る', () => {
+    const tree = [n('ひとつだけ')]
+    const got = deleteNodeSafe(tree, idOf(tree, 'ひとつだけ'))
+    expect(got.nodes).toHaveLength(1)
+    expect(got.nodes[0].text).toBe('')
+    expect(got.focusId).toBe(got.nodes[0].id)
+  })
+
+  it('子を残して消すと、子が自分の場所に繰り上がる', () => {
+    const tree = [n('A'), n('B', [n('B1'), n('B2')]), n('C')]
+    const got = deleteNodeKeepChildren(tree, idOf(tree, 'B'))
+    expect(texts(got.nodes)).toEqual(['A', 'B1', 'B2', 'C'])
+  })
+})
+
+describe('行末の Delete', () => {
+  it('次の行を引き上げてくっつける', () => {
+    const tree = [n('あい'), n('うえ')]
+    const got = mergeNext(tree, idOf(tree, 'あい'))
+    expect(texts(got.nodes)).toEqual(['あいうえ'])
+    expect(got.caret).toBe(2)
+  })
+
+  it('次の行が子を持っているときは、何もしない', () => {
+    const tree = [n('A'), n('B', [n('B1')])]
+    expect(mergeNext(tree, idOf(tree, 'A')).nodes).toBe(tree)
+  })
+
+  it('いちばん下では何もしない', () => {
+    const tree = [n('A')]
+    expect(mergeNext(tree, idOf(tree, 'A')).nodes).toBe(tree)
+  })
+})
+
+describe('見た目のための数え方', () => {
+  it('下にある文字も数える', () => {
+    expect(countChars(n('あい', [n('うえお')]))).toBe(5)
+  })
+
+  it('中身の多い行は、点に輪をつける', () => {
+    expect(hasStoredBody(n('みじかい'))).toBe(false)
+    expect(hasStoredBody(n('ある\n改行'))).toBe(true)
+    expect(hasStoredBody(n('親', [n('あ'.repeat(41))]))).toBe(true)
+  })
+
+  it('星つきを上から集める', () => {
+    const tree = [{ ...n('A', [{ ...n('A1'), favorite: true }]) }, { ...n('B'), favorite: true }]
+    expect(collectFavorites(tree).map((x) => x.text)).toEqual(['A1', 'B'])
+  })
+})
+
+describe('タグ', () => {
+  it('#のあとを拾い、小文字にそろえる', () => {
+    expect(extractTags('これは #Memo と #仕事 のはなし')).toEqual(['memo', '仕事'])
+  })
+
+  it('句読点では切る', () => {
+    expect(extractTags('#メモ、あと')).toEqual(['メモ'])
+  })
+
+  it('木ぜんたいから集めて並べる', () => {
+    const tree = [n('#b のこと', [n('#a と #b')])]
+    expect(collectAllTags(tree)).toEqual(['a', 'b'])
+  })
+})
+
+describe('パンくずの文字', () => {
+  it('長いものは切って … を足す', () => {
+    expect(truncateTitle('あ'.repeat(30))).toBe('あ'.repeat(18) + '…')
+  })
+
+  it('空なら無題', () => {
+    expect(truncateTitle('   ')).toBe('無題')
+  })
+})

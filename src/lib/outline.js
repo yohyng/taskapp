@@ -161,3 +161,116 @@ export function mergeIntoPrevious(nodes, id) {
   next = removeNode(next, id);
   return { nodes: next, focusId: prev.id, caret };
 }
+
+// --- ここから、Quietliner の作法に合わせた操作 ---
+
+// その行の下、子の先頭に入れる（ズームの題で Enter したときなど）
+export function insertChild(nodes, id, node) {
+  const next = clone(nodes);
+  const spot = locate(next, id);
+  if (!spot) return nodes;
+  const target = spot.siblings[spot.index];
+  target.collapsed = false;
+  target.children = [node, ...(target.children || [])];
+  return next;
+}
+
+// 兄弟のあいだで入れ替える（Alt+↑ / ↓）。木ごと動く。
+export function moveSibling(nodes, id, dir) {
+  const next = clone(nodes);
+  const spot = locate(next, id);
+  if (!spot) return nodes;
+  const to = spot.index + (dir < 0 ? -1 : 1);
+  if (to < 0 || to >= spot.siblings.length) return nodes;
+  const tmp = spot.siblings[spot.index];
+  spot.siblings[spot.index] = spot.siblings[to];
+  spot.siblings[to] = tmp;
+  return next;
+}
+
+// 消したあと、どこに行くか。最後の1行を消したら空の行を1つ残す。
+export function deleteNodeSafe(nodes, id) {
+  const before = visibleRows(nodes).map((r) => r.node.id);
+  const at = before.indexOf(id);
+  const next = removeNode(nodes, id);
+  if (next === nodes) return { nodes, focusId: before[0] || null };
+  let focusId = before[at - 1] || before[at + 1] || null;
+  if (!next.length) {
+    const fresh = makeNode("");
+    return { nodes: [fresh], focusId: fresh.id };
+  }
+  if (focusId === id) focusId = visibleRows(next)[0]?.node.id || null;
+  return { nodes: next, focusId };
+}
+
+// 消すが、子は残す（自分のいた場所に繰り上げる）
+export function deleteNodeKeepChildren(nodes, id) {
+  const before = visibleRows(nodes).map((r) => r.node.id);
+  const at = before.indexOf(id);
+  const next = clone(nodes);
+  const spot = locate(next, id);
+  if (!spot) return { nodes, focusId: before[0] || null };
+  const kids = spot.siblings[spot.index].children || [];
+  spot.siblings.splice(spot.index, 1, ...kids);
+  let focusId = before[at - 1] || kids[0]?.id || before[at + 1] || null;
+  if (!next.length) {
+    const fresh = makeNode("");
+    return { nodes: [fresh], focusId: fresh.id };
+  }
+  return { nodes: next, focusId };
+}
+
+// 行末の Delete で、次の行を引き上げてくっつける（Backspace の逆）
+export function mergeNext(nodes, id) {
+  const rows = visibleRows(nodes);
+  const at = rows.findIndex((r) => r.node.id === id);
+  const me = rows[at]?.node;
+  const after = rows[at + 1]?.node;
+  if (!me || !after || after.children?.length) return { nodes, caret: null };
+  const caret = me.text.length;
+  let next = updateNode(nodes, id, { text: me.text + after.text });
+  next = removeNode(next, after.id);
+  return { nodes: next, caret };
+}
+
+// その行より下にある文字の数（自分も含む）。行の右に小さく出す。
+export function countChars(node) {
+  const own = node?.text?.length || 0;
+  return own + (node?.children || []).reduce((sum, c) => sum + countChars(c), 0);
+}
+
+// 中身を持っている行か（ズームの点に輪を出すかどうか）
+export function hasStoredBody(node) {
+  const own = String(node?.text || "");
+  const childLen = (node?.children || []).reduce((sum, c) => sum + countChars(c), 0);
+  return Boolean(own.includes("\n") || own.length > 80 || childLen > 40);
+}
+
+// 星をつけた行を、上から順に集める
+export function collectFavorites(nodes, out = []) {
+  for (const node of nodes) {
+    if (node.favorite) out.push(node);
+    collectFavorites(node.children || [], out);
+  }
+  return out;
+}
+
+// #タグ。小文字でそろえる。
+export function extractTags(text) {
+  const found = String(text || "").match(/#([^\s#.,!?。、！？]+)/g) || [];
+  return found.map((m) => m.slice(1).toLowerCase());
+}
+
+export function collectAllTags(nodes, out = new Set()) {
+  for (const node of nodes) {
+    extractTags(node.text).forEach((t) => out.add(t));
+    collectAllTags(node.children || [], out);
+  }
+  return [...out].sort();
+}
+
+// 長い見出しは、パンくずでは短くする
+export function truncateTitle(text, max = 18) {
+  const normalized = String(text || "").replace(/\s+/g, " ").trim() || "無題";
+  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
+}
