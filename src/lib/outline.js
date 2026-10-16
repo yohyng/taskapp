@@ -274,3 +274,138 @@ export function truncateTitle(text, max = 18) {
   const normalized = String(text || "").replace(/\s+/g, " ").trim() || "無題";
   return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
 }
+
+// --- 持ち込み・持ち出し ---
+
+// Quietliner の書き出しも、素の配列も受ける。
+// 置き場所の名前が版によって違うので、ありそうなところを順に見る。
+export function extractImportItems(parsed) {
+  if (Array.isArray(parsed)) return parsed.map(ensureNode);
+  if (!parsed || typeof parsed !== "object") throw new Error("JSON が読めません");
+  const candidates = [
+    parsed.items, parsed.nodes, parsed.outline,
+    parsed.data?.items, parsed.data?.nodes,
+    parsed.payload?.items, parsed.payload?.nodes,
+    parsed.root?.children,
+  ];
+  const source = candidates.find((v) => Array.isArray(v));
+  if (!source) throw new Error("アウトラインが見つかりません（items / nodes / outline などの配列）");
+  const normalized = source.map(ensureNode);
+  if (!normalized.length) throw new Error("中身が空でした");
+  return normalized;
+}
+
+// 同じ id がぶつからないよう、持ち込んだものには新しい id を振る
+export function rekey(node) {
+  return { ...node, id: uid(), children: (node.children || []).map(rekey) };
+}
+
+// 後ろに足す。同じ名前の親（Diary など）があれば、その中にまとめる。
+export function appendImported(existing, imported) {
+  const root = existing.map((n) => ensureNode(n));
+  for (const raw of imported.map(rekey)) {
+    const title = String(raw.text || "").trim().toLowerCase();
+    const sameName = title && root.find((x) => String(x.text || "").trim().toLowerCase() === title);
+    if (sameName && raw.children?.length) {
+      sameName.children = [...(sameName.children || []), ...raw.children];
+      sameName.collapsed = false;
+      continue;
+    }
+    root.push(raw);
+  }
+  return root.length ? root : [makeNode("")];
+}
+
+export function buildExport(nodes) {
+  return {
+    app: "taskspace-outline",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    items: nodes,
+  };
+}
+
+// --- 探す ---
+
+// 文字を含む行だけを、親の道ごと残す。
+// 親は、子が見つかったときの手がかりとして残す（Workflowy と同じ）。
+export function filterByQuery(nodes, query) {
+  const q = String(query || "").trim().toLowerCase();
+  if (!q) return nodes;
+  const byTag = q.startsWith("#") && q.length > 1;
+  const tag = byTag ? q.slice(1) : null;
+  const hit = (node) => (byTag
+    ? extractTags(node.text).includes(tag)
+    : String(node.text || "").toLowerCase().includes(q));
+
+  const walk = (list) => {
+    const out = [];
+    for (const node of list) {
+      const kids = walk(node.children || []);
+      if (hit(node) || kids.length) {
+        // 探しているあいだは、畳んであっても中を見せる
+        out.push({ ...node, collapsed: false, children: kids.length ? kids : (hit(node) ? node.children || [] : []) });
+      }
+    }
+    return out;
+  };
+  return walk(nodes);
+}
+
+// 文字の中で、当たったところを切り分ける（印をつけて描くため）
+export function splitByQuery(text, query) {
+  const q = String(query || "").trim();
+  if (!q || q.startsWith("#")) return [{ text: String(text || ""), hit: false }];
+  const lower = String(text || "").toLowerCase();
+  const needle = q.toLowerCase();
+  const out = [];
+  let at = 0;
+  for (;;) {
+    const found = lower.indexOf(needle, at);
+    if (found < 0) break;
+    if (found > at) out.push({ text: text.slice(at, found), hit: false });
+    out.push({ text: text.slice(found, found + q.length), hit: true });
+    at = found + q.length;
+  }
+  if (at < text.length) out.push({ text: text.slice(at), hit: false });
+  return out.length ? out : [{ text: String(text || ""), hit: false }];
+}
+
+// --- ドラッグで動かす ---
+
+// 木ごと、別の場所へ移す。
+//   prevVisibleId … 落とした先の、すぐ上にある行（null なら先頭）
+//   targetDepth   … 横に動かした量から決めた深さ
+// 直前の行より深ければその中に入り、同じか浅ければ並びに入る。
+export function moveSubtreeTo(nodes, dragId, prevVisibleId, targetDepth) {
+  const node = findNode(nodes, dragId);
+  if (!node) return nodes;
+  // 自分の中には入れない
+  if (prevVisibleId && pathTo(node.children || [], prevVisibleId)) return nodes;
+  if (prevVisibleId === dragId) return nodes;
+
+  const moved = { ...node, children: (node.children || []).map((c) => ({ ...c })) };
+  const without = removeNode(nodes, dragId);
+  if (!prevVisibleId) return [moved, ...without];
+
+  const path = pathTo(without, prevVisibleId);
+  if (!path) return [...without, moved];
+  const prevDepth = path.length - 1;
+
+  if (targetDepth > prevDepth) {
+    // 直前の行の、いちばん上の子として入れる
+    const next = clone(without);
+    const spot = locate(next, prevVisibleId);
+    const parent = spot.siblings[spot.index];
+    parent.collapsed = false;
+    parent.children = [moved, ...(parent.children || [])];
+    return next;
+  }
+
+  // 直前の行の祖先を targetDepth まで上がって、その次に置く
+  const anchor = path[Math.max(0, Math.min(targetDepth, path.length - 1))];
+  const next = clone(without);
+  const spot = locate(next, anchor.id);
+  spot.siblings.splice(spot.index + 1, 0, moved);
+  return next;
+}

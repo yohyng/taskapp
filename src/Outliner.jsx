@@ -1,7 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2 } from "lucide-react";
+import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload } from "lucide-react";
 import {
-  makeNode, ensureNode, pathTo, visibleRows,
+  makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
+  extractImportItems, appendImported, buildExport, moveSubtreeTo,
   insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
@@ -79,15 +80,47 @@ function load() {
   return defaultOutline();
 }
 
+
+// 探している文字のところに印をつけて描く
+function Marked({ text, query }) {
+  const parts = splitByQuery(text, query);
+  if (parts.length === 1 && !parts[0].hit) return text;
+  return parts.map((p, i) => (p.hit
+    ? <mark key={i} className="rounded bg-amber-300/30 px-px text-inherit">{p.text}</mark>
+    : <span key={i}>{p.text}</span>));
+}
+
 // アウトライン（Quietliner）。
 export default function Outliner() {
   const { nodes, setNodes } = useOutline();
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
+  const [query, setQuery] = useState("");
+  const [note, setNote] = useState("");       // 持ち込みの結果を知らせる
+  const searchRef = useRef(null);
+  const fileRef = useRef(null);
+  const listRef = useRef(null);
+  // 掴んでいるあいだの様子。落ちる場所は線で見せる。
+  const dragRef = useRef(null);
+  const [drag, setDrag] = useState(null);   // { id, top, depth }
+  const INDENT = 20;
   // 編集に入ったときのカーソル位置。-1 は末尾。
   const caretRef = useRef(null);
   const menuRef = useRef(null);
+
+  // ⌘/Ctrl+K で探す欄に移る（Quietliner と同じ）
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // メニューの外を押したら閉じる
   useEffect(() => {
@@ -102,7 +135,10 @@ export default function Outliner() {
   const zoomPath = useMemo(() => (zoomId ? pathTo(nodes, zoomId) : null), [nodes, zoomId]);
   const zoomNode = zoomPath?.at(-1) || null;
   const shown = zoomNode ? zoomNode.children : nodes;
-  const rows = useMemo(() => visibleRows(shown), [shown]);
+  // 探しているあいだは、当たった行とその親だけを出す
+  const searching = query.trim().length > 0;
+  const listed = useMemo(() => (searching ? filterByQuery(shown, query) : shown), [shown, query, searching]);
+  const rows = useMemo(() => visibleRows(listed), [listed]);
 
   const edit = useCallback((id, caret = -1) => {
     caretRef.current = caret;
@@ -122,6 +158,83 @@ export default function Outliner() {
   function patch(id, p) {
     setNodes((prev) => updateNode(prev, id, p));
   }
+
+  function exportJson() {
+    const text = JSON.stringify(buildExport(nodes), null, 2);
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `outline-${new Date().toISOString().slice(0, 10)}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setNote("書き出しました");
+  }
+
+  // Quietliner の書き出しを、いまの木の後ろに足す（上書きはしない）
+  async function importFile(file) {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const incoming = extractImportItems(parsed);
+      setNodes((prev) => appendImported(prev, incoming));
+      setNote(`${incoming.length}件を足しました`);
+    } catch (e) {
+      setNote(`読めませんでした：${e?.message || e}`);
+    }
+  }
+
+  // ● を掴んで木ごと動かす。落ちる場所は、すぐ上の行と横の動きで決める。
+  function startDrag(e, node) {
+    if (e.button !== undefined && e.button !== 0) return;
+    if (searching) return; // 探している最中は並べ替えない（見えている形が違うため）
+    e.preventDefault();
+    const list = listRef.current;
+    if (!list) return;
+    const listTop = list.getBoundingClientRect().top;
+    const startDepth = rows.find((r) => r.node.id === node.id)?.depth ?? 0;
+    const measured = rows.map((r) => {
+      const el = list.querySelector(`[data-row="${r.node.id}"]`);
+      const box = el.getBoundingClientRect();
+      return { id: r.node.id, depth: r.depth, top: box.top - listTop, height: box.height };
+    });
+    dragRef.current = { id: node.id, startX: e.clientX, startDepth, rows: measured, moved: false, drop: null };
+
+    const move = (ev) => {
+      const d = dragRef.current;
+      if (!d) return;
+      if (!d.moved && Math.abs(ev.clientX - d.startX) + Math.abs(ev.clientY - e.clientY) < 4) return;
+      d.moved = true;
+      const y = ev.clientY - listTop;
+      let i = 0;
+      while (i < d.rows.length && y > d.rows[i].top + d.rows[i].height / 2) i += 1;
+      const prev = d.rows[i - 1] || null;
+      const next = d.rows[i] || null;
+      const maxDepth = prev ? prev.depth + 1 : 0;
+      const minDepth = next ? next.depth : 0;
+      const raw = d.startDepth + Math.round((ev.clientX - d.startX) / INDENT);
+      const depth = Math.max(Math.min(minDepth, maxDepth), Math.min(maxDepth, Math.max(minDepth, raw)));
+      d.drop = { prevId: prev?.id ?? null, depth };
+      setDrag({ id: d.id, top: prev ? prev.top + prev.height : 0, depth });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      const d = dragRef.current;
+      dragRef.current = null;
+      setDrag(null);
+      if (!d?.moved || !d.drop) return;
+      applyShown((listNodes) => moveSubtreeTo(listNodes, d.id, d.drop.prevId, d.drop.depth));
+      // 動かした直後のクリックで、ズームに入らないようにする
+      setTimeout(() => { skipZoomRef.current = false; }, 0);
+      skipZoomRef.current = true;
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
+  const skipZoomRef = useRef(false);
 
   function addAtEnd() {
     const made = makeNode("");
@@ -239,6 +352,68 @@ export default function Outliner() {
 
   return (
     <div data-outliner className="mx-auto w-full max-w-3xl px-1 py-2">
+      <div className="mb-2 flex items-center gap-1">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-neutral-600" />
+          <input
+            ref={searchRef}
+            data-outline-search
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") { setQuery(""); e.currentTarget.blur(); } }}
+            placeholder="探す（⌘K・#タグでも）"
+            className="w-full rounded-md border border-white/10 bg-white/[0.03] py-1 pl-7 pr-7 text-[11px] ts-text outline-none placeholder:text-neutral-700 focus:border-white/25"
+          />
+          {query && (
+            <button
+              data-search-clear
+              onClick={() => setQuery("")}
+              title="やめる"
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-neutral-600 hover:text-neutral-200"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          )}
+        </div>
+        <button
+          data-outline-import
+          onClick={() => fileRef.current?.click()}
+          title="Quietliner などの JSON を読み込む（後ろに足します）"
+          className="shrink-0 rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200"
+        >
+          <Upload className="h-3 w-3" />
+        </button>
+        <button
+          data-outline-export
+          onClick={exportJson}
+          title="JSON に書き出す"
+          className="shrink-0 rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200"
+        >
+          <Download className="h-3 w-3" />
+        </button>
+        <input
+          ref={fileRef}
+          data-outline-file
+          type="file"
+          accept="application/json,.json"
+          className="hidden"
+          onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }}
+        />
+      </div>
+
+      {note && (
+        <div data-outline-note className="mb-2 flex items-center justify-between gap-2 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-neutral-400">
+          <span>{note}</span>
+          <button onClick={() => setNote("")} className="rounded px-1 text-neutral-600 hover:text-neutral-200">閉じる</button>
+        </div>
+      )}
+
+      {searching && (
+        <div data-search-count className="mb-1 px-1 text-[10px] text-neutral-500">
+          {rows.length ? `${rows.length}件` : "見つかりませんでした"}
+        </div>
+      )}
+
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500">
         <button
           data-crumb
@@ -278,7 +453,14 @@ export default function Outliner() {
         />
       )}
 
-      <div className="flex flex-col">
+      <div ref={listRef} className="relative flex flex-col">
+        {drag && (
+          <div
+            data-drop-line
+            className="pointer-events-none absolute right-0 z-20 h-[2px] rounded bg-sky-400"
+            style={{ top: drag.top - 1, left: drag.depth * INDENT + 24 }}
+          />
+        )}
         {rows.map(({ node, depth }) => {
           const hasKids = !!node.children?.length;
           const chars = countChars(node);
@@ -293,9 +475,13 @@ export default function Outliner() {
               data-row={node.id}
               data-depth={depth}
               data-completed={node.completed ? "true" : "false"}
+              data-dragging={drag?.id === node.id ? "true" : undefined}
               data-heading={node.headingLevel || ""}
-              style={{ marginLeft: depth * 20, background: node.bgColor || undefined }}
-              className="group/row relative flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]"
+              style={{ marginLeft: depth * INDENT, background: node.bgColor || undefined }}
+              className={classNames(
+                "group/row relative flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]",
+                drag?.id === node.id && "opacity-40",
+              )}
             >
               <button
                 data-fold={node.id}
@@ -314,8 +500,13 @@ export default function Outliner() {
 
               <button
                 data-zoom={node.id}
-                onClick={() => { setZoomId(node.id); setEditingId(null); }}
-                title="クリックでズーム"
+                onPointerDown={(e) => startDrag(e, node)}
+                onClick={() => {
+                  if (skipZoomRef.current) return;
+                  setZoomId(node.id);
+                  setEditingId(null);
+                }}
+                title="クリックでズーム／ドラッグで移動"
                 className={classNames(
                   "mt-[8px] grid h-[7px] w-[7px] shrink-0 place-items-center rounded-full transition",
                   node.collapsed ? "bg-white/70 ring-[5px] ring-white/15" : "bg-white/55 hover:ring-[5px] hover:ring-white/15",
@@ -357,7 +548,7 @@ export default function Outliner() {
                     node.completed && "line-through opacity-50",
                   )}
                 >
-                  {node.text || "空の行"}
+                  {node.text ? <Marked text={node.text} query={query} /> : "空の行"}
                 </div>
               )}
 

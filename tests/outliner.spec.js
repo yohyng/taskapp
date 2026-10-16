@@ -298,3 +298,166 @@ test.describe("Quietliner と同じ操作", () => {
     await expect(row(page, "b").locator("[data-chars]")).toHaveText("4"); // に + にの子
   });
 });
+
+test.describe("探す", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "買いもの", children: [{ id: "a1", text: "牛乳" }, { id: "a2", text: "パン" }] },
+      { id: "b", text: "仕事", children: [{ id: "b1", text: "資料づくり", children: [{ id: "b2", text: "牛乳の件 #memo" }] }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const search = (page) => page.locator("[data-outline-search]");
+
+  test("当たった行と、その親だけが残る", async ({ page }) => {
+    await search(page).fill("牛乳");
+    expect(await shape(page)).toEqual(["買いもの", "  牛乳", "仕事", "  資料づくり", "    牛乳の件 #memo"]);
+    await expect(page.locator("[data-search-count]")).toHaveText("5件");
+  });
+
+  test("当たったところに印がつく", async ({ page }) => {
+    await search(page).fill("牛乳");
+    await expect(page.locator("mark", { hasText: "牛乳" }).first()).toBeVisible();
+  });
+
+  test("#タグでも絞れる", async ({ page }) => {
+    await search(page).fill("#memo");
+    expect(await shape(page)).toEqual(["仕事", "  資料づくり", "    牛乳の件 #memo"]);
+  });
+
+  test("見つからないときは、そう言う", async ({ page }) => {
+    await search(page).fill("ありません");
+    await expect(page.locator("[data-search-count]")).toHaveText("見つかりませんでした");
+  });
+
+  test("消せば元に戻る", async ({ page }) => {
+    await search(page).fill("牛乳");
+    await page.locator("[data-search-clear]").click();
+    expect(await shape(page)).toEqual(["買いもの", "  牛乳", "  パン", "仕事", "  資料づくり", "    牛乳の件 #memo"]);
+  });
+
+  test("⌘K で探す欄に移る", async ({ page }) => {
+    await page.locator("[data-row] [data-row-text]").first().click();
+    await page.keyboard.press("ControlOrMeta+k");
+    await expect(search(page)).toBeFocused();
+  });
+
+  test("Escape でやめる", async ({ page }) => {
+    await search(page).fill("牛乳");
+    await search(page).press("Escape");
+    await expect(search(page)).toHaveValue("");
+  });
+});
+
+test.describe("持ち込み・持ち出し", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "もとからある" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("Quietliner の書き出しを、後ろに足せる", async ({ page }) => {
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "quietliner.json",
+      mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({
+        version: 4,
+        items: [{ id: "x", text: "もってきた", children: [{ id: "x1", text: "その子" }] }],
+      })),
+    });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "もってきた", "  その子"]);
+    await expect(page.locator("[data-outline-note]")).toContainText("1件");
+  });
+
+  test("読めないものは、そう言って何も壊さない", async ({ page }) => {
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "bad.json", mimeType: "application/json", buffer: Buffer.from("{ちがう"),
+    });
+    await expect(page.locator("[data-outline-note]")).toContainText("読めませんでした");
+    expect(await shape(page)).toEqual(["もとからある"]);
+  });
+
+  test("アウトラインが入っていない JSON も、断る", async ({ page }) => {
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "other.json", mimeType: "application/json", buffer: Buffer.from(JSON.stringify({ hello: 1 })),
+    });
+    await expect(page.locator("[data-outline-note]")).toContainText("アウトラインが見つかりません");
+  });
+
+  test("書き出すと、JSON が落ちてくる", async ({ page }) => {
+    const wait = page.waitForEvent("download");
+    await page.locator("[data-outline-export]").click();
+    const dl = await wait;
+    expect(dl.suggestedFilename()).toMatch(/^outline-\d{4}-\d{2}-\d{2}\.json$/);
+
+    const stream = await dl.createReadStream();
+    const text = await new Promise((r) => { let s = ""; stream.on("data", (c) => (s += c)); stream.on("end", () => r(s)); });
+    const parsed = JSON.parse(text);
+    expect(parsed.items[0].text).toBe("もとからある");
+  });
+});
+
+test.describe("ドラッグで動かす", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "A", children: [{ id: "a1", text: "A1" }, { id: "a2", text: "A2" }] },
+      { id: "b", text: "B" },
+      { id: "c", text: "C", children: [{ id: "c1", text: "C1" }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  // ● を掴んで、相手の行の下側まで運ぶ
+  const dragDot = async (page, id, targetId, dx = 0) => {
+    const dot = await page.locator(`[data-zoom="${id}"]`).boundingBox();
+    const to = await page.locator(`[data-row="${targetId}"]`).boundingBox();
+    await page.mouse.move(dot.x + dot.width / 2, dot.y + dot.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(dot.x + dot.width / 2 + dx, to.y + to.height - 2, { steps: 8 });
+    await page.mouse.up();
+  };
+
+  test("別の行の下へ運べる", async ({ page }) => {
+    await dragDot(page, "b", "c1");
+    expect(await shape(page)).toEqual(["A", "  A1", "  A2", "C", "  C1", "B"]);
+  });
+
+  test("右にずらしながら落とすと、その行の子になる", async ({ page }) => {
+    await dragDot(page, "b", "c", 24);
+    expect(await shape(page)).toEqual(["A", "  A1", "  A2", "C", "  B", "  C1"]);
+  });
+
+  test("子も一緒に動く", async ({ page }) => {
+    await dragDot(page, "c", "a1");
+    expect(await shape(page)).toEqual(["A", "  A1", "  C", "    C1", "  A2", "B"]);
+  });
+
+  test("運んでいるあいだ、落ちる場所に線が出る", async ({ page }) => {
+    const dot = await page.locator('[data-zoom="b"]').boundingBox();
+    const to = await page.locator('[data-row="c1"]').boundingBox();
+    await page.mouse.move(dot.x + 3, dot.y + 3);
+    await page.mouse.down();
+    await page.mouse.move(dot.x + 3, to.y + to.height - 2, { steps: 6 });
+    await expect(page.locator("[data-drop-line]")).toBeVisible();
+    await expect(page.locator('[data-row="b"]')).toHaveAttribute("data-dragging", "true");
+    await page.mouse.up();
+    await expect(page.locator("[data-drop-line]")).toHaveCount(0);
+  });
+
+  test("動かさずに離せば、これまで通りズームする", async ({ page }) => {
+    await page.locator('[data-zoom="a"]').click();
+    await expect(page.locator("[data-zoom-title]")).toHaveValue("A");
+  });
+
+  test("自分の中には落とせない", async ({ page }) => {
+    await dragDot(page, "a", "a1", 24);
+    expect(await shape(page)).toEqual(["A", "  A1", "  A2", "B", "C", "  C1"]);
+  });
+});

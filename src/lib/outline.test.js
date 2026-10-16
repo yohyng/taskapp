@@ -265,3 +265,168 @@ describe('パンくずの文字', () => {
     expect(truncateTitle('   ')).toBe('無題')
   })
 })
+
+import { extractImportItems, rekey, appendImported, buildExport, filterByQuery, splitByQuery } from './outline.js'
+
+describe('持ち込み', () => {
+  it('Quietliner の書き出し（items）を読める', () => {
+    const got = extractImportItems({ version: 4, items: [{ text: 'あ', children: [{ text: 'い' }] }] })
+    expect(got).toHaveLength(1)
+    expect(got[0].children[0].text).toBe('い')
+  })
+
+  it('置き場所の名前が違っても拾う', () => {
+    for (const key of ['nodes', 'outline']) {
+      expect(extractImportItems({ [key]: [{ text: 'x' }] })[0].text).toBe('x')
+    }
+    expect(extractImportItems({ data: { nodes: [{ text: 'y' }] } })[0].text).toBe('y')
+    expect(extractImportItems({ root: { children: [{ text: 'z' }] } })[0].text).toBe('z')
+  })
+
+  it('素の配列も読める', () => {
+    expect(extractImportItems([{ text: 'なま' }])[0].text).toBe('なま')
+  })
+
+  it('読めないものは、理由を言って断る', () => {
+    expect(() => extractImportItems({ hello: 1 })).toThrow(/アウトライン/)
+    expect(() => extractImportItems({ items: [] })).toThrow(/空/)
+    expect(() => extractImportItems("ちがう")).toThrow()
+  })
+
+  it('id を振り直すので、元とぶつからない', () => {
+    const src = { ...makeNode('おや'), children: [makeNode('こ')] }
+    const got = rekey(src)
+    expect(got.id).not.toBe(src.id)
+    expect(got.children[0].id).not.toBe(src.children[0].id)
+    expect(got.children[0].text).toBe('こ')
+  })
+
+  it('後ろに足す（いまあるものは消さない）', () => {
+    const now = [n('いまのこる')]
+    const got = appendImported(now, [{ ...makeNode('もってきた') }])
+    expect(texts(got)).toEqual(['いまのこる', 'もってきた'])
+  })
+
+  it('同じ名前の親があれば、その中にまとめる', () => {
+    const now = [n('Diary', [n('10/1')])]
+    const got = appendImported(now, [{ ...makeNode('Diary'), children: [makeNode('10/2')] }])
+    expect(texts(got)).toEqual(['Diary', '  10/1', '  10/2'])
+  })
+
+  it('持ち出したものを、そのまま読み戻せる', () => {
+    const tree = [n('あ', [n('い')])]
+    const back = extractImportItems(JSON.parse(JSON.stringify(buildExport(tree))))
+    expect(texts(back)).toEqual(['あ', '  い'])
+  })
+})
+
+describe('探す', () => {
+  const tree = [
+    n('買いもの', [n('牛乳'), n('パン')]),
+    n('仕事', [n('資料づくり', [n('牛乳の件')])]),
+  ]
+
+  it('当たった行と、その親だけが残る', () => {
+    expect(texts(filterByQuery(tree, '牛乳')))
+      .toEqual(['買いもの', '  牛乳', '仕事', '  資料づくり', '    牛乳の件'])
+  })
+
+  it('大文字小文字は区別しない', () => {
+    expect(texts(filterByQuery([n('Memo'), n('ほか')], 'memo'))).toEqual(['Memo'])
+  })
+
+  it('当たった親の子は、そのまま見せる', () => {
+    expect(texts(filterByQuery(tree, '買いもの'))).toEqual(['買いもの', '  牛乳', '  パン'])
+  })
+
+  it('畳んであっても、探しているあいだは開く', () => {
+    let t = [n('おや', [n('さがしもの')])]
+    t = toggleCollapse(t, idOf(t, 'おや'))
+    expect(texts(filterByQuery(t, 'さがしもの'))).toEqual(['おや', '  さがしもの'])
+  })
+
+  it('#タグでも絞れる', () => {
+    const t = [n('これは #memo です'), n('ちがう')]
+    expect(texts(filterByQuery(t, '#memo'))).toEqual(['これは #memo です'])
+  })
+
+  it('空なら、そのまま全部', () => {
+    expect(filterByQuery(tree, '   ')).toBe(tree)
+  })
+
+  it('当たりが無ければ、空になる', () => {
+    expect(filterByQuery(tree, 'ありません')).toEqual([])
+  })
+})
+
+describe('当たったところに印をつける', () => {
+  it('前後に分けて返す', () => {
+    expect(splitByQuery('あいうえお', 'うえ')).toEqual([
+      { text: 'あい', hit: false }, { text: 'うえ', hit: true }, { text: 'お', hit: false },
+    ])
+  })
+
+  it('いくつあっても分ける', () => {
+    expect(splitByQuery('aXaXa', 'x').filter((p) => p.hit)).toHaveLength(2)
+  })
+
+  it('探していないときは、そのまま', () => {
+    expect(splitByQuery('あい', '')).toEqual([{ text: 'あい', hit: false }])
+  })
+})
+
+import { moveSubtreeTo } from './outline.js'
+
+describe('ドラッグで動かす', () => {
+  const tree = () => [
+    n('A', [n('A1'), n('A2')]),
+    n('B'),
+    n('C', [n('C1')]),
+  ]
+
+  it('いちばん上に落とす', () => {
+    const t = tree()
+    expect(texts(moveSubtreeTo(t, idOf(t, 'B'), null, 0)))
+      .toEqual(['B', 'A', '  A1', '  A2', 'C', '  C1'])
+  })
+
+  it('ある行の下に、並びとして入れる', () => {
+    const t = tree()
+    // A1 の下・深さ1 ＝ A の子のまま、A1 の次
+    expect(texts(moveSubtreeTo(t, idOf(t, 'B'), idOf(t, 'A1'), 1)))
+      .toEqual(['A', '  A1', '  B', '  A2', 'C', '  C1'])
+  })
+
+  it('直前の行より深ければ、その中に入る', () => {
+    const t = tree()
+    // C の下・深さ1 ＝ C の子の先頭
+    expect(texts(moveSubtreeTo(t, idOf(t, 'B'), idOf(t, 'C'), 1)))
+      .toEqual(['A', '  A1', '  A2', 'C', '  B', '  C1'])
+  })
+
+  it('浅い段を指せば、親の外に出る', () => {
+    const t = tree()
+    // A2 の下・深さ0 ＝ A の次（根の並び）
+    expect(texts(moveSubtreeTo(t, idOf(t, 'B'), idOf(t, 'A2'), 0)))
+      .toEqual(['A', '  A1', '  A2', 'B', 'C', '  C1'])
+  })
+
+  it('子も一緒に動く', () => {
+    const t = tree()
+    expect(texts(moveSubtreeTo(t, idOf(t, 'C'), null, 0)))
+      .toEqual(['C', '  C1', 'A', '  A1', '  A2', 'B'])
+  })
+
+  it('自分の中には入れない', () => {
+    const t = tree()
+    expect(moveSubtreeTo(t, idOf(t, 'A'), idOf(t, 'A1'), 2)).toBe(t)
+  })
+
+  it('畳んである行の中に入れるときは、開く', () => {
+    let t = [n('A', [n('A1')]), n('B')]
+    t = toggleCollapse(t, idOf(t, 'A'))
+    const got = moveSubtreeTo(t, idOf(t, 'B'), idOf(t, 'A'), 1)
+    expect(findNode(got, idOf(got, 'A')).collapsed).toBe(false)
+    expect(texts(got)).toEqual(['A', '  B', '  A1'])
+  })
+})
