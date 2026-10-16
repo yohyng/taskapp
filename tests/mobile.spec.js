@@ -51,9 +51,12 @@ test.describe("スマホでの見え方", () => {
 
   test("空の曜日が画面を埋め尽くさない", async ({ page }) => {
     await open(page, [t("d", "きょうの用事", "task", { pageId: null, scheduledDate: todayKey() })], "list");
+    // 曜日の枠そのものを測る（見た目の class ではなく、日付の印で指す）
     const tall = await page.evaluate(() => {
-      const col = document.querySelector('div[class*="min-h-[420px]"], div[class*="min-h-0"]');
-      return col ? col.getBoundingClientRect().height : 0;
+      const cols = [...document.querySelectorAll("[data-day-col]")];
+      // きょう以外＝中身の無い日のうち、いちばん背の高いもの
+      const empty = cols.filter((c) => !c.querySelector("[data-task-id]"));
+      return empty.length ? Math.max(...empty.map((c) => c.getBoundingClientRect().height)) : 0;
     });
     // 1日あたり140pxを超えると、何も無い日を延々とスクロールすることになる
     expect(tall).toBeGreaterThan(0);

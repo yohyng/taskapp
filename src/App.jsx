@@ -3647,7 +3647,7 @@ function App() {
     <OutlineProvider>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
     {/* 画面の高さに収める。はみ出した分は、下の枠それぞれの中で転がす。 */}
-    <div className="flex h-[100dvh] flex-col overflow-hidden ts-bg ts-text" style={{ fontFamily: appFontCss }}>
+    <div data-app-root className="flex h-[100dvh] flex-col overflow-hidden ts-bg ts-text" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex h-full w-full max-w-[2400px] min-h-0 flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">

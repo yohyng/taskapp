@@ -47,7 +47,7 @@ function contrastLadder(page) {
 
 const rootColors = (page) =>
   page.evaluate(() => {
-    const cs = getComputedStyle(document.querySelector(".min-h-screen"));
+    const cs = getComputedStyle(document.querySelector("[data-app-root]"));
     return { bg: cs.backgroundColor, color: cs.color };
   });
 
