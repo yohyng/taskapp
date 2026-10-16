@@ -13,6 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
+import Outliner from "./Outliner";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -167,6 +168,7 @@ const CUSTOM_TYPES_SETTING_KEY = "custom_block_types";
 // 7days の下に置く自由ブロックの持ち主。ページ一覧には出さない。
 const BOARD_PAGE_ID = "board-7days";
 const KEEP_AWAKE_KEY = "taskspace-keep-awake";
+const APP_TAB_KEY = "taskspace-app-tab";
 const QUICK_ADD_HEIGHT_KEY = "taskspace-quick-add-height";
 const QUICK_ADD_HEIGHT = 96;
 const PIP_UNAVAILABLE_KEY = "taskspace-pip-unavailable-v2";
@@ -3120,6 +3122,11 @@ function App() {
     todayTasks.filter((t) => t.status !== "完了").length,
   );
 
+  // どのページを見ているか
+  const [appTab, setAppTab] = useState(() => {
+    try { return localStorage.getItem(APP_TAB_KEY) === "outline" ? "outline" : "tasks"; } catch { return "tasks"; }
+  });
+
   const [typeEditor, setTypeEditor] = useState(false);
   // Supabase に列が無くて、この端末にしか残らない項目
   const missingNoticeRef = useRef(false);
@@ -3280,7 +3287,24 @@ function App() {
             <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
           </div>
 
-          <div className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
+          {/* ページの切り替え。中身はどちらも出しっぱなしで、見せる側だけ変える。 */}
+          <div data-app-tabs className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
+            {[["tasks", "タスク"], ["outline", "アウトライン"]].map(([key, label]) => (
+              <button
+                key={key}
+                data-app-tab={key}
+                onClick={() => { setAppTab(key); try { localStorage.setItem(APP_TAB_KEY, key); } catch { /* noop */ } }}
+                className={classNames(
+                  "rounded-md px-2.5 py-1 text-xs transition",
+                  appTab === key ? "bg-white/15 ts-text" : "text-neutral-500 hover:bg-white/[0.07]",
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             <button
               onClick={() => setQuickAddOpen(true)}
               title="タスクを追加"
@@ -3642,7 +3666,9 @@ function App() {
           </div>
         </header>
 
+        {appTab === "outline" && <Outliner />}
 
+        <div className={appTab === "tasks" ? "contents" : "hidden"}>
         {viewMode === "list" && use5col && (
           <>
           {(
@@ -3919,8 +3945,9 @@ function App() {
         </div>
 
         <TaskInspector task={selectedTask} taskMap={taskMap} categories={categories} projectsByCategory={projectsByCategory} upsertTask={upsertTask} removeTask={removeTask} addTask={addTask} onClose={() => setSelectedTaskId(null)} />
+        </div>
 
-        <MarqueeSelect onSelect={handleMarqueeSelect} />
+        {appTab === "tasks" && <MarqueeSelect onSelect={handleMarqueeSelect} />}
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>

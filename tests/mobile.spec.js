@@ -161,7 +161,7 @@ test.describe("指での操作", () => {
     await open(page, [t("a", "もじ")]);
     // アイコンだけのボタンは控えめ（場所を食わない）が、指では押せる大きさを保つ
     const small = await page.evaluate(() =>
-      [...document.querySelectorAll("header button:not([data-quick-add])")]
+      [...document.querySelectorAll("[data-header-actions] button:not([data-quick-add])")]
         .filter((b) => b.getBoundingClientRect().height > 0)
         .filter((b) => b.getBoundingClientRect().height < 32)
         .map((b) => b.getAttribute("title") || ""));
@@ -172,7 +172,7 @@ test.describe("指での操作", () => {
     await open(page, [t("a", "もじ")]);
     const add = await page.locator("header button[data-quick-add]").boundingBox();
     expect(add.height).toBeGreaterThanOrEqual(40);
-    const others = await page.locator("header button:not([data-quick-add])")
+    const others = await page.locator("[data-header-actions] button:not([data-quick-add])")
       .evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
     expect(add.width).toBeGreaterThan(Math.max(...others) * 2);
   });

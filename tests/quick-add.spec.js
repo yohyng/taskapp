@@ -76,7 +76,8 @@ test.describe("スマホの上の帯", () => {
 
   test("ボタンが1段に収まり、＋だけ横に広い", async ({ page }) => {
     const add = await page.getByRole("button", { name: "タスクを追加" }).boundingBox();
-    const others = await page.locator("header button").evaluateAll((els) =>
+    // 見るのは操作ボタンの列（ページのタブは別の段にある）
+    const others = await page.locator("[data-header-actions] button").evaluateAll((els) =>
       els.filter((e) => !e.hasAttribute("data-quick-add"))
         .map((e) => { const r = e.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), w: Math.round(r.width) }; }));
     // ＋ はほかのボタンより目に見えて広い
