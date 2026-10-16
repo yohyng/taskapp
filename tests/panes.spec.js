@@ -220,3 +220,40 @@ test.describe("枠の幅に合わせて中身も変わる", () => {
     await expect.poll(() => weekCols(page)).toBe("6");
   });
 });
+
+test.describe("枠ごとに転がす", () => {
+  test.use({ viewport: { width: 1400, height: 700 } });
+
+  const scrollTop = (page, i) => page.locator("[data-pane-id]").nth(i)
+    .evaluate((e) => e.scrollTop);
+  const canScroll = (page, i) => page.locator("[data-pane-id]").nth(i)
+    .evaluate((e) => e.scrollHeight > e.clientHeight + 4);
+
+  test("中身がはみ出す枠は、その中で転がる", async ({ page }) => {
+    expect(await canScroll(page, 0)).toBe(true);
+    await page.locator("[data-pane-id]").first().evaluate((e) => { e.scrollTop = 200; });
+    expect(await scrollTop(page, 0)).toBeGreaterThan(100);
+  });
+
+  test("画面ぜんたいは動かない（上の帯は残る）", async ({ page }) => {
+    await page.locator("[data-pane-id]").first().evaluate((e) => { e.scrollTop = 400; });
+    const scrolled = await page.evaluate(() => window.scrollY);
+    expect(scrolled).toBe(0);
+    await expect(page.locator("header")).toBeInViewport();
+  });
+
+  test("片方を転がしても、もう片方は動かない", async ({ page }) => {
+    await addPane(page);
+    // 両方に中身を入れて、はみ出させる
+    await page.locator("[data-pane-mode]").nth(1).selectOption("outline");
+    await page.locator("[data-pane-id]").first().evaluate((e) => { e.scrollTop = 300; });
+
+    expect(await scrollTop(page, 0)).toBeGreaterThan(100);
+    expect(await scrollTop(page, 1)).toBe(0);
+  });
+
+  test("枠の高さは画面に収まる", async ({ page }) => {
+    const h = await page.locator("[data-pane-id]").first().evaluate((e) => e.getBoundingClientRect().bottom);
+    expect(h).toBeLessThanOrEqual(700 + 1);
+  });
+});

@@ -3646,8 +3646,9 @@ function App() {
     <BlockEditContext.Provider value={blockEditValue}>
     <OutlineProvider>
     <DndContext sensors={sensors} collisionDetection={taskFirstCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-    <div className="min-h-screen ts-bg ts-text" style={{ fontFamily: appFontCss }}>
-      <div className="mx-auto flex max-w-[2400px] flex-col gap-2 px-3 py-2">
+    {/* 画面の高さに収める。はみ出した分は、下の枠それぞれの中で転がす。 */}
+    <div className="flex h-[100dvh] flex-col overflow-hidden ts-bg ts-text" style={{ fontFamily: appFontCss }}>
+      <div className="mx-auto flex h-full w-full max-w-[2400px] min-h-0 flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
             <h1 className="text-base font-semibold tracking-tight sm:text-xl">⚡ Task Space</h1>
@@ -4058,7 +4059,8 @@ function App() {
           data-panes
           ref={panesRef}
           className={classNames(
-            "flex flex-col gap-2",
+            // 残りの高さをぜんぶ使い、はみ出しは枠の中で見る
+            "flex min-h-0 flex-1 flex-col gap-2",
             panes.length > 1 && "lg:flex-row lg:items-stretch",
           )}
         >
@@ -4085,7 +4087,8 @@ function App() {
                   data-pane-id={pane.id}
                   style={panes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
                   className={classNames(
-                    "ts-pane min-w-0 flex-1",
+                    // 枠ごとに転がす。隣や画面ぜんたいを巻き込まない。
+                    "ts-pane min-w-0 flex-1 overflow-y-auto overscroll-contain",
                     panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
                   )}
                 >
