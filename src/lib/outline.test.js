@@ -430,3 +430,65 @@ describe('ドラッグで動かす', () => {
     expect(texts(got)).toEqual(['A', '  B', '  A1'])
   })
 })
+
+import { flattenTree, buildTree, mergeOutline } from './outline.js'
+
+describe('木と行の行き来', () => {
+  const tree = [n('A', [n('A1'), n('A2', [n('A2a')])]), n('B')]
+
+  it('平らにすると、親と並び順を持つ', () => {
+    const rows = flattenTree(tree)
+    expect(rows.map((r) => r.text)).toEqual(['A', 'A1', 'A2', 'A2a', 'B'])
+    const a2a = rows.find((r) => r.text === 'A2a')
+    expect(a2a.parentId).toBe(rows.find((r) => r.text === 'A2').id)
+    expect(rows.find((r) => r.text === 'B').sortOrder).toBe(1)
+  })
+
+  it('行から元の木に戻る', () => {
+    expect(texts(buildTree(flattenTree(tree)))).toEqual(texts(tree))
+  })
+
+  it('並び順が入れ替わっていても、順に戻す', () => {
+    const rows = flattenTree(tree).reverse()
+    expect(texts(buildTree(rows))).toEqual(texts(tree))
+  })
+
+  it('親が見つからない行は、根に置いて捨てない', () => {
+    const rows = [{ id: 'x', parentId: 'いない', sortOrder: 0, text: 'まいご' }]
+    expect(texts(buildTree(rows))).toEqual(['まいご'])
+  })
+
+  it('色や見出しも行き来で消えない', () => {
+    const fancy = [{ ...makeNode('見出し'), headingLevel: 2, textColor: '#e03535', bgColor: 'rgba(0,0,0,0.1)' }]
+    const back = buildTree(flattenTree(fancy))[0]
+    expect(back).toMatchObject({ headingLevel: 2, textColor: '#e03535', bgColor: 'rgba(0,0,0,0.1)' })
+  })
+})
+
+describe('手元と向こうを突き合わせる', () => {
+  const stamp = (node, t) => ({ ...node, updatedAt: t })
+
+  it('向こうにしかない行は、持ってくる', () => {
+    const local = [n('てもと')]
+    const remote = [n('むこう')]
+    expect(texts(mergeOutline(local, remote)).sort()).toEqual(['てもと', 'むこう'])
+  })
+
+  it('同じ行は、新しいほうを採る', () => {
+    const base = makeNode('ふるい')
+    const local = [stamp({ ...base, text: 'てもとで直した' }, '2026-01-02T00:00:00Z')]
+    const remote = [stamp({ ...base, text: 'むこうで直した' }, '2026-01-01T00:00:00Z')]
+    expect(texts(mergeOutline(local, remote))).toEqual(['てもとで直した'])
+    expect(texts(mergeOutline(remote, local))).toEqual(['てもとで直した'])
+  })
+
+  it('消した行は、向こうに残っていても戻ってこない', () => {
+    const gone = makeNode('消したやつ')
+    expect(mergeOutline([], [gone], new Set([gone.id]))).toEqual([])
+  })
+
+  it('親子の形は保たれる', () => {
+    const tree = [n('おや', [n('こ')])]
+    expect(texts(mergeOutline(tree, tree))).toEqual(['おや', '  こ'])
+  })
+})

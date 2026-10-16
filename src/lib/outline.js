@@ -409,3 +409,79 @@ export function moveSubtreeTo(nodes, dragId, prevVisibleId, targetDepth) {
   spot.siblings.splice(spot.index + 1, 0, moved);
   return next;
 }
+
+// --- 木 ⇄ 行（Supabase に置くときの形） ---
+
+// 木を平らにする。親と並び順を持たせれば、行の集まりから元に戻せる。
+export function flattenTree(nodes, parentId = null, out = []) {
+  nodes.forEach((node, i) => {
+    out.push({
+      id: node.id,
+      parentId,
+      sortOrder: i,
+      text: node.text || "",
+      collapsed: !!node.collapsed,
+      completed: !!node.completed,
+      favorite: !!node.favorite,
+      headingLevel: node.headingLevel ?? null,
+      textColor: node.textColor ?? null,
+      bgColor: node.bgColor ?? null,
+      createdAt: node.createdAt || null,
+      updatedAt: node.updatedAt || null,
+    });
+    flattenTree(node.children || [], node.id, out);
+  });
+  return out;
+}
+
+// 行の集まりから木に戻す。親が見つからない行は、根に置いて迷子にしない。
+export function buildTree(rows) {
+  const byId = new Map();
+  for (const r of rows) {
+    byId.set(r.id, {
+      ...ensureNode({ ...r, children: [] }),
+      headingLevel: r.headingLevel ?? null,
+      textColor: r.textColor ?? null,
+      bgColor: r.bgColor ?? null,
+      __parentId: r.parentId ?? null,
+      __sortOrder: Number.isFinite(r.sortOrder) ? r.sortOrder : 0,
+    });
+  }
+  const roots = [];
+  for (const node of byId.values()) {
+    const parent = node.__parentId ? byId.get(node.__parentId) : null;
+    if (parent && parent !== node) parent.children.push(node);
+    else roots.push(node);
+  }
+  const sortDeep = (list) => {
+    list.sort((a, b) => a.__sortOrder - b.__sortOrder);
+    for (const node of list) {
+      sortDeep(node.children);
+      delete node.__parentId;
+      delete node.__sortOrder;
+    }
+    return list;
+  };
+  return sortDeep(roots);
+}
+
+// 手元と向こうを突き合わせる。同じ行は新しいほうを採り、
+// 片方にしかない行は残す（消したものは、消した印で外す）。
+export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set()) {
+  const localRows = flattenTree(localNodes);
+  const remoteRows = flattenTree(remoteNodes);
+  const byId = new Map();
+  for (const row of remoteRows) {
+    if (deletedIds.has(row.id)) continue;
+    byId.set(row.id, row);
+  }
+  for (const row of localRows) {
+    if (deletedIds.has(row.id)) { byId.delete(row.id); continue; }
+    const there = byId.get(row.id);
+    if (!there) { byId.set(row.id, row); continue; }
+    const mine = row.updatedAt || "";
+    const theirs = there.updatedAt || "";
+    byId.set(row.id, mine >= theirs ? row : there);
+  }
+  return buildTree([...byId.values()]);
+}

@@ -51,3 +51,25 @@ describe('列がまだ無いことを、行の形から見分ける', () => {
     expect(absentTaskColumns(null)).toEqual([])
   })
 })
+
+describe('アウトラインの置き場', () => {
+  it('作るための SQL を出せる', async () => {
+    const { outlineTableSql } = await import('./db.js')
+    const sql = outlineTableSql()
+    expect(sql).toContain('create table if not exists outline_nodes')
+    // 行に戻すのに要るもの
+    for (const col of ['parent_id', 'sort_order', 'text', 'collapsed', 'completed', 'favorite',
+                       'heading_level', 'text_color', 'bg_color', 'updated_at']) {
+      expect(sql).toContain(col)
+    }
+    // すでにあっても壊さない
+    expect(sql).toContain('if not exists')
+  })
+
+  it('置き場が無ければ、同期せず手元だけで動く', async () => {
+    const { loadOutlineRows, isOutlineTableMissing } = await import('./db.js')
+    // Supabase を使わない設定のときは null（＝手元のまま）
+    expect(await loadOutlineRows()).toBe(null)
+    expect(typeof isOutlineTableMissing()).toBe('boolean')
+  })
+})

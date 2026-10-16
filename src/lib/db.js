@@ -427,3 +427,102 @@ export function subscribeRealtime({ onTaskChange, onTrayChange, onCategoryChange
 
   return () => supabase.removeChannel(channel)
 }
+
+// --- アウトライン（Quietliner 側）---
+// 木を行ごとに置く。丸ごと1件にすると、2台で触ったときに片方が消える。
+const OUTLINE_TABLE = 'outline_nodes'
+let outlineTableMissing = false
+
+export function isOutlineTableMissing() {
+  return outlineTableMissing
+}
+
+export function outlineTableSql() {
+  return `create table if not exists outline_nodes (
+  id            text primary key,
+  parent_id     text,
+  sort_order    integer not null default 0,
+  text          text    not null default '',
+  collapsed     boolean not null default false,
+  completed     boolean not null default false,
+  favorite      boolean not null default false,
+  heading_level integer,
+  text_color    text,
+  bg_color      text,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+create index if not exists outline_nodes_parent_idx on outline_nodes (parent_id, sort_order);`
+}
+
+// 置き場が無いときのエラーを見分ける（テーブル未作成）
+function looksLikeMissingTable(error) {
+  if (!error) return false
+  const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''} ${error.code ?? ''}`
+  return /42P01|PGRST205|PGRST106/.test(text) || /relation .*outline_nodes.* does not exist/i.test(text)
+     || (/could not find the table/i.test(text) && /outline_nodes/i.test(text))
+}
+
+function outlineRowToNode(r) {
+  return {
+    id: r.id,
+    parentId: r.parent_id ?? null,
+    sortOrder: r.sort_order ?? 0,
+    text: r.text ?? '',
+    collapsed: !!r.collapsed,
+    completed: !!r.completed,
+    favorite: !!r.favorite,
+    headingLevel: r.heading_level ?? null,
+    textColor: r.text_color ?? null,
+    bgColor: r.bg_color ?? null,
+    createdAt: r.created_at ?? null,
+    updatedAt: r.updated_at ?? null,
+  }
+}
+
+function outlineNodeToRow(n) {
+  return {
+    id: n.id,
+    parent_id: n.parentId ?? null,
+    sort_order: n.sortOrder ?? 0,
+    text: n.text ?? '',
+    collapsed: !!n.collapsed,
+    completed: !!n.completed,
+    favorite: !!n.favorite,
+    heading_level: n.headingLevel ?? null,
+    text_color: n.textColor ?? null,
+    bg_color: n.bgColor ?? null,
+    created_at: n.createdAt || new Date().toISOString(),
+    updated_at: n.updatedAt || new Date().toISOString(),
+  }
+}
+
+// 読む。置き場が無ければ null を返し、手元のものだけで動かす。
+export async function loadOutlineRows() {
+  if (!isSupabaseEnabled) return null
+  const { data, error } = await supabase.from(OUTLINE_TABLE).select('*').order('sort_order')
+  if (error) {
+    if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+    console.error('[db] outline load error', error)
+    return null
+  }
+  outlineTableMissing = false
+  return (data || []).map(outlineRowToNode)
+}
+
+// 変わった行だけ送り、消した行は向こうからも消す
+export async function saveOutlineRows(rows, deletedIds = []) {
+  if (!isSupabaseEnabled || outlineTableMissing) return null
+  if (deletedIds.length) {
+    const { error } = await supabase.from(OUTLINE_TABLE).delete().in('id', deletedIds)
+    if (error && looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+  }
+  if (!rows.length) return null
+  const { error } = await supabase.from(OUTLINE_TABLE).upsert(rows.map(outlineNodeToRow), { onConflict: 'id' })
+  if (error) {
+    if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+    console.error('[db] outline save error', error)
+    return error.message || String(error)
+  }
+  return null
+}

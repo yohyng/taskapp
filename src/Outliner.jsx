@@ -6,7 +6,9 @@ import {
   insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
+  flattenTree, buildTree, mergeOutline,
 } from "./lib/outline";
+import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
 
@@ -14,12 +16,74 @@ const OUTLINE_KEY = "taskspace-outline-v1";
 // 枠ごとに違うのは「どこにズームしているか」だけ。
 const OutlineContext = React.createContext(null);
 
+const OUTLINE_TOMB_KEY = "taskspace-outline-deleted";
+const readTomb = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(OUTLINE_TOMB_KEY) || "[]")); } catch { return new Set(); }
+};
+const writeTomb = (set) => {
+  try { localStorage.setItem(OUTLINE_TOMB_KEY, JSON.stringify([...set].slice(-500))); } catch { /* noop */ }
+};
+
 export function OutlineProvider({ children }) {
   const [nodes, setNodes] = useState(load);
+  const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
+  const readyRef = useRef(false);                 // 読み込み前は送らない
+  const syncedRef = useRef(new Map());            // 向こうと同じだと分かっている行
+  const tombRef = useRef(readTomb());
+  const timerRef = useRef(null);
+
+  // 手元には必ず残す。向こうが無くても使えるように。
   useEffect(() => {
     try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
   }, [nodes]);
-  const value = useMemo(() => ({ nodes, setNodes }), [nodes]);
+
+  // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
+  useEffect(() => {
+    let alive = true;
+    loadOutlineRows().then((rows) => {
+      if (!alive) return;
+      readyRef.current = true;
+      if (!rows) {
+        if (isOutlineTableMissing()) setSyncNote("missing-table");
+        return;
+      }
+      const remote = buildTree(rows);
+      setNodes((mine) => {
+        const merged = mergeOutline(mine, remote, tombRef.current);
+        // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
+        syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+        return merged.length ? merged : mine;
+      });
+    });
+    return () => { alive = false; };
+  }, []);
+
+  // 書き込み：変わった行だけ、少し待ってから送る
+  useEffect(() => {
+    if (!readyRef.current) return;
+    clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      const rows = flattenTree(nodes);
+      const here = new Set(rows.map((r) => r.id));
+      const changed = rows.filter((r) => syncedRef.current.get(r.id) !== JSON.stringify(r));
+      const gone = [...syncedRef.current.keys()].filter((id) => !here.has(id));
+      if (!changed.length && !gone.length) return;
+      if (gone.length) {
+        gone.forEach((id) => tombRef.current.add(id));
+        writeTomb(tombRef.current);
+      }
+      saveOutlineRows(changed, gone).then(() => {
+        if (isOutlineTableMissing()) { setSyncNote("missing-table"); return; }
+        const next = new Map(syncedRef.current);
+        gone.forEach((id) => next.delete(id));
+        changed.forEach((r) => next.set(r.id, JSON.stringify(r)));
+        syncedRef.current = next;
+      });
+    }, 800);
+    return () => clearTimeout(timerRef.current);
+  }, [nodes]);
+
+  const value = useMemo(() => ({ nodes, setNodes, syncNote, dismissSync: () => setSyncNote("") }), [nodes, syncNote]);
   return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
 }
 
@@ -92,7 +156,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes } = useOutline();
+  const { nodes, setNodes, syncNote, dismissSync } = useOutline();
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
@@ -400,6 +464,33 @@ export default function Outliner() {
           onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }}
         />
       </div>
+
+      {syncNote === "missing-table" && (
+        <div data-outline-sql className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
+          <div className="mb-1 font-semibold">この端末にしか残りません</div>
+          <div className="mb-1 text-amber-100/80">
+            Supabase にアウトラインの置き場が無いので、ほかの端末には伝わりません。
+            SQL Editor に貼って実行すると、以後は同期します。
+          </div>
+          <pre className="mb-1 max-h-40 overflow-auto whitespace-pre-wrap break-all rounded bg-black/30 p-2 text-[10px] text-amber-50/90">
+{outlineTableSql()}
+          </pre>
+          <div className="flex gap-1.5">
+            <button
+              onClick={async () => {
+                try { await navigator.clipboard.writeText(outlineTableSql()); setNote("SQL をコピーしました"); }
+                catch { setNote("コピーできませんでした。手で選んでください"); }
+              }}
+              className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15"
+            >
+              SQL をコピー
+            </button>
+            <button onClick={dismissSync} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
 
       {note && (
         <div data-outline-note className="mb-2 flex items-center justify-between gap-2 rounded border border-white/10 bg-white/[0.03] px-2 py-1 text-[10px] text-neutral-400">
