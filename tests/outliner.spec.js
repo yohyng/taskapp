@@ -1587,3 +1587,41 @@ test.describe("行ごとの日付（メタデータ）", () => {
     await expect.poll(async () => (await stored(page, "e")).date).toBeFalsy();
   });
 });
+
+test.describe("画像の行", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "ふつうのメモ" },
+      { id: "b", text: "https://example.com/zu.png" },
+      { id: "c", text: "https://drive.google.com/file/d/1AbC-dEf/view?usp=sharing" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("画像の URL は、絵として出る", async ({ page }) => {
+    await expect(page.locator('[data-row="b"] [data-row-image]')).toHaveAttribute("src", "https://example.com/zu.png");
+    await expect(page.locator('[data-row="a"] [data-row-image]')).toHaveCount(0);
+  });
+
+  test("ドライブの共有リンクも、そのまま貼れる", async ({ page }) => {
+    await expect(page.locator('[data-row="c"] [data-row-image]'))
+      .toHaveAttribute("src", "https://drive.google.com/thumbnail?id=1AbC-dEf&sz=w1600");
+  });
+
+  test("押せば、これまで通り URL を直せる", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await expect(page.locator('[data-row="b"] textarea')).toHaveValue("https://example.com/zu.png");
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-row="b"] [data-row-image]')).toBeVisible();
+  });
+
+  test("貼り付けた直後から、絵になる", async ({ page }) => {
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.type("https://example.com/new.webp");
+    await page.keyboard.press("Escape");
+    await expect(page.locator('[data-row="a"] [data-row-image]')).toHaveAttribute("src", "https://example.com/new.webp");
+  });
+});

@@ -908,3 +908,38 @@ describe('日付ビュー', () => {
     expect(got.at(-1).children.map((n) => n.text)).toEqual(['TRAY'])
   })
 })
+
+import { imageUrlOf, driveIdOf } from './outline.js'
+
+describe('画像の行', () => {
+  it('画像の URL は、絵として扱う', () => {
+    expect(imageUrlOf('https://example.com/a.png')).toBe('https://example.com/a.png')
+    expect(imageUrlOf('https://example.com/a.JPG?v=2')).toBe('https://example.com/a.JPG?v=2')
+  })
+
+  it('![](…) の書き方も読む', () => {
+    expect(imageUrlOf('![ずかい](https://example.com/x)')).toBe('https://example.com/x')
+  })
+
+  it('ふつうの文や、ほかの文字が混ざる行は、絵にしない', () => {
+    expect(imageUrlOf('ふつうのメモ')).toBe(null)
+    expect(imageUrlOf('この図 https://example.com/a.png を見て')).toBe(null)
+    expect(imageUrlOf('https://example.com/page')).toBe(null)
+  })
+
+  it('ドライブの共有リンクから id を取り出す', () => {
+    const id = '1AbC-dEfGhIjKlMnOpQrStUvWxYz'
+    for (const url of [
+      `https://drive.google.com/file/d/${id}/view?usp=sharing`,
+      `https://drive.google.com/open?id=${id}`,
+      `https://drive.google.com/uc?export=view&id=${id}`,
+      `https://lh3.googleusercontent.com/d/${id}`,
+    ]) expect(driveIdOf(url)).toBe(id)
+    expect(driveIdOf('https://example.com/a.png')).toBe(null)
+  })
+
+  it('ドライブのリンクは、絵が出る形に直す', () => {
+    const got = imageUrlOf('https://drive.google.com/file/d/1AbC-dEf/view?usp=sharing')
+    expect(got).toBe('https://drive.google.com/thumbnail?id=1AbC-dEf&sz=w1600')
+  })
+})

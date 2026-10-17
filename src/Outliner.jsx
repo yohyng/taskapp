@@ -9,7 +9,7 @@ import {
   flattenTree, buildTree, mergeOutline,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
-  groupByDate, fillDates,
+  groupByDate, fillDates, imageUrlOf,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
@@ -1353,7 +1353,21 @@ alter table outline_nodes disable row level security;
                     node.completed && "line-through opacity-50",
                   )}
                 >
-                  {node.text ? <Marked text={node.text} query={query} /> : "空の行"}
+                  {(() => {
+                    const img = imageUrlOf(node.text);
+                    if (!img) return node.text ? <Marked text={node.text} query={query} /> : "空の行";
+                    // 画像の行。押せば、これまで通り文字（URL）を直せる。
+                    return (
+                      <img
+                        data-row-image
+                        src={img}
+                        alt=""
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        className="max-h-80 max-w-full rounded border border-white/10"
+                      />
+                    );
+                  })()}
                 </div>
               )}
 

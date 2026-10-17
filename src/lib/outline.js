@@ -860,3 +860,38 @@ export function groupByDate(nodes, { newestYearFirst = true } = {}) {
   }
   return out;
 }
+
+// --- 画像 ---
+
+// 行が「画像ひとつ」なら、その URL を返す。
+// Google ドライブの共有リンクは、そのままでは絵として出ないので直す。
+//   https://drive.google.com/file/d/<id>/view?usp=sharing
+//   https://drive.google.com/open?id=<id>
+//   https://drive.google.com/uc?id=<id>
+//   https://lh3.googleusercontent.com/d/<id>
+export function driveIdOf(url) {
+  const s = String(url || "");
+  const m = s.match(/drive\.google\.com\/file\/d\/([\w-]+)/)
+    || s.match(/drive\.google\.com\/(?:open|uc|thumbnail)\?(?:[^#]*&)?id=([\w-]+)/)
+    || s.match(/lh3\.googleusercontent\.com\/d\/([\w-]+)/);
+  return m ? m[1] : null;
+}
+
+export function imageUrlOf(text) {
+  const s = String(text || "").trim();
+  if (!s) return null;
+
+  // ![説明](URL) の形
+  const md = s.match(/^!\[[^\]]*\]\((\S+?)\)$/);
+  const raw = md ? md[1] : s;
+  if (/\s/.test(raw)) return null;        // ほかの文字が混ざっていたら、絵にしない
+  if (!/^https?:\/\//i.test(raw)) return null;
+
+  const drive = driveIdOf(raw);
+  // ドライブは「中身を見せる」口に差し替える。大きさは幅で指定できる。
+  if (drive) return `https://drive.google.com/thumbnail?id=${drive}&sz=w1600`;
+
+  if (/\.(png|jpe?g|gif|webp|svg|avif)(\?|#|$)/i.test(raw)) return raw;
+  if (md) return raw;                     // ![](…) と書いてあるなら、拡張子が無くても絵として扱う
+  return null;
+}
