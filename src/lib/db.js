@@ -450,12 +450,14 @@ export function outlineTableSql() {
   heading_level integer,
   text_color    text,
   bg_color      text,
+  image_width   integer,
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
 create index if not exists outline_nodes_parent_idx on outline_nodes (parent_id, sort_order);
 -- すでに表を作ってあるときは、こちらだけで足りる
-alter table outline_nodes add column if not exists date text;`
+alter table outline_nodes add column if not exists date text;
+alter table outline_nodes add column if not exists image_width integer;`
 }
 
 // 置き場が無いときのエラーを見分ける（テーブル未作成）
@@ -479,6 +481,7 @@ function outlineRowToNode(r) {
     headingLevel: r.heading_level ?? null,
     textColor: r.text_color ?? null,
     bgColor: r.bg_color ?? null,
+    imageWidth: r.image_width ?? null,
     createdAt: r.created_at ?? null,
     updatedAt: r.updated_at ?? null,
   }
@@ -497,6 +500,7 @@ function outlineNodeToRow(n) {
     heading_level: n.headingLevel ?? null,
     text_color: n.textColor ?? null,
     bg_color: n.bgColor ?? null,
+    image_width: n.imageWidth ?? null,
     created_at: n.createdAt || new Date().toISOString(),
     updated_at: n.updatedAt || new Date().toISOString(),
   }

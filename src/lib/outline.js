@@ -37,6 +37,9 @@ export function ensureNode(input) {
     headingLevel: input?.headingLevel ? Number(input.headingLevel) : null,
     textColor: input?.textColor || null,
     bgColor: input?.bgColor || null,
+    // 画像の行の幅（px）。掴んで変えたぶんを覚えておく。
+    imageWidth: Number.isFinite(Number(input?.imageWidth)) && Number(input?.imageWidth) > 0
+      ? Math.round(Number(input.imageWidth)) : null,
     children: kids.map(ensureNode),
     createdAt: input?.createdAt || time,
     updatedAt: input?.updatedAt || time,
@@ -550,6 +553,7 @@ export function flattenTree(nodes, parentId = null, out = []) {
       headingLevel: node.headingLevel ?? null,
       textColor: node.textColor ?? null,
       bgColor: node.bgColor ?? null,
+      imageWidth: node.imageWidth ?? null,
       createdAt: node.createdAt || null,
       updatedAt: node.updatedAt || null,
     });
@@ -568,6 +572,7 @@ export function buildTree(rows) {
       headingLevel: r.headingLevel ?? null,
       textColor: r.textColor ?? null,
       bgColor: r.bgColor ?? null,
+      imageWidth: r.imageWidth ?? null,
       __parentId: r.parentId ?? null,
       __sortOrder: Number.isFinite(r.sortOrder) ? r.sortOrder : 0,
     });

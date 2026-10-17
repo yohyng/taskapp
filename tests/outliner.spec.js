@@ -1592,7 +1592,7 @@ test.describe("画像の行", () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
       { id: "a", text: "ふつうのメモ" },
-      { id: "b", text: "https://example.com/zu.png" },
+      { id: "b", text: `${location.origin}/icon-512.png` },
       { id: "c", text: "https://drive.google.com/file/d/1AbC-dEf/view?usp=sharing" },
     ])));
     await page.reload();
@@ -1601,7 +1601,8 @@ test.describe("画像の行", () => {
   });
 
   test("画像の URL は、絵として出る", async ({ page }) => {
-    await expect(page.locator('[data-row="b"] [data-row-image]')).toHaveAttribute("src", "https://example.com/zu.png");
+    await expect(page.locator('[data-row="b"] [data-row-image]'))
+      .toHaveAttribute("src", new RegExp("/icon-512\\.png$"));
     await expect(page.locator('[data-row="a"] [data-row-image]')).toHaveCount(0);
   });
 
@@ -1610,11 +1611,61 @@ test.describe("画像の行", () => {
       .toHaveAttribute("src", "https://drive.google.com/thumbnail?id=1AbC-dEf&sz=w1600");
   });
 
-  test("押せば、これまで通り URL を直せる", async ({ page }) => {
+  test("押しても絵のまま（文字に化けない）", async ({ page }) => {
     await page.locator('[data-row="b"] [data-row-text]').click();
-    await expect(page.locator('[data-row="b"] textarea')).toHaveValue("https://example.com/zu.png");
+    await expect(page.locator('[data-row="b"] textarea')).toHaveCount(0);
+    await expect(page.locator('[data-row="b"] [data-row-image]')).toBeVisible();
+  });
+
+  test("URL は ⋯ から直せる", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-menu]').click();
+    await page.locator('[data-row="b"] [data-row-edit-url]').click();
+    await expect(page.locator('[data-row="b"] textarea')).toHaveValue(/icon-512\.png$/);
     await page.keyboard.press("Escape");
     await expect(page.locator('[data-row="b"] [data-row-image]')).toBeVisible();
+  });
+
+  test("ふつうの行には、URL を直す口は出ない", async ({ page }) => {
+    await page.locator('[data-row="a"] [data-row-menu]').click();
+    await expect(page.locator('[data-row="a"] [data-row-edit-url]')).toHaveCount(0);
+  });
+
+  // 絵が届くまで測らない（届く前は幅がほぼ 0 になる）
+  const loaded = async (page) => {
+    const img = page.locator('[data-row="b"] [data-row-image]');
+    await expect.poll(async () => img.evaluate((el) => el.naturalWidth)).toBeGreaterThan(0);
+    return img;
+  };
+
+  test("右下を掴むと、大きさを変えられる", async ({ page }) => {
+    const img = await loaded(page);
+    const before = (await img.boundingBox()).width;
+    const grip = page.locator('[data-row="b"] [data-image-resize]');
+    const box = await grip.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2 - 80, box.y + box.height / 2, { steps: 8 });
+    await page.mouse.up();
+    const after = (await img.boundingBox()).width;
+    expect(after).toBeLessThan(before - 40);
+    // 幅は行の持ち物として残る（読み直しても、ほかの端末でも同じ大きさ）
+    const kept = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("taskspace-outline-v1")).find((n) => n.id === "b").imageWidth);
+    expect(kept).toBeCloseTo(after, 0);
+  });
+
+  test("つまみを両押しすると、もとの大きさに戻る", async ({ page }) => {
+    await loaded(page);
+    const grip = page.locator('[data-row="b"] [data-image-resize]');
+    const box = await grip.boundingBox();
+    await page.mouse.move(box.x + 1, box.y + 1);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 60, box.y + 1, { steps: 6 });
+    await page.mouse.up();
+    const small = (await page.locator('[data-row="b"] [data-row-image]').boundingBox()).width;
+    await page.locator('[data-row="b"] [data-image-resize]').dblclick();
+    expect((await page.locator('[data-row="b"] [data-row-image]').boundingBox()).width)
+      .toBeGreaterThan(small);
   });
 
   test("貼り付けた直後から、絵になる", async ({ page }) => {

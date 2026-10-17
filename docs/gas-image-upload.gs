@@ -1,7 +1,12 @@
 /**
  * Task Space — Google ドライブにつなぐための Apps Script。
- *   ・画像を置く（行に貼った画像の実体）
+ *   ・画像を置く（images/<年>/<月>/ に、日付と行の文字を入れた名前で）
  *   ・控えを置く（アプリの中身まるごと。backups フォルダに日付つきで）
+ *
+ * フォルダの中はこうなる
+ *   <指定したフォルダ>/
+ *     images/2026/10/2026-10-17_2131_打ち合わせのメモ_ab12cd.png
+ *     backups/taskspace-2026-10-17-21-31.json
  *
  * 置き方
  *  1. script.google.com で新しいプロジェクトを作り、この中身を貼る
@@ -34,6 +39,7 @@ function doPost(e) {
     if (body.kind === "backup") {
       const box = subFolder(folder, "backups");
       const name = "taskspace-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".json";
+      // 控えは backups/ にそのまま。名前が日付順なので、並べればそのまま時系列。
       const file = box.createFile(name, body.json || "{}", "application/json");
       prune(box, KEEP_BACKUPS);
       return reply({ ok: true, id: file.getId(), name: name });
@@ -42,7 +48,14 @@ function doPost(e) {
     const name = body.name || ("image-" + new Date().toISOString().replace(/[:.]/g, "-"));
     const blob = Utilities.newBlob(bytes, body.mimeType || "image/png", name);
 
-    const file = folder.createFile(blob);
+    // 画像は images/<年>/<月>/ に分けて入れる。あとから探しやすいように。
+    var box = subFolder(folder, "images");
+    var parts = String(body.folder || "").split("/");
+    for (var i = 0; i < parts.length; i++) if (parts[i]) box = subFolder(box, parts[i]);
+
+    const file = box.createFile(blob);
+    // どの行に貼ったものかを、説明欄に残す（ドライブの検索で当たる）
+    if (body.note) file.setDescription(String(body.note));
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
 
     return reply({

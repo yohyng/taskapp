@@ -100,7 +100,9 @@ test.describe("画像を貼る", () => {
     await pasteImage(page);
     await expect(note(page)).toContainText("画像を置きました");
     await expect(page.locator("[data-row] [data-row-text]").first()).toHaveValue(/drive\.google\.com/);
-    expect(sent[0].name).toBe("ねこ.png");
+    // 名前は「日付_時刻_手がかり_しるし.拡張子」、置き場は年/月のフォルダ
+    expect(sent[0].name).toMatch(/^\d{4}-\d{2}-\d{2}_\d{4}_ねこ_[a-z0-9]{6}\.png$/);
+    expect(sent[0].folder).toMatch(/^\d{4}\/\d{2}$/);
     expect(sent[0].mimeType).toBe("image/png");
     expect(sent[0].dataBase64.length).toBeGreaterThan(0);
     expect(sent[0].token).toBe("ひみつ");

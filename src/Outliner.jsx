@@ -811,7 +811,10 @@ export default function Outliner() {
     }
     setNote(`画像を置いています… ${file.name || ""}`);
     try {
-      const got = await uploadToDrive(file);
+      // どこに貼ったものかを、名前と説明に残す（あとで探せるように）
+      const where = pathTo(nodes, node?.id)?.slice(0, -1).map((n) => truncateTitle(n.text, 20)).join(" / ");
+      const hint = String(node?.text || "").trim() || where?.split(" / ").at(-1) || "";
+      const got = await uploadToDrive(file, readDriveSetting(), { hint, where });
       if (node && !String(node.text || "").trim()) {
         patch(node.id, { text: got.url });
       } else {
@@ -822,6 +825,32 @@ export default function Outliner() {
     } catch (e) {
       setNote(`置けませんでした：${e?.message || e}`);
     }
+  }
+
+  // 画像の右下を掴んで、大きさを変える。
+  // 離したときにだけ木へ書き戻す（動かしているあいだは絵だけ動かす）。
+  function startResize(e, node) {
+    e.preventDefault();
+    e.stopPropagation();
+    const box = e.currentTarget.closest("[data-row-image-box]");
+    const img = box?.querySelector("img");
+    if (!img) return;
+    const startX = e.clientX;
+    const startW = img.getBoundingClientRect().width;
+    const limit = box.parentElement?.getBoundingClientRect().width || 1200;
+    let last = startW;
+    const move = (ev) => {
+      last = Math.max(60, Math.min(limit, Math.round(startW + (ev.clientX - startX))));
+      img.style.width = `${last}px`;
+      img.style.maxHeight = "none";
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      patch(node.id, { imageWidth: Math.round(last) });
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
   }
 
   // 貼り付け・落とし込みから画像を拾う
@@ -1483,6 +1512,8 @@ alter table outline_nodes disable row level security;
                     if (e.shiftKey) { e.preventDefault(); pickTo(node.id); return; }
                     if (e.metaKey || e.ctrlKey) { e.preventDefault(); togglePick(node.id); return; }
                     clearPick();
+                    // 画像の行は、押しても絵のまま。URL を直すのは ⋯ から。
+                    if (imageUrlOf(node.text)) { anchorRef.current = node.id; return; }
                     edit(node.id, -1);
                   }}
                   style={textStyle}
@@ -1497,14 +1528,28 @@ alter table outline_nodes disable row level security;
                     if (!img) return node.text ? <Marked text={node.text} query={query} /> : "空の行";
                     // 画像の行。押せば、これまで通り文字（URL）を直せる。
                     return (
-                      <img
-                        data-row-image
-                        src={img}
-                        alt=""
-                        loading="lazy"
-                        referrerPolicy="no-referrer"
-                        className="max-h-80 max-w-full rounded border border-white/10"
-                      />
+                      <span data-row-image-box className="relative inline-block max-w-full align-top">
+                        <img
+                          data-row-image
+                          src={img}
+                          alt=""
+                          loading="lazy"
+                          draggable={false}
+                          referrerPolicy="no-referrer"
+                          style={node.imageWidth ? { width: `${node.imageWidth}px` } : undefined}
+                          className={classNames(
+                            "max-w-full rounded border border-white/10",
+                            !node.imageWidth && "max-h-80",
+                          )}
+                        />
+                        <span
+                          data-image-resize={node.id}
+                          onPointerDown={(e) => startResize(e, node)}
+                          title="ドラッグで大きさを変える（ダブルクリックでもとに戻す）"
+                          onDoubleClick={(e) => { e.stopPropagation(); patch(node.id, { imageWidth: null }); }}
+                          className="absolute bottom-1 right-1 h-3.5 w-3.5 cursor-nwse-resize rounded-sm border border-white/40 bg-black/50 opacity-0 transition hover:opacity-100 group-hover/row:opacity-70"
+                        />
+                      </span>
                     );
                   })()}
                 </div>
@@ -1572,6 +1617,15 @@ alter table outline_nodes disable row level security;
                   <button onClick={() => { setMenuId(null); patch(node.id, { favorite: !node.favorite }); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">
                     <Star className="h-3 w-3" /> {node.favorite ? "お気に入り解除" : "お気に入り"}
                   </button>
+                  {imageUrlOf(node.text) && (
+                    <button
+                      data-row-edit-url
+                      onClick={() => { setMenuId(null); edit(node.id, -1); }}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]"
+                    >
+                      ✎ 画像の URL を直す
+                    </button>
+                  )}
                   {hasKids && (
                     <button onClick={() => { setMenuId(null); setNodes((prev) => toggleCollapse(prev, node.id)); }} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 hover:bg-white/[0.07]">
                       {node.collapsed ? "▶ 展開" : "▼ 折りたたむ"}

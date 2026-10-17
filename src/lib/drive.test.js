@@ -100,3 +100,34 @@ describe('控え', () => {
     expect(hoursSinceBackup()).toBe(Infinity)
   })
 })
+
+import { tidyName } from './drive.js'
+
+describe('ドライブに並ぶ名前', () => {
+  const at = new Date('2026-10-17T21:31:00')
+  const file = (name, type) => ({ name, type })
+
+  it('日付と時刻、行の文字、拡張子で作る', () => {
+    const got = tidyName(file('image.png', 'image/png'), '打ち合わせのメモ', at)
+    expect(got).toMatch(/^2026-10-17_2131_打ち合わせのメモ_[a-z0-9]{6}\.png$/)
+  })
+
+  it('貼り付けの image.png は、行の文字のほうを使う', () => {
+    expect(tidyName(file('image.png', 'image/png'), '', at)).toMatch(/^2026-10-17_2131_[a-z0-9]{6}\.png$/)
+  })
+
+  it('もとの名前が意味を持つときは、それを使う', () => {
+    expect(tidyName(file('ねこ.jpg', 'image/jpeg'), '', at)).toMatch(/^2026-10-17_2131_ねこ_[a-z0-9]{6}\.jpg$/)
+  })
+
+  it('名前に使えない字と URL は落とす', () => {
+    const got = tidyName(file('a.png', 'image/png'), 'これ/を:みて https://example.com/x', at)
+    expect(got).not.toMatch(/[/:*?"<>|]/)
+    expect(got).toContain('これ-を-みて')
+  })
+
+  it('長い行は切り詰める', () => {
+    const got = tidyName(file('a.png', 'image/png'), 'あ'.repeat(200), at)
+    expect(got.length).toBeLessThan(80)
+  })
+})

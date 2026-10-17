@@ -40,12 +40,39 @@ export function toBase64(file) {
 
 // 送って、表示できる URL をもらう。
 // Content-Type は付けない（付けると先に OPTIONS が飛び、GAS が答えられない）。
-export async function uploadToDrive(file, setting = readDriveSetting()) {
+// ドライブに並ぶ名前を、あとから見て分かる形にする。
+//   2026-10-17_2131_ねこの写真_ab12cd.png
+// 置き場では年月のフォルダに分けて入る（GAS 側でやる）。
+const EXT = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp", "image/heic": "heic", "image/svg+xml": "svg" };
+
+export function tidyName(file, hint = "", at = new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp = `${at.getFullYear()}-${p(at.getMonth() + 1)}-${p(at.getDate())}_${p(at.getHours())}${p(at.getMinutes())}`;
+  const fromFile = String(file?.name || "").replace(/\.[a-z0-9]+$/i, "");
+  // 貼り付けた画像の名前はたいてい image.png なので、行の文字のほうを使う
+  const plain = String(hint || "").trim() || (/^(image|スクリーンショット|screenshot)/i.test(fromFile) ? "" : fromFile);
+  const label = plain
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[\\/:*?"<>|#\n\t]+/g, " ")
+    .trim()
+    .slice(0, 40)
+    .replace(/\s+/g, "-");
+  const tail = Math.random().toString(36).slice(2, 8);
+  const ext = EXT[file?.type] || String(file?.name || "").split(".").pop()?.toLowerCase() || "png";
+  return [stamp, label, tail].filter(Boolean).join("_") + `.${ext}`;
+}
+
+export async function uploadToDrive(file, setting = readDriveSetting(), about = {}) {
   if (!setting.url) throw new Error("置き場が決まっていません（設定で GAS の URL を入れてください）");
+  const at = new Date();
   const payload = {
     token: setting.token || "",
-    name: file.name || `image-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.png`,
+    name: tidyName(file, about.hint, at),
     mimeType: file.type || "image/png",
+    // 置き場では年/月のフォルダに分ける
+    folder: `${at.getFullYear()}/${String(at.getMonth() + 1).padStart(2, "0")}`,
+    // どこに貼ったものか（ドライブの説明欄に入れておく）
+    note: [about.hint, about.where].filter(Boolean).join(" / ").slice(0, 300),
     dataBase64: await toBase64(file),
   };
   const res = await fetch(setting.url, { method: "POST", body: JSON.stringify(payload) });
