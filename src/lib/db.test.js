@@ -99,3 +99,29 @@ describe('小分けにして送る', () => {
     expect(Math.max(...parts.map((p) => p.length))).toBe(200)
   })
 })
+
+import { noteAbsentOutlineColumns, absentOutlineColumns, outlineColumnsSql } from './db.js'
+
+describe('置き場に足りない列', () => {
+  it('読んだ行の形から、無い列を見つける', () => {
+    noteAbsentOutlineColumns([{ id: 'a', text: '', heading_level: null, text_color: null, bg_color: null }])
+    expect(absentOutlineColumns().sort()).toEqual(['date', 'image_width'])
+  })
+
+  it('ぜんぶ揃っていれば、何も言わない', () => {
+    noteAbsentOutlineColumns([{ id: 'a', date: null, image_width: null, heading_level: null, text_color: null, bg_color: null }])
+    expect(absentOutlineColumns()).toEqual([])
+  })
+
+  it('1行も無ければ、判断しない', () => {
+    noteAbsentOutlineColumns([{ id: 'a', date: null, image_width: null, heading_level: null, text_color: null, bg_color: null }])
+    noteAbsentOutlineColumns([])
+    expect(absentOutlineColumns()).toEqual([])
+  })
+
+  it('足りないぶんだけの SQL を作る', () => {
+    expect(outlineColumnsSql(['date', 'image_width'])).toBe(
+      'alter table outline_nodes add column if not exists date text;\n'
+      + 'alter table outline_nodes add column if not exists image_width integer;')
+  })
+})

@@ -11,7 +11,7 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf,
 } from "./lib/outline";
-import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
+import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
@@ -145,6 +145,9 @@ export function OutlineProvider({ children }) {
         return;
       }
       readyRef.current = true;
+      // 置き場に列が足りないと、その持ち物（日付・画像の幅・色）だけが
+      // ほかの端末に伝わらない。黙っていると「端末ごとに違う」になる。
+      if (absentOutlineColumns().length) setSyncNote(`missing-col:${absentOutlineColumns().join(",")}`);
       const remote = buildTree(rows);
       applyRaw((mine) => {
         const merged = mergeOutline(mine, remote, tombRef.current);
@@ -1292,6 +1295,35 @@ alter table outline_nodes disable row level security;
           <button onClick={dismissSync} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15">
             閉じる
           </button>
+        </div>
+      )}
+
+      {syncNote.startsWith("missing-col:") && (
+        <div data-outline-missing-col className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
+          <div className="mb-1 font-semibold">置き場に足りない列があります</div>
+          <div className="mb-1 text-amber-100/80">
+            {syncNote.slice("missing-col:".length).replace(/,/g, "・")} が無いので、そのぶんだけ
+            ほかの端末に伝わりません（文字と並びは伝わります）。SQL Editor で足してください。
+          </div>
+          <pre className="mb-1 overflow-auto whitespace-pre-wrap break-all rounded bg-black/30 p-2 text-[10px] text-amber-50/90">
+{outlineColumnsSql(syncNote.slice("missing-col:".length).split(","))}
+          </pre>
+          <div className="flex gap-1.5">
+            <button
+              data-outline-copy-col-sql
+              onClick={async () => {
+                const sql = outlineColumnsSql(syncNote.slice("missing-col:".length).split(","));
+                try { await navigator.clipboard.writeText(sql); setNote("SQL をコピーしました"); }
+                catch { setNote("コピーできませんでした。手で選んでください"); }
+              }}
+              className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15"
+            >
+              SQL をコピー
+            </button>
+            <button onClick={dismissSync} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
+              閉じる
+            </button>
+          </div>
         </div>
       )}
 

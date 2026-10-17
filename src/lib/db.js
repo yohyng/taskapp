@@ -487,7 +487,48 @@ function outlineRowToNode(r) {
   }
 }
 
+// 置き場にまだ無い列（あとから足したもの）。
+// 列が無いまま送ると upsert がまるごと断られ、端末どうしの同期が止まる。
+const OUTLINE_OPTIONAL = ['date', 'image_width', 'heading_level', 'text_color', 'bg_color']
+let outlineAbsent = new Set()
+
+export function absentOutlineColumns() {
+  return [...outlineAbsent]
+}
+
+const OUTLINE_COLUMN_TYPE = {
+  date: 'text', image_width: 'integer', heading_level: 'integer', text_color: 'text', bg_color: 'text',
+}
+
+// 足りない列だけを足す SQL（表はもうある、というとき用）
+export function outlineColumnsSql(cols = absentOutlineColumns()) {
+  return cols
+    .map((c) => `alter table outline_nodes add column if not exists ${c} ${OUTLINE_COLUMN_TYPE[c] || 'text'};`)
+    .join('\n')
+}
+
+// 読み込んだ行の形から、無い列を見つける（1行も無ければ分からないので触らない）
+export function noteAbsentOutlineColumns(rows) {
+  const sample = rows?.[0]
+  if (!sample) return []
+  outlineAbsent = new Set(OUTLINE_OPTIONAL.filter((col) => !(col in sample)))
+  return [...outlineAbsent]
+}
+
+// 「その列が無い」と言われたときに、列名を拾う（PGRST204 など）
+function missingColumnOf(error) {
+  const text = `${error?.message ?? ''} ${error?.details ?? ''} ${error?.hint ?? ''}`
+  const m = text.match(/'([a-z_]+)' column/i) || text.match(/column "?([a-z_]+)"? of relation/i)
+  return m && OUTLINE_OPTIONAL.includes(m[1]) ? m[1] : null
+}
+
 function outlineNodeToRow(n) {
+  const row = outlineNodeToFullRow(n)
+  for (const col of outlineAbsent) delete row[col]
+  return row
+}
+
+function outlineNodeToFullRow(n) {
   return {
     id: n.id,
     parent_id: n.parentId ?? null,
@@ -527,6 +568,7 @@ export async function loadOutlineRows() {
     if (from > 500000) break   // 念のための止め
   }
   outlineTableMissing = false
+  noteAbsentOutlineColumns(out)
   return out.map(outlineRowToNode)
 }
 
@@ -568,9 +610,14 @@ export async function saveOutlineRows(rows, deletedIds = []) {
   }
 
   for (const part of chunk(rows, 500)) {
-    const { error } = await supabase.from(OUTLINE_TABLE).upsert(part.map(outlineNodeToRow), { onConflict: 'id' })
-    if (error) {
+    // 無い列を言われたら、その列を外してもう一度だけ試す。
+    // ここで諦めると、端末どうしの同期がまるごと止まってしまう。
+    for (let tries = 0; ; tries += 1) {
+      const { error } = await supabase.from(OUTLINE_TABLE).upsert(part.map(outlineNodeToRow), { onConflict: 'id' })
+      if (!error) break
       if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+      const col = missingColumnOf(error)
+      if (col && tries < OUTLINE_OPTIONAL.length) { outlineAbsent.add(col); continue }
       console.error('[db] outline save error', error)
       return error.message || String(error)
     }
