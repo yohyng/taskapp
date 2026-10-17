@@ -583,15 +583,64 @@ export default function Outliner() {
     if (e.button !== 0) return;
     const list = listRef.current;
     if (!list) return;
-    const start = { x: e.clientX, y: e.clientY };
+    // 転がす入れ物（枠）。この中での位置で数えると、送っても選びが続く。
+    const box = list.closest("[data-pane-id]") || list.parentElement;
+    const boxRect = () => box.getBoundingClientRect();
+    const toContentY = (clientY) => clientY - boxRect().top + box.scrollTop;
+
+    const start = { x: e.clientX, y: e.clientY, contentY: toContentY(e.clientY) };
     let acting = !fromId;      // 余白からなら、すぐ選び始める
     if (acting) e.preventDefault();
+    let last = { x: e.clientX, y: e.clientY };
+    let raf = 0;
 
     const rowAt = (x, y) => document.elementFromPoint(x, y)?.closest("[data-row]")?.getAttribute("data-row") || null;
 
+    // いまの枠に重なっている行を拾う。位置は「枠の中」で見るので、
+    // 送って画面から出ていった行も選ばれたまま残る。
+    const paint = () => {
+      const r = boxRect();
+      const curContentY = toContentY(last.y);
+      const top = Math.min(start.contentY, curContentY);
+      const bottom = Math.max(start.contentY, curContentY);
+
+      const hit = [...list.querySelectorAll("[data-row]")].filter((el) => {
+        const b = el.getBoundingClientRect();
+        const elTop = b.top - r.top + box.scrollTop;
+        return elTop + b.height > top && elTop < bottom;
+      }).map((el) => el.getAttribute("data-row"));
+      if (fromId && !hit.includes(fromId)) hit.unshift(fromId);
+      setPicked(hit);
+
+      // 枠は画面の座標で描く（枠の外にはみ出さないように切る）
+      const viewTop = Math.max(r.top, top - box.scrollTop + r.top);
+      const viewBottom = Math.min(r.bottom, bottom - box.scrollTop + r.top);
+      setBand({
+        left: Math.min(start.x, last.x),
+        top: viewTop,
+        width: Math.abs(last.x - start.x),
+        height: Math.max(0, viewBottom - viewTop),
+      });
+    };
+
+    // 端に近づいたら、枠の中を送る（押さえたまま下まで選べるように）
+    const tick = () => {
+      const r = boxRect();
+      const edge = 48;
+      let by = 0;
+      if (last.y > r.bottom - edge) by = Math.min(24, (last.y - (r.bottom - edge)) / 2);
+      else if (last.y < r.top + edge) by = -Math.min(24, ((r.top + edge) - last.y) / 2);
+      if (by) {
+        box.scrollTop += by;
+        paint();
+      }
+      raf = requestAnimationFrame(tick);
+    };
+
     const move = (ev) => {
-      const far = Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 8;
+      last = { x: ev.clientX, y: ev.clientY };
       if (!acting) {
+        const far = Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 8;
         // 文字から始めたときは、別の行に入ったら選択に切り替える
         const over = rowAt(ev.clientX, ev.clientY);
         if (!far || !over || over === fromId) return;
@@ -599,28 +648,19 @@ export default function Outliner() {
         window.getSelection()?.removeAllRanges();
         setEditingId(null);
         anchorRef.current = fromId;
+        raf = requestAnimationFrame(tick);
       }
       ev.preventDefault();
-      setBand({
-        left: Math.min(start.x, ev.clientX), top: Math.min(start.y, ev.clientY),
-        width: Math.abs(ev.clientX - start.x), height: Math.abs(ev.clientY - start.y),
-      });
-      // 枠に重なった行を拾う
-      const top = Math.min(start.y, ev.clientY);
-      const bottom = Math.max(start.y, ev.clientY);
-      const hit = [...list.querySelectorAll("[data-row]")].filter((el) => {
-        const r = el.getBoundingClientRect();
-        return r.bottom > top && r.top < bottom;
-      }).map((el) => el.getAttribute("data-row"));
-      if (fromId && !hit.includes(fromId)) hit.unshift(fromId);
-      setPicked(hit);
+      paint();
     };
     const up = () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
       setBand(null);
     };
+    if (acting) raf = requestAnimationFrame(tick);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", up);

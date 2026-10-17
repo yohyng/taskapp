@@ -1225,3 +1225,64 @@ test.describe("保存して読み直す", () => {
     await fresh.close();
   });
 });
+
+test.describe("なぞり選択が、送っても続く", () => {
+  test.use({ viewport: { width: 1200, height: 600 } });
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify(
+      Array.from({ length: 60 }, (_, i) => ({ id: `n${i}`, text: `行${i}` })))));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const pickedCount = (page) => page.evaluate(() => document.querySelectorAll("[data-picked]").length);
+
+  test("下の端で押さえていると、送りながら選び続ける", async ({ page }) => {
+    const first = await page.locator('[data-row="n0"]').boundingBox();
+    const pane = await page.locator("[data-pane-id]").first().boundingBox();
+
+    await page.mouse.move(first.x + first.width - 8, first.y + 2);
+    await page.mouse.down();
+    // 枠の下の端まで引いて、そのまま押さえておく
+    await page.mouse.move(first.x + first.width - 8, pane.y + pane.height - 10, { steps: 10 });
+    const before = await pickedCount(page);
+    await page.waitForTimeout(900);          // 送られるのを待つ
+    const after = await pickedCount(page);
+    await page.mouse.up();
+
+    expect(before).toBeGreaterThan(5);
+    expect(after).toBeGreaterThan(before + 5);   // 送ったぶん増えている
+  });
+
+  test("送って画面から出た行も、選ばれたまま", async ({ page }) => {
+    const first = await page.locator('[data-row="n0"]').boundingBox();
+    const pane = await page.locator("[data-pane-id]").first().boundingBox();
+
+    await page.mouse.move(first.x + first.width - 8, first.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(first.x + first.width - 8, pane.y + pane.height - 10, { steps: 10 });
+    await page.waitForTimeout(900);
+    await page.mouse.up();
+
+    // いちばん上の行は、もう画面の外に出ているかもしれないが選ばれている
+    const ids = await page.evaluate(() =>
+      [...document.querySelectorAll("[data-picked]")].map((e) => e.getAttribute("data-row")));
+    expect(ids).toContain("n0");
+    expect(ids.length).toBeGreaterThan(12);
+    await expect(page.locator("[data-pick-bar]")).toContainText(`${ids.length}件`);
+  });
+
+  test("選んだあと、まとめて消せる", async ({ page }) => {
+    const first = await page.locator('[data-row="n0"]').boundingBox();
+    const pane = await page.locator("[data-pane-id]").first().boundingBox();
+    await page.mouse.move(first.x + first.width - 8, first.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(first.x + first.width - 8, pane.y + pane.height - 10, { steps: 10 });
+    await page.waitForTimeout(700);
+    await page.mouse.up();
+
+    const picked = await pickedCount(page);
+    await page.locator("[data-pick-delete]").click();
+    await expect.poll(async () => (await page.locator("[data-row]").count())).toBe(60 - picked);
+  });
+});
