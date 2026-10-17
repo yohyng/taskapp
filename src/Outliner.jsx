@@ -13,6 +13,7 @@ import {
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
+import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
 
@@ -334,6 +335,12 @@ function Marked({ text, query }) {
 export default function Outliner() {
   const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
+  const [drive, setDrive] = useState(readDriveSetting);
+  const saveDrive = (patchIt) => {
+    const next = { ...drive, ...patchIt };
+    setDrive(next);
+    writeDriveSetting(next);
+  };
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
@@ -757,6 +764,71 @@ export default function Outliner() {
     setNote("ぜんぶ消しました（⌘Z で戻せます）");
   }
 
+  // 控え：この端末に置いてあるもの一式を、ドライブへ。
+  // Supabase が飛んでも、ここから戻せるようにしておく。
+  function collectAll() {
+    const store = {};
+    try {
+      for (let i = 0; i < localStorage.length; i += 1) {
+        const key = localStorage.key(i);
+        if (!key) continue;
+        // 合言葉は控えに入れない
+        if (key === "taskspace-drive-token") continue;
+        if (/^(taskspace-|notion-like-taskdb|ts-)/.test(key)) store[key] = localStorage.getItem(key);
+      }
+    } catch { /* 読めないものは諦める */ }
+    return { app: "taskspace", at: new Date().toISOString(), store };
+  }
+
+  async function runBackup(manual = false) {
+    if (!hasDrive()) {
+      if (manual) setNote("置き場が決まっていません（上の URL と合言葉を入れてください）");
+      return;
+    }
+    if (manual) setNote("控えています…");
+    try {
+      const got = await backupToDrive(collectAll());
+      setNote(`控えました（${got.name || "backups"}）`);
+    } catch (e) {
+      setNote(`控えられませんでした：${e?.message || e}`);
+    }
+  }
+
+  // ほどよい間隔で、ひとりでに控える（開いたあと少し置いてから、1日1回）
+  useEffect(() => {
+    if (!hasDrive() || hoursSinceBackup() < 24) return;
+    const id = setTimeout(() => runBackup(false), 30000);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 画像をドライブに預けて、その URL を行に書く。
+  // 行が空ならそこへ、文字があれば下に新しい行を作って入れる。
+  async function putImage(file, node) {
+    if (!hasDrive()) {
+      setNote("画像の置き場が決まっていません（⚙ の「画像の置き場」で設定してください）");
+      return;
+    }
+    setNote(`画像を置いています… ${file.name || ""}`);
+    try {
+      const got = await uploadToDrive(file);
+      if (node && !String(node.text || "").trim()) {
+        patch(node.id, { text: got.url });
+      } else {
+        const made = makeNode(got.url);
+        applyShown((list) => (node ? insertAfter(list, node.id, made) : [...list, made]));
+      }
+      setNote("画像を置きました");
+    } catch (e) {
+      setNote(`置けませんでした：${e?.message || e}`);
+    }
+  }
+
+  // 貼り付け・落とし込みから画像を拾う
+  const imageFrom = (dt) => [...(dt?.files || [])].find((f) => f.type.startsWith("image/"))
+    || [...(dt?.items || [])].map((i) => (i.kind === "file" ? i.getAsFile() : null))
+       .find((f) => f && f.type.startsWith("image/"));
+
   function addAtEnd() {
     const made = makeNode("");
     applyShown((list) => [...list, made]);
@@ -977,6 +1049,53 @@ export default function Outliner() {
                     {label}
                   </button>
                 ))}
+              </div>
+
+              <div className="mb-2 border-t border-white/10 pt-2">
+                <div className="mb-1 text-[10px] text-neutral-500">画像の置き場（Google ドライブ）</div>
+                <input
+                  data-drive-url
+                  value={drive.url}
+                  onChange={(e) => saveDrive({ url: e.target.value.trim() })}
+                  placeholder="GAS の URL（…/exec）"
+                  className="mb-1 w-full rounded border border-white/10 bg-black/25 px-2 py-1 text-[10px] ts-text outline-none placeholder:text-neutral-700"
+                />
+                <input
+                  data-drive-token
+                  type="password"
+                  value={drive.token}
+                  onChange={(e) => saveDrive({ token: e.target.value })}
+                  placeholder="合言葉"
+                  className="mb-1 w-full rounded border border-white/10 bg-black/25 px-2 py-1 text-[10px] ts-text outline-none placeholder:text-neutral-700"
+                />
+                <div className="mb-1 flex gap-1">
+                  <button
+                    data-drive-test
+                    onClick={async () => {
+                      setNote("つながるか試しています…");
+                      try {
+                        const got = await pingDrive({ url: drive.url, token: drive.token });
+                        setNote(`つながりました（フォルダ：${got.folder || "?"}）`);
+                      } catch (e) { setNote(`つながりません：${e?.message || e}`); }
+                    }}
+                    className="flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                  >
+                    つながるか試す
+                  </button>
+                  <button
+                    data-drive-backup
+                    onClick={() => runBackup(true)}
+                    className="flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                  >
+                    いま控える
+                  </button>
+                </div>
+                <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                  画像はドライブに置き、行には URL だけを書きます。
+                  中身まるごとの控えも、ここへ1日1回ぶん置きます
+                  {lastBackupAt() ? `（前回：${lastBackupAt().slice(0, 16).replace("T", " ")}）` : "（まだ控えていません）"}。
+                  置き方は docs/gas-image-upload.gs を見てください。
+                </div>
               </div>
 
               <div className="mb-2 border-t border-white/10 pt-2">
@@ -1223,6 +1342,14 @@ alter table outline_nodes disable row level security;
           clearPick();
           startBand(e);
         }}
+        onDragOver={(e) => { if (imageFrom(e.dataTransfer)) e.preventDefault(); }}
+        onDrop={(e) => {
+          const file = imageFrom(e.dataTransfer);
+          if (!file) return;
+          e.preventDefault();
+          const row = e.target.closest("[data-row]")?.getAttribute("data-row");
+          putImage(file, row ? pathTo(listed, row)?.at(-1) : null);
+        }}
         style={{
           fontSize: `${view.fontSize}px`,
           textAlign: view.align,
@@ -1327,6 +1454,18 @@ alter table outline_nodes disable row level security;
                     e.target.style.height = `${e.target.scrollHeight}px`;
                   }}
                   onKeyDown={(e) => onKeyDown(e, node)}
+                  onPaste={(e) => {
+                    const file = imageFrom(e.clipboardData);
+                    if (!file) return;           // 文字の貼り付けは、これまで通り
+                    e.preventDefault();
+                    putImage(file, node);
+                  }}
+                  onDrop={(e) => {
+                    const file = imageFrom(e.dataTransfer);
+                    if (!file) return;
+                    e.preventDefault();
+                    putImage(file, node);
+                  }}
                   onBlur={() => { setEditingId((cur) => (cur === node.id ? null : cur)); setTagHint(null); }}
                   className={classNames(
                     "min-w-0 flex-1 resize-none bg-transparent px-1 py-0 text-[1em] leading-relaxed ts-text outline-none",
