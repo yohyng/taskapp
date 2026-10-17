@@ -8,7 +8,7 @@ import {
   countChars, hasStoredBody, truncateTitle,
   flattenTree, buildTree, mergeOutline,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
-  collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags,
+  collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 
@@ -17,6 +17,9 @@ const OUTLINE_KEY = "taskspace-outline-v1";
 // 木はひとつ。枠（ペイン）をいくつ開いても、同じものを見ている。
 // 枠ごとに違うのは「どこにズームしているか」だけ。
 const OutlineContext = React.createContext(null);
+// 木そのものを要らない側（App のメモ追加など）のための口。
+// ここは中身が変わらないので、木を書き換えても描き直しを誘わない。
+const OutlineApiContext = React.createContext(null);
 
 const OUTLINE_VIEW_KEY = "taskspace-outline-view";
 const DEFAULT_VIEW = { fontSize: 14, align: "left", typewriter: false, anchor: 0.6 };
@@ -37,7 +40,14 @@ export function OutlineProvider({ children }) {
   const [nodes, setNodes] = useState(load);
   // いまの木を、更新の外からも読めるようにしておく（履歴を積むため）
   const nodesRef = useRef(nodes);
-  const [hist, setHist] = useState({ past: [], future: [] });
+  // 履歴そのものは ref に持ち、画面には「戻せるか」だけを伝える。
+  // 更新関数の中で木を動かすと、二度呼ばれたときにずれるため。
+  const histRef = useRef({ past: [], future: [] });
+  const [histCount, setHistCount] = useState({ past: 0, future: 0 });
+  const syncHist = (next) => {
+    histRef.current = next;
+    setHistCount({ past: next.past.length, future: next.future.length });
+  };
   const coalesceRef = useRef({ key: null, at: 0 });
   const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
   const [view, setViewState] = useState(readView);
@@ -71,7 +81,8 @@ export function OutlineProvider({ children }) {
     const same = opts.coalesce && c.key === opts.coalesce && now - c.at < 900;
     coalesceRef.current = { key: opts.coalesce || null, at: now };
     if (same) return;
-    setHist((h) => ({ past: [...h.past, prev].slice(-100), future: [] }));
+    const h = histRef.current;
+    syncHist({ past: [...h.past, prev].slice(-100), future: [] });
   }, []);
 
   // 同期で入ってきたぶんは、履歴に積まない（自分の操作ではないので）
@@ -83,27 +94,25 @@ export function OutlineProvider({ children }) {
   }, []);
 
   const undo = useCallback(() => {
-    setHist((h) => {
-      if (!h.past.length) return h;
-      const prev = h.past[h.past.length - 1];
-      const now = nodesRef.current;
-      nodesRef.current = prev;
-      setNodes(prev);
-      coalesceRef.current = { key: null, at: 0 };
-      return { past: h.past.slice(0, -1), future: [...h.future, now].slice(-100) };
-    });
+    const h = histRef.current;
+    if (!h.past.length) return;
+    const prev = h.past[h.past.length - 1];
+    const now = nodesRef.current;
+    nodesRef.current = prev;
+    setNodes(prev);
+    coalesceRef.current = { key: null, at: 0 };
+    syncHist({ past: h.past.slice(0, -1), future: [...h.future, now].slice(-100) });
   }, []);
 
   const redo = useCallback(() => {
-    setHist((h) => {
-      if (!h.future.length) return h;
-      const next = h.future[h.future.length - 1];
-      const now = nodesRef.current;
-      nodesRef.current = next;
-      setNodes(next);
-      coalesceRef.current = { key: null, at: 0 };
-      return { past: [...h.past, now].slice(-100), future: h.future.slice(0, -1) };
-    });
+    const h = histRef.current;
+    if (!h.future.length) return;
+    const node = h.future[h.future.length - 1];
+    const now = nodesRef.current;
+    nodesRef.current = node;
+    setNodes(node);
+    coalesceRef.current = { key: null, at: 0 };
+    syncHist({ past: [...h.past, now].slice(-100), future: h.future.slice(0, -1) });
   }, []);
 
   // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
@@ -111,11 +120,13 @@ export function OutlineProvider({ children }) {
     let alive = true;
     loadOutlineRows().then((rows) => {
       if (!alive) return;
-      readyRef.current = true;
       if (!rows) {
+        // 読めていないのに送り始めると、向こうの新しい行を手元の古い木で
+        // 上書きしてしまう。置き場が無いときだけ、知らせて黙る。
         if (isOutlineTableMissing()) setSyncNote("missing-table");
         return;
       }
+      readyRef.current = true;
       const remote = buildTree(rows);
       applyRaw((mine) => {
         const merged = mergeOutline(mine, remote, tombRef.current);
@@ -184,10 +195,30 @@ export function OutlineProvider({ children }) {
 
   const value = useMemo(() => ({
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView,
-    undo, redo, canUndo: hist.past.length > 0, canRedo: hist.future.length > 0,
+    undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, hist, syncNote, view, setView]);
-  return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView]);
+  // 「いまの木」はしまっておき、使うときに読む
+  const api = useMemo(() => ({
+    addMemo: (dateLabel, text) => {
+      const got = addMemoUnderDate(nodesRef.current, dateLabel, text);
+      apply(() => got.nodes);
+      return got;
+    },
+  }), [apply]);
+
+  return (
+    <OutlineApiContext.Provider value={api}>
+      <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>
+    </OutlineApiContext.Provider>
+  );
+}
+
+// 木を使わず、書き足すだけの側はこちら（描き直しに巻き込まれない）
+export function useOutlineApi() {
+  const ctx = React.useContext(OutlineApiContext);
+  if (!ctx) throw new Error("OutlineProvider の中で使ってください");
+  return ctx;
 }
 
 export function useOutline() {
@@ -258,7 +289,7 @@ function Marked({ text, query }) {
       : <span key={i}>{p.text}</span>));
   }
   const parts = splitTags(text);
-  if (parts.length === 1) return text;
+  if (parts.length === 1 && !parts[0].tag) return text;
   return parts.map((p, i) => (p.tag
     ? <span key={i} data-tag className="text-sky-300/80">{p.text}</span>
     : <span key={i}>{p.text}</span>));
@@ -435,11 +466,13 @@ export default function Outliner() {
     if (!list) return;
     const listTop = list.getBoundingClientRect().top;
     const startDepth = rows.find((r) => r.node.id === node.id)?.depth ?? 0;
-    const measured = rows.map((r) => {
+    const measured = rows.flatMap((r) => {
       const el = list.querySelector(`[data-row="${r.node.id}"]`);
+      if (!el) return [];   // 描き替えの隙に消えていることがある
       const box = el.getBoundingClientRect();
-      return { id: r.node.id, depth: r.depth, top: box.top - listTop, height: box.height };
+      return [{ id: r.node.id, depth: r.depth, top: box.top - listTop, height: box.height }];
     });
+    if (!measured.length) return;
     dragRef.current = { id: node.id, startX: e.clientX, startDepth, rows: measured, moved: false, drop: null };
 
     const move = (ev) => {
@@ -462,6 +495,7 @@ export default function Outliner() {
     const up = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
       const d = dragRef.current;
       dragRef.current = null;
       setDrag(null);
@@ -473,6 +507,8 @@ export default function Outliner() {
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    // 指が画面の外へ出たときにも、掴んだままにならないようにする
+    window.addEventListener("pointercancel", up);
   }
   const skipZoomRef = useRef(false);
 
@@ -585,6 +621,17 @@ export default function Outliner() {
       e.preventDefault();
       applyShown((list) => moveSibling(list, node.id, e.key === "ArrowUp" ? -1 : 1));
       edit(node.id, selStart);
+      return;
+    }
+    // 探しているあいだは、見えていない行が隣にいる。くっつけると
+    // 画面に無いものに文字が混ざるので、つなぎ合わせはやらない。
+    if (searching && (e.key === "Backspace" || e.key === "Delete")) {
+      if (e.key === "Backspace" && collapsed && selStart === 0 && value.length === 0) {
+        e.preventDefault();
+        const got = deleteNodeSafe(shown, node.id);
+        applyShown(() => got.nodes);
+        if (got.focusId) edit(got.focusId, -1);
+      }
       return;
     }
     if (e.key === "Backspace" && collapsed && selStart === 0) {

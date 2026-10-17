@@ -13,8 +13,7 @@ import {
   pointerWithin,
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import Outliner, { useOutline } from "./Outliner";
-import { addMemoUnderDate } from "./lib/outline";
+import Outliner, { useOutlineApi } from "./Outliner";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -3139,8 +3138,9 @@ function App() {
     selectMany: (ids) => setSelectedIds(new Set(ids)),
   }), [selectedIds]);
 
-  // メモはアウトライン側に書く。木はアプリ全体でひとつ。
-  const { nodes: outlineNodes, setNodes: setOutlineNodes } = useOutline();
+  // メモはアウトライン側に書く。木そのものは受け取らない
+  //（受け取ると、アウトラインで1文字打つたびに画面ぜんたいが描き直される）。
+  const outline = useOutlineApi();
   const [quickAddKind, setQuickAddKind] = useState(() => {
     try { return localStorage.getItem(QUICK_ADD_KIND_KEY) === "memo" ? "memo" : "task"; } catch { return "task"; }
   });
@@ -3167,7 +3167,7 @@ function App() {
   // きょうの日付の行に、メモを足す
   function addMemo(text) {
     const label = toDateKey(new Date());
-    setOutlineNodes((prev) => addMemoUnderDate(prev, label, text).nodes);
+    outline.addMemo(label, text);
     setToast(`${label} のメモに書きとめました`);
   }
 

@@ -31,6 +31,10 @@ export function ensureNode(input) {
     favorite: Boolean(input?.favorite),
     collapsed: Boolean(input?.collapsed),
     completed: Boolean(input?.completed),
+    // 見た目も持ち物。ここで落とすと、読み直しで色と見出しが消える。
+    headingLevel: input?.headingLevel ? Number(input.headingLevel) : null,
+    textColor: input?.textColor || null,
+    bgColor: input?.bgColor || null,
     children: kids.map(ensureNode),
     createdAt: input?.createdAt || time,
     updatedAt: input?.updatedAt || time,
@@ -199,7 +203,9 @@ export function deleteNodeSafe(nodes, id) {
     const fresh = makeNode("");
     return { nodes: [fresh], focusId: fresh.id };
   }
-  if (focusId === id) focusId = visibleRows(next)[0]?.node.id || null;
+  // 消したものの中にいた行は、もう無い。残っている行から選び直す。
+  const alive = new Set(visibleRows(next).map((r) => r.node.id));
+  if (!focusId || !alive.has(focusId)) focusId = visibleRows(next)[0]?.node.id || null;
   return { nodes: next, focusId };
 }
 
@@ -353,10 +359,11 @@ export function filterByQuery(nodes, query) {
 }
 
 // 文字の中で、当たったところを切り分ける（印をつけて描くため）
-export function splitByQuery(text, query) {
+export function splitByQuery(rawText, query) {
+  const text = String(rawText ?? "");
   const q = String(query || "").trim();
-  if (!q || q.startsWith("#")) return [{ text: String(text || ""), hit: false }];
-  const lower = String(text || "").toLowerCase();
+  if (!q || q.startsWith("#")) return [{ text, hit: false }];
+  const lower = text.toLowerCase();
   const needle = q.toLowerCase();
   const out = [];
   let at = 0;
@@ -368,7 +375,7 @@ export function splitByQuery(text, query) {
     at = found + q.length;
   }
   if (at < text.length) out.push({ text: text.slice(at), hit: false });
-  return out.length ? out : [{ text: String(text || ""), hit: false }];
+  return out.length ? out : [{ text, hit: false }];
 }
 
 // --- ドラッグで動かす ---
@@ -447,10 +454,21 @@ export function buildTree(rows) {
       __sortOrder: Number.isFinite(r.sortOrder) ? r.sortOrder : 0,
     });
   }
+  // 親をたどって根に着くか見る。輪になっている行は、捨てずに根へ出す。
+  const reachesRoot = (node) => {
+    const seen = new Set([node.id]);
+    let cur = node.__parentId ? byId.get(node.__parentId) : null;
+    while (cur) {
+      if (seen.has(cur.id)) return false;
+      seen.add(cur.id);
+      cur = cur.__parentId ? byId.get(cur.__parentId) : null;
+    }
+    return true;
+  };
   const roots = [];
   for (const node of byId.values()) {
     const parent = node.__parentId ? byId.get(node.__parentId) : null;
-    if (parent && parent !== node) parent.children.push(node);
+    if (parent && parent !== node && reachesRoot(node)) parent.children.push(node);
     else roots.push(node);
   }
   const sortDeep = (list) => {
@@ -503,11 +521,38 @@ export function addMemoUnderDate(nodes, dateLabel, text) {
 
 // --- まとめて操作する ---
 
-// 選んだ行をまとめて字下げする。上から順にやると、連続した行が
-// 親子に割れてしまうので、兄弟のまとまりごとに扱う。
+// 選んだ行をまとめて字下げする。
+// 1行ずつ indent すると、2行目が1行目の子になって選択が割れる。
+// WorkFlowy と同じく、先頭の行の「ひとつ上の兄弟」の下にまとめて入れる。
 export function indentMany(nodes, ids) {
+  if (!ids.length) return nodes;
+  // 選んだ中で、親も選ばれているものは一緒に動くので外す
+  const tops = ids.filter((id) => {
+    const path = pathTo(nodes, id) || [];
+    return !path.slice(0, -1).some((p) => ids.includes(p.id));
+  });
+  if (!tops.length) return nodes;
+  const first = locate(nodes, tops[0]);
+  if (!first || first.index === 0) return nodes;      // 上に兄弟がいない
+  const parentId = first.siblings[first.index - 1].id;
+
   let out = nodes;
-  for (const id of ids) out = indent(out, id);
+  for (const id of tops) {
+    const spot = locate(out, id);
+    const parent = locate(out, parentId);
+    if (!spot || !parent) continue;
+    // 入れ先が自分の中にあるなら動かさない
+    if (pathTo(spot.siblings[spot.index].children || [], parentId)) continue;
+    const cloned = clone(out);
+    const from = locate(cloned, id);
+    const to = locate(cloned, parentId);
+    if (!from || !to) continue;
+    const [moved] = from.siblings.splice(from.index, 1);
+    const target = to.siblings[to.index];
+    target.collapsed = false;
+    target.children = [...(target.children || []), moved];
+    out = cloned;
+  }
   return out;
 }
 

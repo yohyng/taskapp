@@ -627,3 +627,50 @@ describe('#タグの補完', () => {
     expect(splitTags('ふつう')).toEqual([{ text: 'ふつう', tag: false }])
   })
 })
+
+describe('直したところ（回帰）', () => {
+  it('見た目は、読み直しても落ちない', () => {
+    const got = ensureNode({ text: 'みだし', headingLevel: 2, textColor: '#e03535', bgColor: 'rgba(0,0,0,.1)' })
+    expect(got).toMatchObject({ headingLevel: 2, textColor: '#e03535', bgColor: 'rgba(0,0,0,.1)' })
+    // 入れ子も同じ
+    expect(ensureNode({ text: 'おや', children: [{ text: 'こ', headingLevel: 1 }] }).children[0].headingLevel).toBe(1)
+  })
+
+  it('まとめて字下げしても、選んだ行どうしが親子にならない', () => {
+    const t = [n('A'), n('B'), n('C')]
+    const got = indentMany(t, [idOf(t, 'B'), idOf(t, 'C')])
+    expect(texts(got)).toEqual(['A', '  B', '  C'])
+  })
+
+  it('先頭の行に上の兄弟がいなければ、何も動かさない', () => {
+    const t = [n('A'), n('B')]
+    expect(indentMany(t, [idOf(t, 'A'), idOf(t, 'B')])).toBe(t)
+  })
+
+  it('親も子も選んでいるときは、親だけ動かす（二重に動かさない）', () => {
+    const t = [n('A'), n('B', [n('B1')])]
+    const got = indentMany(t, [idOf(t, 'B'), idOf(t, 'B1')])
+    expect(texts(got)).toEqual(['A', '  B', '    B1'])
+  })
+
+  it('探す印つけは、空でも落ちない', () => {
+    expect(splitByQuery(null, 'あ')).toEqual([{ text: '', hit: false }])
+    expect(splitByQuery(undefined, '')).toEqual([{ text: '', hit: false }])
+  })
+
+  it('親が輪になっていても、行を捨てない', () => {
+    const rows = [
+      { id: 'x', parentId: 'y', sortOrder: 0, text: 'X' },
+      { id: 'y', parentId: 'x', sortOrder: 0, text: 'Y' },
+    ]
+    expect(texts(buildTree(rows)).sort()).toEqual(['X', 'Y'])
+  })
+
+  it('消したあとの行き先は、必ず残っている行', () => {
+    const t = [n('A', [n('A1')]), n('B')]
+    const got = deleteNodeSafe(t, idOf(t, 'A'))   // A を消すと A1 も消える
+    const alive = texts(got.nodes)
+    expect(alive).toEqual(['B'])
+    expect(findNode(got.nodes, got.focusId)).toBeTruthy()
+  })
+})

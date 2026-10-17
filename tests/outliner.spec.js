@@ -840,3 +840,58 @@ test.describe("見た目の設定", () => {
     expect(await pane.evaluate((e) => e.scrollTop)).toBe(0);
   });
 });
+
+// レビューで見つかった不具合の、戻り止め
+test.describe("直したところ", () => {
+  test("色と見出しは、読み直しても残る", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "みだし", headingLevel: 1, textColor: "#e03535", bgColor: "rgba(50,130,255,0.10)" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await expect(page.locator('[data-row="a"]')).toHaveAttribute("data-heading", "1");
+    await expect(page.locator('[data-row="a"] [data-row-text]')).toHaveCSS("color", "rgb(224, 53, 53)");
+    await expect(page.locator('[data-row="a"]')).toHaveCSS("background-color", "rgba(50, 130, 255, 0.1)");
+
+    // 書き込みで壊れないこと（保存したものを読み直す）
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("！");
+    await page.keyboard.press("Escape");
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-v1"))[0]);
+    expect(saved).toMatchObject({ headingLevel: 1, textColor: "#e03535" });
+  });
+
+  test("タグだけの行にも色が付く", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "#memo" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await expect(page.locator('[data-row="a"] [data-tag]')).toHaveText("#memo");
+  });
+
+  test("探している最中は、見えていない行とくっつけない", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "あたり1" },
+      { id: "b", text: "よそもの" },
+      { id: "c", text: "あたり2" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator("[data-outline-search]").fill("あたり");
+    expect(await shape(page)).toEqual(["あたり1", "あたり2"]);
+
+    await page.locator('[data-row="c"] [data-row-text]').click();
+    await page.keyboard.press("Home");
+    await page.keyboard.press("Backspace");
+
+    // 画面に無い「よそもの」に混ざっていないこと
+    const all = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+    expect(all).toEqual(["あたり1", "よそもの", "あたり2"]);
+  });
+});

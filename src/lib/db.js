@@ -515,7 +515,12 @@ export async function saveOutlineRows(rows, deletedIds = []) {
   if (!isSupabaseEnabled || outlineTableMissing) return null
   if (deletedIds.length) {
     const { error } = await supabase.from(OUTLINE_TABLE).delete().in('id', deletedIds)
-    if (error && looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+    if (error) {
+      if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+      // 黙って先へ進むと、消したはずの行が他の端末で生き返る
+      console.error('[db] outline delete error', error)
+      return error.message || String(error)
+    }
   }
   if (!rows.length) return null
   const { error } = await supabase.from(OUTLINE_TABLE).upsert(rows.map(outlineNodeToRow), { onConflict: 'id' })
