@@ -815,6 +815,9 @@ export function fillDates(nodes, inherited = { y: null, m: null, d: null }) {
 //   newestYearFirst … 年は新しい順（月日は古い順）。書いたものを見返す向き。
 export function groupByDate(nodes, { newestYearFirst = true } = {}) {
   const rows = [];
+  // その下のどこかに日付があるか（包みの中を見にいくかの判断に使う）
+  const datedInside = (node) =>
+    (node.children || []).some((kid) => kid.date || datedInside(kid));
   const walk = (list) => {
     for (const node of list) {
       // 日付の見出しそのもの（2026 / 2026/01 / 2026/01/02）は、並べ替えると
@@ -822,6 +825,10 @@ export function groupByDate(nodes, { newestYearFirst = true } = {}) {
       const own = dateHintOf(node.text);
       const isHeading = !!own && String(node.text || "").trim().length <= 10;
       if (isHeading) { walk(node.children || []); continue; }
+      // 日付そのものは持っていないが、下に日付のある行をかかえている包み
+      // （書き出しの表題など）は、中をほどいて拾う。
+      // これをしないと、ぜんぶが「日付なし」のひとかたまりになってしまう。
+      if (!node.date && datedInside(node)) { walk(node.children || []); continue; }
       // 見出しでない行は、中身ごとそのまま持っていく（下へは降りない）
       rows.push(node);
     }

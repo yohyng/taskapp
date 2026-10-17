@@ -902,6 +902,23 @@ describe('日付ビュー', () => {
     expect(base.length).toBe(3)   // 元はそのまま
   })
 
+  it('書き出しの表題で一度くるまれていても、中の日付を拾う', () => {
+    // MD の書き出しは「# 表題」がひとつの親になることが多い。
+    // ここでほどけないと、ぜんぶが「日付なし」のかたまりになってしまう。
+    const wrapped = fillDates([
+      { text: '統合アウトライナー｜ISO日付統一版', children: [
+        { text: '2026', children: [{ text: '2026-01-02', children: [{ text: '正月のこと' }] }] },
+        { text: 'TRAY', children: [{ text: '日付のないメモ' }] },
+      ] },
+    ])
+    const got = groupByDate(wrapped)
+    expect(got.map((n) => n.text)).toEqual(['2026', '日付なし'])
+    expect(shapeOf(got)).toEqual([
+      '2026', '  2026/01', '    2026/01/02', '      正月のこと',
+      '日付なし', '  TRAY', '    日付のないメモ',
+    ])
+  })
+
   it('日付が無いものは、まとめて最後に置く', () => {
     const got = groupByDate(tree())
     expect(got.at(-1).text).toBe('日付なし')
