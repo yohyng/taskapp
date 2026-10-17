@@ -523,11 +523,16 @@ export async function saveOutlineRows(rows, deletedIds = []) {
     }
   }
   if (!rows.length) return null
-  const { error } = await supabase.from(OUTLINE_TABLE).upsert(rows.map(outlineNodeToRow), { onConflict: 'id' })
-  if (error) {
-    if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
-    console.error('[db] outline save error', error)
-    return error.message || String(error)
+  // 取り込みのあとは万単位になることがある。一度に送ると弾かれるので小分けにする。
+  const CHUNK = 500
+  for (let at = 0; at < rows.length; at += CHUNK) {
+    const part = rows.slice(at, at + CHUNK).map(outlineNodeToRow)
+    const { error } = await supabase.from(OUTLINE_TABLE).upsert(part, { onConflict: 'id' })
+    if (error) {
+      if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+      console.error('[db] outline save error', error)
+      return error.message || String(error)
+    }
   }
   return null
 }

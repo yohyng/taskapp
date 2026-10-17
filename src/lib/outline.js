@@ -301,25 +301,132 @@ export function extractImportItems(parsed) {
   return normalized;
 }
 
-// 同じ id がぶつからないよう、持ち込んだものには新しい id を振る
-export function rekey(node) {
-  return { ...node, id: uid(), children: (node.children || []).map(rekey) };
+// 向こうで消した印が付いているものを、取り込みの前に落とす。
+//   deletedAt … 行そのものに付いている印
+//   deletedIds … 書き出しに付いてくる、消した行の一覧
+function pruneDeleted(rawItems, deadIds) {
+  const out = [];
+  for (const raw of rawItems || []) {
+    if (!raw || typeof raw !== "object") continue;
+    if (raw.deletedAt || deadIds.has(String(raw.id))) continue;
+    out.push({ ...raw, children: pruneDeleted(raw.children, deadIds) });
+  }
+  return out;
 }
 
-// 後ろに足す。同じ名前の親（Diary など）があれば、その中にまとめる。
-export function appendImported(existing, imported) {
-  const root = existing.map((n) => ensureNode(n));
-  for (const raw of imported.map(rekey)) {
-    const title = String(raw.text || "").trim().toLowerCase();
-    const sameName = title && root.find((x) => String(x.text || "").trim().toLowerCase() === title);
-    if (sameName && raw.children?.length) {
-      sameName.children = [...(sameName.children || []), ...raw.children];
-      sameName.collapsed = false;
-      continue;
-    }
-    root.push(raw);
+// 同じものを2回読んでも増えないように、id をそのまま使う。
+// 既にある行は中身を更新し、無い行だけ足す。
+export function importOutline(current, parsed) {
+  const deadIds = new Set((parsed?.deletedIds || []).map(String));
+  const rawItems = Array.isArray(parsed) ? parsed : (() => {
+    // 置き場所の判定は extractImportItems と同じにしたいので、一度通す
+    extractImportItems(parsed);
+    const candidates = [
+      parsed.items, parsed.nodes, parsed.outline,
+      parsed.data?.items, parsed.data?.nodes,
+      parsed.payload?.items, parsed.payload?.nodes,
+      parsed.root?.children,
+    ];
+    return candidates.find((v) => Array.isArray(v));
+  })();
+
+  const before = countNodes(rawItems);
+  const incoming = pruneDeleted(rawItems, deadIds).map(ensureNode);
+  if (!incoming.length) throw new Error("取り込める行がありませんでした");
+
+  const curRows = flattenTree(current);
+  const rootCount = current.length;
+  const known = new Set(curRows.map((r) => r.id));
+  const rows = new Map(curRows.map((r) => [r.id, r]));
+
+  // id が分からない相手でも二重にならないよう、同じ名前の根は中身を寄せる
+  const rootByText = new Map(
+    current.map((x) => [String(x.text || "").trim().toLowerCase(), x.id]).filter(([t]) => t),
+  );
+  const mergedRoot = new Map();   // 取り込んだ根の id → 寄せ先の根の id
+  for (const root of incoming) {
+    if (known.has(root.id)) continue;
+    const same = rootByText.get(String(root.text || "").trim().toLowerCase());
+    if (same) mergedRoot.set(root.id, same);
   }
-  return root.length ? root : [makeNode("")];
+
+  let added = 0;
+  let updated = 0;
+  let merged = 0;
+  for (const row of flattenTree(incoming)) {
+    if (deadIds.has(row.id)) continue;
+    if (mergedRoot.has(row.id)) { merged += 1; continue; }   // 根そのものは置き換えない
+    const parentId = mergedRoot.get(row.parentId) ?? row.parentId;
+    if (known.has(row.id)) updated += 1;
+    else added += 1;
+    rows.set(row.id, {
+      ...row,
+      parentId,
+      // 新しく来た根は、いまある根の後ろに並べる。
+      // 寄せ先に入れる子は、その中の後ろに付ける。
+      sortOrder: row.parentId === null && parentId === null
+        ? rootCount + row.sortOrder
+        : (parentId !== row.parentId ? 1000 + row.sortOrder : row.sortOrder),
+    });
+  }
+
+  return {
+    nodes: buildTree([...rows.values()]),
+    added,
+    updated,
+    merged,
+    skipped: before - countNodes(incoming),
+  };
+}
+
+function countNodes(list) {
+  return (list || []).reduce((n, x) => n + 1 + countNodes(x?.children), 0);
+}
+
+// id を持たない書き出し（.md や Notion）は、同じ文字の行を手がかりに重ねる。
+// 同じ親の下に同じ文字の行があれば、それを使い回して中だけ足す。
+// こうしないと、同じ書き出しを2回読むたびに丸ごと増える。
+export function mergeByText(current, incoming) {
+  let added = 0;
+  let matched = 0;
+
+  const walk = (here, list) => {
+    const out = here.map((x) => ({ ...x, children: [...(x.children || [])] }));
+    // 同じ文字の兄弟がいくつもある書き出しがあるので、出てきた順に取る。
+    // 先頭だけを見ると、2回目以降が毎回ぜんぶ増えてしまう。
+    const queue = new Map();
+    out.forEach((x, i) => {
+      const key = String(x.text || "").trim();
+      if (!queue.has(key)) queue.set(key, []);
+      queue.get(key).push(i);
+    });
+    const takeSame = (key) => {
+      const q = queue.get(key);
+      if (!q || !q.length) return null;
+      return out[q.shift()];
+    };
+
+    for (const raw of list) {
+      const node = ensureNode(raw);
+      const same = takeSame(String(node.text || "").trim());
+      if (same) {
+        matched += 1;
+        same.children = walk(same.children || [], raw.children || []);
+        if (raw.completed !== undefined) same.completed = !!raw.completed;
+      } else {
+        added += 1 + countAll(raw.children);
+        out.push(node);
+      }
+    }
+    return out;
+  };
+
+  const nodes = walk(current, incoming);
+  return { nodes, added, matched };
+}
+
+function countAll(list) {
+  return (list || []).reduce((n, x) => n + 1 + countAll(x?.children), 0);
 }
 
 export function buildExport(nodes) {

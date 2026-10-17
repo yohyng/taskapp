@@ -266,7 +266,7 @@ describe('パンくずの文字', () => {
   })
 })
 
-import { extractImportItems, rekey, appendImported, buildExport, filterByQuery, splitByQuery } from './outline.js'
+import { extractImportItems, importOutline, buildExport, filterByQuery, splitByQuery } from './outline.js'
 
 describe('持ち込み', () => {
   it('Quietliner の書き出し（items）を読める', () => {
@@ -293,24 +293,47 @@ describe('持ち込み', () => {
     expect(() => extractImportItems("ちがう")).toThrow()
   })
 
-  it('id を振り直すので、元とぶつからない', () => {
-    const src = { ...makeNode('おや'), children: [makeNode('こ')] }
-    const got = rekey(src)
-    expect(got.id).not.toBe(src.id)
-    expect(got.children[0].id).not.toBe(src.children[0].id)
-    expect(got.children[0].text).toBe('こ')
+  it('同じものを2回読んでも、増えずに更新される', () => {
+    const payload = { items: [{ id: 'u1', text: 'もってきた', children: [{ id: 'u2', text: 'その子' }] }] }
+    const once = importOutline([n('いまのこる')], payload)
+    expect(texts(once.nodes)).toEqual(['いまのこる', 'もってきた', '  その子'])
+    expect(once).toMatchObject({ added: 2, updated: 0 })
+
+    const twice = importOutline(once.nodes, payload)
+    expect(texts(twice.nodes)).toEqual(['いまのこる', 'もってきた', '  その子'])
+    expect(twice).toMatchObject({ added: 0, updated: 2 })
+  })
+
+  it('向こうで直した文字が、こちらにも入る', () => {
+    const first = importOutline([], { items: [{ id: 'u1', text: 'まえ' }] })
+    const second = importOutline(first.nodes, { items: [{ id: 'u1', text: 'あと' }] })
+    expect(texts(second.nodes)).toEqual(['あと'])
+  })
+
+  it('消した印のある行は、取り込まない', () => {
+    const got = importOutline([], {
+      items: [
+        { id: 'a', text: 'いきてる' },
+        { id: 'b', text: 'けした', deletedAt: '2026-01-01T00:00:00Z' },
+        { id: 'c', text: 'これも', children: [{ id: 'c1', text: '中身' }] },
+      ],
+      deletedIds: ['c'],
+    })
+    expect(texts(got.nodes)).toEqual(['いきてる'])
+    expect(got.skipped).toBe(3)   // けした1件 + これも（子ごと）2件
   })
 
   it('後ろに足す（いまあるものは消さない）', () => {
     const now = [n('いまのこる')]
-    const got = appendImported(now, [{ ...makeNode('もってきた') }])
-    expect(texts(got)).toEqual(['いまのこる', 'もってきた'])
+    const got = importOutline(now, { items: [{ id: 'z', text: 'もってきた' }] })
+    expect(texts(got.nodes)).toEqual(['いまのこる', 'もってきた'])
   })
 
-  it('同じ名前の親があれば、その中にまとめる', () => {
+  it('id が違っても、同じ名前の根なら中にまとめる', () => {
     const now = [n('Diary', [n('10/1')])]
-    const got = appendImported(now, [{ ...makeNode('Diary'), children: [makeNode('10/2')] }])
-    expect(texts(got)).toEqual(['Diary', '  10/1', '  10/2'])
+    const got = importOutline(now, { items: [{ id: 'other', text: 'Diary', children: [{ id: 'd2', text: '10/2' }] }] })
+    expect(texts(got.nodes)).toEqual(['Diary', '  10/1', '  10/2'])
+    expect(got.merged).toBe(1)
   })
 
   it('持ち出したものを、そのまま読み戻せる', () => {
@@ -672,5 +695,46 @@ describe('直したところ（回帰）', () => {
     const alive = texts(got.nodes)
     expect(alive).toEqual(['B'])
     expect(findNode(got.nodes, got.focusId)).toBeTruthy()
+  })
+})
+
+import { mergeByText } from './outline.js'
+
+describe('id の無い書き出しを重ねる', () => {
+  const incoming = [{ text: '2025', children: [{ text: 'TRAY', children: [{ text: 'メモ1' }] }] }]
+
+  it('いちど目は、まるごと入る', () => {
+    const got = mergeByText([], incoming)
+    expect(texts(got.nodes)).toEqual(['2025', '  TRAY', '    メモ1'])
+    expect(got.added).toBe(3)
+  })
+
+  it('二度目は増えない（同じ文字の行に重ねる）', () => {
+    const once = mergeByText([], incoming).nodes
+    const twice = mergeByText(once, incoming)
+    expect(texts(twice.nodes)).toEqual(['2025', '  TRAY', '    メモ1'])
+    expect(twice.added).toBe(0)
+    expect(twice.matched).toBe(3)
+  })
+
+  it('増えたぶんだけが足される', () => {
+    const once = mergeByText([], incoming).nodes
+    const more = mergeByText(once, [{ text: '2025', children: [{ text: 'TRAY', children: [{ text: 'メモ2' }] }] }])
+    expect(texts(more.nodes)).toEqual(['2025', '  TRAY', '    メモ1', '    メモ2'])
+    expect(more.added).toBe(1)
+  })
+
+  it('同じ文字でも、親が違えば別の行', () => {
+    const got = mergeByText(
+      [{ ...makeNode('A'), children: [makeNode('おなじ')] }],
+      [{ text: 'B', children: [{ text: 'おなじ' }] }],
+    )
+    expect(texts(got.nodes)).toEqual(['A', '  おなじ', 'B', '  おなじ'])
+  })
+
+  it('完了の印は、取り込んだほうに合わせる', () => {
+    const once = mergeByText([], [{ text: 'やること' }]).nodes
+    const done = mergeByText(once, [{ text: 'やること', completed: true }])
+    expect(done.nodes[0].completed).toBe(true)
   })
 })

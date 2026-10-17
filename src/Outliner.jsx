@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2, Settings2 } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
-  extractImportItems, appendImported, buildExport, moveSubtreeTo,
+  importOutline, mergeByText, buildExport, moveSubtreeTo,
   insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
@@ -11,6 +11,7 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
+import { parseByFormat, parseZip } from "./lib/import-formats";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
 
@@ -64,8 +65,21 @@ export function OutlineProvider({ children }) {
   const timerRef = useRef(null);
 
   // 手元には必ず残す。向こうが無くても使えるように。
+  // 入りきらないこともある（大きな書き出しを取り込んだとき）。
+  // 黙って落とすと、閉じた瞬間に消えるので知らせる。
+  const tooBigRef = useRef(false);
   useEffect(() => {
-    try { localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes)); } catch { /* 入らなくても動く */ }
+    let failed = false;
+    try {
+      localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes));
+    } catch {
+      failed = true;
+    }
+    // 知らせは、変わったときだけ出す（毎回 setState すると描き直しが続く）
+    if (failed !== tooBigRef.current) {
+      tooBigRef.current = failed;
+      setSyncNote((cur) => (failed ? "too-big" : (cur === "too-big" ? "" : cur)));
+    }
   }, [nodes]);
 
   // 書き換えはここを通す。前の姿を履歴に積む。
@@ -444,14 +458,41 @@ export default function Outliner() {
     setNote("書き出しました");
   }
 
-  // Quietliner の書き出しを、いまの木の後ろに足す（上書きはしない）
+  // ほかのアプリの書き出しを取り込む。
+  //   .json … Quietliner（行に id があるので、2回読んでも増えない）
+  //   .md / .html / .zip … WorkFlowy や Notion（id が無いので、同じ文字の行に重ねる）
   async function importFile(file) {
     if (!file) return;
+    setNote("読み込んでいます…");
     try {
-      const parsed = JSON.parse(await file.text());
-      const incoming = extractImportItems(parsed);
-      setNodes((prev) => appendImported(prev, incoming));
-      setNote(`${incoming.length}件を足しました`);
+      const name = file.name || "";
+      let result = null;
+
+      if (/\.zip$/i.test(name)) {
+        const got = await parseZip(await file.arrayBuffer());
+        result = { ...mergeByText(nodes, got.items), how: `zip の中の ${got.files} ファイル` };
+      } else {
+        const text = await file.text();
+        const looksJson = /\.json$/i.test(name) || /^\s*[[{]/.test(text);
+        if (looksJson) {
+          result = { ...importOutline(nodes, JSON.parse(text)), how: "Quietliner の書き出し" };
+        } else {
+          const got = parseByFormat(name, text);
+          result = {
+            ...mergeByText(nodes, got.items),
+            how: got.format === "workflowy-html" ? "WorkFlowy の HTML" : "箇条書きの書き出し",
+          };
+        }
+      }
+
+      setNodes(() => result.nodes);
+      const parts = [];
+      if (result.added) parts.push(`${result.added}件を足した`);
+      if (result.updated) parts.push(`${result.updated}件を更新`);
+      if (result.matched) parts.push(`${result.matched}件は既にあった`);
+      if (result.merged) parts.push(`${result.merged}件は同じ名前の行にまとめた`);
+      if (result.skipped) parts.push(`${result.skipped}件は向こうで消えていたので飛ばした`);
+      setNote(`${result.how}：${parts.length ? parts.join("、") : "変わりはありませんでした"}`);
     } catch (e) {
       setNote(`読めませんでした：${e?.message || e}`);
     }
@@ -807,7 +848,7 @@ export default function Outliner() {
         <button
           data-outline-import
           onClick={() => fileRef.current?.click()}
-          title="Quietliner などの JSON を読み込む（後ろに足します）"
+          title="取り込む（Quietliner の .json / WorkFlowy の .md・.html / Notion の .zip）。2回読んでも増えません"
           className="shrink-0 rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200"
         >
           <Upload className="h-3 w-3" />
@@ -824,11 +865,22 @@ export default function Outliner() {
           ref={fileRef}
           data-outline-file
           type="file"
-          accept="application/json,.json"
+          accept=".json,.md,.markdown,.txt,.html,.htm,.zip,application/json,text/markdown,text/html,application/zip"
           className="hidden"
           onChange={(e) => { importFile(e.target.files?.[0]); e.target.value = ""; }}
         />
       </div>
+
+      {syncNote === "too-big" && (
+        <div data-outline-toobig className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
+          <div className="mb-1 font-semibold">この端末に置ききれませんでした</div>
+          <div>
+            中身が大きすぎて、ブラウザの保管場所に入りません。閉じると戻ってしまいます。
+            いらない行を消すか、書き出して分けてください。
+            {!isOutlineTableMissing() && " Supabase には送っているので、そちらには残ります。"}
+          </div>
+        </div>
+      )}
 
       {syncNote.startsWith("error:") && (
         <div data-outline-sync-error className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">

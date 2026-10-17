@@ -361,17 +361,48 @@ test.describe("持ち込み・持ち出し", () => {
     await open(page);
   });
 
-  test("Quietliner の書き出しを、後ろに足せる", async ({ page }) => {
-    await page.locator("[data-outline-file]").setInputFiles({
-      name: "quietliner.json",
-      mimeType: "application/json",
-      buffer: Buffer.from(JSON.stringify({
-        version: 4,
-        items: [{ id: "x", text: "もってきた", children: [{ id: "x1", text: "その子" }] }],
-      })),
+  const upload = (page, payload, name = "quietliner.json") =>
+    page.locator("[data-outline-file]").setInputFiles({
+      name, mimeType: "application/json", buffer: Buffer.from(JSON.stringify(payload)),
+    });
+
+  test("Quietliner の書き出しを取り込める", async ({ page }) => {
+    await upload(page, {
+      schema: "quietliner.v1", appVersion: "5.11.2", version: 7696,
+      items: [{ id: "u1", text: "もってきた", children: [{ id: "u2", text: "その子" }] }],
+      settings: { rootTitle: "Notes" },
     });
     await expect.poll(() => shape(page)).toEqual(["もとからある", "もってきた", "  その子"]);
-    await expect(page.locator("[data-outline-note]")).toContainText("1件");
+    await expect(page.locator("[data-outline-note]")).toContainText("2件を足した");
+  });
+
+  test("同じものを2回読んでも、増えない", async ({ page }) => {
+    const payload = { items: [{ id: "u1", text: "もってきた", children: [{ id: "u2", text: "その子" }] }] };
+    await upload(page, payload);
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "もってきた", "  その子"]);
+
+    await upload(page, payload);
+    await expect(page.locator("[data-outline-note]")).toContainText("2件を更新");
+    expect(await shape(page)).toEqual(["もとからある", "もってきた", "  その子"]);
+  });
+
+  test("向こうで消した行は、取り込まない", async ({ page }) => {
+    await upload(page, {
+      items: [
+        { id: "live", text: "いきてる" },
+        { id: "gone", text: "けした", deletedAt: "2026-01-01T00:00:00Z" },
+      ],
+      deletedIds: [],
+    });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "いきてる"]);
+    await expect(page.locator("[data-outline-note]")).toContainText("飛ばした");
+  });
+
+  test("取り込んだぶんも、元に戻せる", async ({ page }) => {
+    await upload(page, { items: [{ id: "u1", text: "もってきた" }] });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "もってきた"]);
+    await page.locator("[data-outline-undo]").click();
+    expect(await shape(page)).toEqual(["もとからある"]);
   });
 
   test("読めないものは、そう言って何も壊さない", async ({ page }) => {
@@ -893,5 +924,124 @@ test.describe("直したところ", () => {
     // 画面に無い「よそもの」に混ざっていないこと
     const all = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
     expect(all).toEqual(["あたり1", "よそもの", "あたり2"]);
+  });
+});
+
+test.describe("ほかのアプリから取り込む", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "keep", text: "もとからある" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const put = (page, name, body, mimeType = "text/plain") =>
+    page.locator("[data-outline-file]").setInputFiles({ name, mimeType, buffer: Buffer.from(body) });
+
+  test("WorkFlowy の .md（字下げの箇条書き）を読める", async ({ page }) => {
+    await put(page, "WF.md", [
+      "Home", "",
+      "- 2025",
+      "  - TRAY",
+      "    - メモひとつ",
+      "  - TASK LIST",
+      "    - [ ] やること",
+      "    - [x] おわったこと",
+    ].join("\n"), "text/markdown");
+
+    await expect.poll(() => shape(page)).toEqual([
+      "もとからある", "2025", "  TRAY", "    メモひとつ", "  TASK LIST", "    やること", "    おわったこと",
+    ]);
+    // 題（Home）は入れ物にしない。チェック済みは完了として入る。
+    const done = await page.evaluate(() => {
+      const find = (ns) => ns.flatMap((n) => [n, ...find(n.children || [])]);
+      return find(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).filter((n) => n.completed).map((n) => n.text);
+    });
+    expect(done).toEqual(["おわったこと"]);
+  });
+
+  test("同じ .md を2回読んでも増えない", async ({ page }) => {
+    const md = ["Home", "", "- 2025", "  - メモ", "  - メモ"].join("\n");
+    await put(page, "WF.md", md, "text/markdown");
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
+
+    await put(page, "WF.md", md, "text/markdown");
+    await expect(page.locator("[data-outline-note]")).toContainText("既にあった");
+    expect(await shape(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
+  });
+
+  test("WorkFlowy の .html を読める", async ({ page }) => {
+    await put(page, "WF.html", `
+      <span class="name"><span class="innerContentContainer">Home</span></span>
+      <ul>
+        <li><div class="name" data-chid="aa"><span class="innerContentContainer">2025</span></div>
+          <ul><li><div class="name" data-chid="bb"><span class="innerContentContainer"><b>TRAY</b></span></div></li></ul>
+        </li>
+      </ul>`, "text/html");
+
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025", "  TRAY"]);
+  });
+
+  test("Notion の .md は、見出しの下に入れ子になる", async ({ page }) => {
+    await put(page, "Note.md", [
+      "# Note", "",
+      "## NOMLAB NOTE", "",
+      "- 打ち合わせ",
+      "    - 決まったこと",
+      "", "## Work", "",
+      "- べつの話",
+    ].join("\n"), "text/markdown");
+
+    await expect.poll(() => shape(page)).toEqual([
+      "もとからある", "Note", "  NOMLAB NOTE", "    打ち合わせ", "      決まったこと", "  Work", "    べつの話",
+    ]);
+  });
+
+  test("Notion の .zip（中の .md）を読める", async ({ page }) => {
+    // ほどかずに入れた zip（method 0）。中身は Notion の書き出しと同じ形。
+    const zip = await page.evaluate(async () => {
+      const body = new TextEncoder().encode("# Note\n\n## 章\n\n- 中身\n");
+      const name = new TextEncoder().encode("Note.md");
+      const crcTable = [...Array(256)].map((_, n) => {
+        let c = n;
+        for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+        return c >>> 0;
+      });
+      let crc = 0xffffffff;
+      for (const b of body) crc = crcTable[(crc ^ b) & 0xff] ^ (crc >>> 8);
+      crc = (crc ^ 0xffffffff) >>> 0;
+
+      const parts = [];
+      const u32 = (v) => { const a = new Uint8Array(4); new DataView(a.buffer).setUint32(0, v, true); return a; };
+      const u16 = (v) => { const a = new Uint8Array(2); new DataView(a.buffer).setUint16(0, v, true); return a; };
+      // ローカルヘッダ
+      parts.push(u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(body.length), u32(body.length), u16(name.length), u16(0), name, body);
+      const localSize = parts.reduce((n, p) => n + p.length, 0);
+      // 中央ディレクトリ
+      const cd = [u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
+        u32(crc), u32(body.length), u32(body.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(0), name];
+      const cdSize = cd.reduce((n, p) => n + p.length, 0);
+      const eocd = [u32(0x06054b50), u16(0), u16(0), u16(1), u16(1), u32(cdSize), u32(localSize), u16(0)];
+      const all = [...parts, ...cd, ...eocd];
+      const total = all.reduce((n, p) => n + p.length, 0);
+      const out = new Uint8Array(total);
+      let at = 0;
+      for (const p of all) { out.set(p, at); at += p.length; }
+      return [...out];
+    });
+
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "notion.zip", mimeType: "application/zip", buffer: Buffer.from(zip),
+    });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "Note", "  章", "    中身"]);
+    await expect(page.locator("[data-outline-note]")).toContainText("zip の中の 1 ファイル");
+  });
+
+  test("読めないものは、理由を出して何も壊さない", async ({ page }) => {
+    await put(page, "bad.zip", "これは zip ではない", "application/zip");
+    await expect(page.locator("[data-outline-note]")).toContainText("読めませんでした");
+    expect(await shape(page)).toEqual(["もとからある"]);
   });
 });
