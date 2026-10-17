@@ -7,6 +7,7 @@ import {
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
   flattenTree, buildTree, mergeOutline,
+  indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 
@@ -247,6 +248,8 @@ export default function Outliner() {
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
   const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState([]);     // まとめて選んだ行
+  const anchorRef = useRef(null);                // Shift+クリックの起点
   const [note, setNote] = useState("");       // 持ち込みの結果を知らせる
   const searchRef = useRef(null);
   const fileRef = useRef(null);
@@ -258,6 +261,22 @@ export default function Outliner() {
   // 編集に入ったときのカーソル位置。-1 は末尾。
   const caretRef = useRef(null);
   const menuRef = useRef(null);
+
+  // まとめて選んでいるときのキー操作
+  useEffect(() => {
+    if (!picked.length) return;
+    function onKey(e) {
+      const inText = ["input", "textarea"].includes(document.activeElement?.tagName?.toLowerCase());
+      if (e.key === "Escape") { clearPick(); return; }
+      if (inText) return;
+      if (e.key === "Tab") { e.preventDefault(); bulkIndent(e.shiftKey); return; }
+      if (e.key === "Backspace" || e.key === "Delete") { e.preventDefault(); bulkDelete(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); bulkComplete(); return; }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "c") { e.preventDefault(); bulkCopy(); }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
 
   // ⌘/Ctrl+K で探す欄に移る（Quietliner と同じ）
   useEffect(() => {
@@ -282,6 +301,8 @@ export default function Outliner() {
     return () => window.removeEventListener("pointerdown", onDown);
   }, [menuId]);
 
+  // 星をつけた行。押すとそこへ飛ぶ（Quietliner のサイドバーに当たるもの）
+  const favorites = useMemo(() => collectFavorites(nodes), [nodes]);
   const zoomPath = useMemo(() => (zoomId ? pathTo(nodes, zoomId) : null), [nodes, zoomId]);
   const zoomNode = zoomPath?.at(-1) || null;
   const shown = zoomNode ? zoomNode.children : nodes;
@@ -293,6 +314,8 @@ export default function Outliner() {
   const edit = useCallback((id, caret = -1) => {
     caretRef.current = caret;
     setEditingId(id);
+    // いま触っている行が、まとめて選ぶときの起点になる
+    anchorRef.current = id;
   }, []);
 
   // ズームしているときは、その子の並びだけを差し替える
@@ -389,6 +412,51 @@ export default function Outliner() {
   }
   const skipZoomRef = useRef(false);
 
+  const pickedSet = useMemo(() => new Set(picked), [picked]);
+  function clearPick() { setPicked([]); anchorRef.current = null; }
+
+  // Shift+クリックで、起点からここまでをまとめて選ぶ
+  function pickTo(id) {
+    const from = anchorRef.current || id;
+    setPicked(rangeBetween(listed, from, id));
+    anchorRef.current = from;
+    setEditingId(null);
+  }
+  // Ctrl/⌘+クリックで、1行ずつ足し引きする
+  function togglePick(id) {
+    setPicked((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    anchorRef.current = id;
+    setEditingId(null);
+  }
+  // 画面の順にそろえる（まとめて動かすときに順番が要る）
+  const orderedPick = () => visibleRows(listed).map((r) => r.node.id).filter((id) => pickedSet.has(id));
+
+  function bulkIndent(back) {
+    const ids = orderedPick();
+    if (!ids.length) return;
+    applyShown((list) => (back ? outdentMany(list, ids) : indentMany(list, ids)));
+  }
+  function bulkDelete() {
+    const ids = orderedPick();
+    if (!ids.length) return;
+    applyShown((list) => removeMany(list, ids));
+    clearPick();
+  }
+  function bulkComplete() {
+    const ids = orderedPick();
+    if (!ids.length) return;
+    const allDone = ids.every((id) => pathTo(listed, id)?.at(-1)?.completed);
+    applyShown((list) => patchMany(list, ids, { completed: !allDone }));
+  }
+  async function bulkCopy() {
+    const ids = orderedPick();
+    if (!ids.length) return;
+    try {
+      await navigator.clipboard.writeText(textOf(listed, ids));
+      setNote(`${ids.length}件をコピーしました`);
+    } catch { setNote("コピーできませんでした"); }
+  }
+
   function addAtEnd() {
     const made = makeNode("");
     applyShown((list) => [...list, made]);
@@ -470,6 +538,22 @@ export default function Outliner() {
       e.preventDefault();
       applyShown(() => got.nodes);
       edit(node.id, got.caret);
+      return;
+    }
+    // Shift+↑↓：行の端から、まとめて選ぶほうへ移る
+    if (e.shiftKey && !e.altKey && !meta && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const up = e.key === "ArrowUp";
+      const atEdge = up ? selStart === 0 : selEnd === value.length;
+      if (!atEdge) return;
+      const order = rows.map((r) => r.node.id);
+      const at = order.indexOf(node.id);
+      const to = order[at + (up ? -1 : 1)];
+      if (!to) return;
+      e.preventDefault();
+      const from = anchorRef.current || node.id;
+      anchorRef.current = from;
+      setPicked(rangeBetween(listed, from, to));
+      setEditingId(null);
       return;
     }
     if (e.key === "ArrowUp" && collapsed && selStart === 0) { e.preventDefault(); moveFocus(node.id, -1); return; }
@@ -629,6 +713,23 @@ alter table outline_nodes disable row level security;
         </div>
       )}
 
+      {favorites.length > 0 && (
+        <div data-favorites className="mb-2 flex flex-wrap items-center gap-1">
+          <Star className="h-3 w-3 shrink-0 fill-amber-300/70 text-amber-300/70" />
+          {favorites.map((fav) => (
+            <button
+              key={fav.id}
+              data-favorite={fav.id}
+              onClick={() => { setZoomId(fav.id); setEditingId(null); clearPick(); }}
+              title={fav.text}
+              className="max-w-[12rem] truncate rounded-full border border-white/10 bg-white/[0.03] px-2 py-0.5 text-[10px] text-neutral-400 transition hover:bg-white/[0.08] hover:text-neutral-200"
+            >
+              {truncateTitle(fav.text, 14)}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500">
         <button
           data-crumb
@@ -691,11 +792,13 @@ alter table outline_nodes disable row level security;
               data-depth={depth}
               data-completed={node.completed ? "true" : "false"}
               data-dragging={drag?.id === node.id ? "true" : undefined}
+              data-picked={pickedSet.has(node.id) ? "true" : undefined}
               data-heading={node.headingLevel || ""}
               style={{ marginLeft: depth * INDENT, background: node.bgColor || undefined }}
               className={classNames(
                 "group/row relative flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]",
                 drag?.id === node.id && "opacity-40",
+                pickedSet.has(node.id) && "bg-sky-400/15 ring-1 ring-sky-400/30",
               )}
             >
               <button
@@ -756,7 +859,13 @@ alter table outline_nodes disable row level security;
               ) : (
                 <div
                   data-row-text
-                  onClick={() => edit(node.id, -1)}
+                  onClick={(e) => {
+                    // Shift / ⌘ クリックはまとめて選ぶ（Quietliner と同じ）
+                    if (e.shiftKey) { e.preventDefault(); pickTo(node.id); return; }
+                    if (e.metaKey || e.ctrlKey) { e.preventDefault(); togglePick(node.id); return; }
+                    clearPick();
+                    edit(node.id, -1);
+                  }}
                   style={textStyle}
                   className={classNames(
                     "min-w-0 flex-1 cursor-text whitespace-pre-wrap break-words px-1 py-0 text-[14px] leading-relaxed",
@@ -882,6 +991,23 @@ alter table outline_nodes disable row level security;
           );
         })}
       </div>
+
+      {picked.length > 0 && (
+        <div
+          data-pick-bar
+          className="sticky bottom-2 z-30 mt-2 flex flex-wrap items-center gap-1 rounded-xl border border-white/15 ts-surface px-2 py-1.5 shadow-2xl"
+        >
+          <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
+            {picked.length}件
+          </span>
+          <button data-pick-outdent onClick={() => bulkIndent(true)} title="字下げを戻す（Shift+Tab）" className="rounded px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.07]">←</button>
+          <button data-pick-indent onClick={() => bulkIndent(false)} title="字下げ（Tab）" className="rounded px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.07]">→</button>
+          <button data-pick-complete onClick={bulkComplete} title="完了（⌘Enter）" className="rounded px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.07]">完了</button>
+          <button data-pick-copy onClick={bulkCopy} title="コピー（⌘C）" className="rounded px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.07]">コピー</button>
+          <button data-pick-delete onClick={bulkDelete} title="削除" className="rounded px-2 py-1 text-[11px] text-red-300/80 transition hover:bg-red-400/10">削除</button>
+          <button data-pick-clear onClick={clearPick} title="選ぶのをやめる（Esc）" className="ml-auto rounded px-2 py-1 text-[11px] text-neutral-500 transition hover:bg-white/[0.07]">✕</button>
+        </div>
+      )}
 
       <button
         data-outline-add

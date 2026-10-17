@@ -566,3 +566,125 @@ test.describe("畳むつまみ", () => {
     expect(await shape(page)).toEqual(["おや"]);
   });
 });
+
+test.describe("まとめて選ぶ", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "A" }, { id: "b", text: "B" }, { id: "c", text: "C" }, { id: "d", text: "D" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const text = (page, id) => page.locator(`[data-row="${id}"] [data-row-text]`);
+  const pickedIds = (page) => page.evaluate(() =>
+    [...document.querySelectorAll("[data-picked]")].map((e) => e.getAttribute("data-row")));
+
+  test("Shift+クリックで、あいだをまとめて選ぶ", async ({ page }) => {
+    await text(page, "a").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    expect(await pickedIds(page)).toEqual(["a", "b", "c"]);
+    await expect(page.locator("[data-pick-bar]")).toContainText("3件");
+  });
+
+  test("⌘クリックで、飛び飛びに選ぶ", async ({ page }) => {
+    await text(page, "a").click({ modifiers: ["ControlOrMeta"] });
+    await text(page, "c").click({ modifiers: ["ControlOrMeta"] });
+    expect(await pickedIds(page)).toEqual(["a", "c"]);
+  });
+
+  test("Shift+↓ でも広がる", async ({ page }) => {
+    await text(page, "a").click();
+    await page.keyboard.press("Shift+ArrowDown");
+    expect(await pickedIds(page)).toEqual(["a", "b"]);
+  });
+
+  test("まとめて字下げ・戻しができる", async ({ page }) => {
+    await text(page, "b").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await page.locator("[data-pick-indent]").click();
+    expect(await shape(page)).toEqual(["A", "  B", "  C", "D"]);
+
+    await page.locator("[data-pick-outdent]").click();
+    expect(await shape(page)).toEqual(["A", "B", "C", "D"]);
+  });
+
+  test("Tab でもまとめて字下げできる", async ({ page }) => {
+    await text(page, "b").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await page.keyboard.press("Tab");
+    expect(await shape(page)).toEqual(["A", "  B", "  C", "D"]);
+  });
+
+  test("まとめて完了にできる", async ({ page }) => {
+    await text(page, "a").click();
+    await text(page, "b").click({ modifiers: ["Shift"] });
+    await page.locator("[data-pick-complete]").click();
+    await expect(page.locator('[data-row="a"]')).toHaveAttribute("data-completed", "true");
+    await expect(page.locator('[data-row="b"]')).toHaveAttribute("data-completed", "true");
+    await expect(page.locator('[data-row="c"]')).toHaveAttribute("data-completed", "false");
+  });
+
+  test("まとめて消せる", async ({ page }) => {
+    await text(page, "b").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await page.locator("[data-pick-delete]").click();
+    expect(await shape(page)).toEqual(["A", "D"]);
+    await expect(page.locator("[data-pick-bar]")).toHaveCount(0);
+  });
+
+  test("Esc でやめられる", async ({ page }) => {
+    await text(page, "a").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await page.keyboard.press("Escape");
+    await expect(page.locator("[data-pick-bar]")).toHaveCount(0);
+    expect(await pickedIds(page)).toEqual([]);
+  });
+
+  test("ふつうのクリックで、選ぶのをやめて編集に入る", async ({ page }) => {
+    await text(page, "a").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await text(page, "d").click();
+    expect(await pickedIds(page)).toEqual([]);
+    await expect(page.locator('[data-row="d"] textarea')).toBeVisible();
+  });
+
+  test("まとめて消したのも、元に戻せる", async ({ page }) => {
+    await text(page, "b").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    await page.locator("[data-pick-delete]").click();
+    expect(await shape(page)).toEqual(["A", "D"]);
+    await page.locator("[data-outline-undo]").click();
+    expect(await shape(page)).toEqual(["A", "B", "C", "D"]);
+  });
+});
+
+test.describe("お気に入り", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "ふつうの行" },
+      { id: "b", text: "よく使う", favorite: true, children: [{ id: "b1", text: "中身" }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("星をつけた行が、上に並ぶ", async ({ page }) => {
+    await expect(page.locator("[data-favorites]")).toBeVisible();
+    await expect(page.locator('[data-favorite="b"]')).toHaveText("よく使う");
+  });
+
+  test("押すと、その中に入る", async ({ page }) => {
+    await page.locator('[data-favorite="b"]').click();
+    await expect(page.locator("[data-zoom-title]")).toHaveValue("よく使う");
+    expect(await shape(page)).toEqual(["中身"]);
+  });
+
+  test("星が無いときは、何も出さない", async ({ page }) => {
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.getByRole("button", { name: "お気に入り解除" }).click();
+    await expect(page.locator("[data-favorites]")).toHaveCount(0);
+  });
+});

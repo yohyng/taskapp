@@ -500,3 +500,55 @@ export function addMemoUnderDate(nodes, dateLabel, text) {
   const day = { ...makeNode(dateLabel), children: [made] };
   return { nodes: [day, ...nodes], id: made.id, dayId: day.id };
 }
+
+// --- まとめて操作する ---
+
+// 選んだ行をまとめて字下げする。上から順にやると、連続した行が
+// 親子に割れてしまうので、兄弟のまとまりごとに扱う。
+export function indentMany(nodes, ids) {
+  let out = nodes;
+  for (const id of ids) out = indent(out, id);
+  return out;
+}
+
+// 戻すほうは下から。上から戻すと、下の兄弟を連れていってしまう。
+export function outdentMany(nodes, ids) {
+  let out = nodes;
+  for (const id of [...ids].reverse()) out = outdent(out, id);
+  return out;
+}
+
+export function removeMany(nodes, ids) {
+  let out = nodes;
+  for (const id of ids) out = removeNode(out, id);
+  return out.length ? out : [makeNode("")];
+}
+
+export function patchMany(nodes, ids, patch) {
+  let out = nodes;
+  for (const id of ids) out = updateNode(out, id, patch);
+  return out;
+}
+
+// 選んだぶんを、字下げつきの文章にする（持ち出し・コピー用）
+export function textOf(nodes, ids = null) {
+  const lines = [];
+  const walk = (list, depth) => {
+    for (const node of list) {
+      const take = !ids || ids.includes(node.id);
+      if (take) lines.push("  ".repeat(depth) + (node.text || ""));
+      walk(node.children || [], take ? depth + 1 : depth);
+    }
+  };
+  walk(nodes, 0);
+  return lines.join("\n");
+}
+
+// 画面に出ている順で、2つの行のあいだを選ぶ（Shift+クリック）
+export function rangeBetween(nodes, fromId, toId) {
+  const order = visibleRows(nodes).map((r) => r.node.id);
+  const a = order.indexOf(fromId);
+  const b = order.indexOf(toId);
+  if (a < 0 || b < 0) return [toId];
+  return order.slice(Math.min(a, b), Math.max(a, b) + 1);
+}

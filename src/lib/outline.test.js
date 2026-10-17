@@ -525,3 +525,54 @@ describe('その日のメモ', () => {
     expect(findNode(got.nodes, got.id).text).toBe('めも')
   })
 })
+
+import { indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween } from './outline.js'
+
+describe('まとめて操作する', () => {
+  it('続いた行を、まとめて字下げできる', () => {
+    const t = [n('A'), n('B'), n('C')]
+    const got = indentMany(t, [idOf(t, 'B'), idOf(t, 'C')])
+    expect(texts(got)).toEqual(['A', '  B', '  C'])
+  })
+
+  it('まとめて戻すと、並びのまま浅くなる', () => {
+    const t = [n('A', [n('B'), n('C')])]
+    const got = outdentMany(t, [idOf(t, 'B'), idOf(t, 'C')])
+    expect(texts(got)).toEqual(['A', 'B', 'C'])
+  })
+
+  it('まとめて消せる。全部消したら空の行が残る', () => {
+    const t = [n('A'), n('B')]
+    expect(texts(removeMany(t, [idOf(t, 'A')]))).toEqual(['B'])
+    const all = removeMany(t, [idOf(t, 'A'), idOf(t, 'B')])
+    expect(all).toHaveLength(1)
+    expect(all[0].text).toBe('')
+  })
+
+  it('まとめて印をつけられる', () => {
+    const t = [n('A'), n('B')]
+    const got = patchMany(t, [idOf(t, 'A'), idOf(t, 'B')], { completed: true })
+    expect(got.every((x) => x.completed)).toBe(true)
+  })
+
+  it('字下げつきの文章にできる', () => {
+    const t = [n('A', [n('A1')]), n('B')]
+    expect(textOf(t)).toBe('A\n  A1\nB')
+  })
+
+  it('選んだぶんだけ文章にする', () => {
+    const t = [n('A', [n('A1')]), n('B')]
+    expect(textOf(t, [idOf(t, 'A'), idOf(t, 'A1')])).toBe('A\n  A1')
+  })
+
+  it('2つの行のあいだを、画面の順で選ぶ', () => {
+    const t = [n('A', [n('A1')]), n('B')]
+    expect(rangeBetween(t, idOf(t, 'A'), idOf(t, 'B')))
+      .toEqual([idOf(t, 'A'), idOf(t, 'A1'), idOf(t, 'B')])
+  })
+
+  it('逆向きに選んでも同じ', () => {
+    const t = [n('A'), n('B')]
+    expect(rangeBetween(t, idOf(t, 'B'), idOf(t, 'A'))).toEqual([idOf(t, 'A'), idOf(t, 'B')])
+  })
+})
