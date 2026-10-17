@@ -8,6 +8,7 @@
 const BULLET = /^(\s*)(?:[-*+]|\d+[.)])\s+(.*)$/;
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const CHECK = /^\[([ xX])\]\s+(.*)$/;
+const INDENT_OF = /^(\s*)/;
 
 // 字下げの幅は書き出し元によって違う（2 / 4 / タブ）。実際の値から決める。
 function indentUnit(lines) {
@@ -70,8 +71,17 @@ export function parseIndentedMarkdown(raw) {
     const head = HEADING.exec(line.trim());
     if (head) {
       const level = Math.min(3, head[1].length);
-      sectionDepth = level - 1;
-      put({ text: plain(head[2]), headingLevel: level, children: [] }, sectionDepth);
+      const pad = INDENT_OF.exec(line)[1].replace(/\t/g, "    ").length;
+      if (pad === 0) {
+        // 行頭の見出しは、そこから下のひとまとまりの親になる（Notion の書き出し）
+        sectionDepth = level - 1;
+        put({ text: plain(head[2]), headingLevel: level, children: [] }, sectionDepth);
+      } else {
+        // 字下げの中にある見出しは、箇条書きの中身。
+        // ここで親子の深さを入れ替えてしまうと、以降の行がぜんぶずれる。
+        put({ text: plain(head[2]), headingLevel: level, children: [] },
+          sectionDepth + 1 + Math.floor(pad / unit));
+      }
       continue;
     }
 
@@ -89,8 +99,18 @@ export function parseIndentedMarkdown(raw) {
     // 箇条書きでない行。すぐ上の行の続きとして足す（Notion の説明文など）
     const text = plain(line);
     if (!text) continue;
-    if (current) current.text = current.text ? `${current.text}\n${text}` : text;
-    else put({ text, children: [] }, sectionDepth + 1);
+    const pad = INDENT_OF.exec(line)[1].replace(/\t/g, "    ").length;
+    // 空行をはさんだ続き（段落の切れ目）では current が切れている。
+    // そのまま根に置くと、そこから下の親子が丸ごとずれてしまうので、
+    // 字下げの深さから「どの行の続きか」を拾い直す。
+    //   「- 本文」の続きは、その中黒のぶんだけ深く字下げされている。
+    const host = current || (pad > 0 ? lastAt.get(Math.floor(pad / unit) - 1) : null);
+    if (host) {
+      host.text = host.text ? `${host.text}\n${text}` : text;
+      current = host;
+    } else {
+      put({ text, children: [] }, pad > 0 ? Math.floor(pad / unit) : sectionDepth + 1);
+    }
   }
 
   return roots;
