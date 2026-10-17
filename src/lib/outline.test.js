@@ -576,3 +576,54 @@ describe('まとめて操作する', () => {
     expect(rangeBetween(t, idOf(t, 'B'), idOf(t, 'A'))).toEqual([idOf(t, 'A'), idOf(t, 'B')])
   })
 })
+
+import { hashtagAtCursor, tagSuggestions, applyTag, splitTags } from './outline.js'
+
+describe('#タグの補完', () => {
+  it('カーソルが # の途中にいるのを見つける', () => {
+    const got = hashtagAtCursor('これは #me', 7 + 3)
+    expect(got).toEqual({ start: 4, query: 'me' })
+  })
+
+  it('# を打った直後も、候補を出す', () => {
+    expect(hashtagAtCursor('あと #', 4)).toEqual({ start: 3, query: '' })
+  })
+
+  it('空白のあとや、タグの外では出さない', () => {
+    expect(hashtagAtCursor('#memo のあと', 9)).toBe(null)
+    expect(hashtagAtCursor('ふつうの文', 5)).toBe(null)
+  })
+
+  it('打ちかけで始まる候補を返す（自分自身は出さない）', () => {
+    expect(tagSuggestions(['memo', 'media', 'work'], 'me')).toEqual(['memo', 'media'])
+    expect(tagSuggestions(['memo'], 'memo')).toEqual([])
+  })
+
+  it('候補は多すぎないようにする', () => {
+    const many = Array.from({ length: 20 }, (_, i) => `tag${i}`)
+    expect(tagSuggestions(many, 'tag')).toHaveLength(8)
+  })
+
+  it('選ぶと、打ちかけが置き換わって空白が付く', () => {
+    const got = applyTag('これは #me', 10, 'memo')
+    expect(got.text).toBe('これは #memo ')
+    expect(got.caret).toBe(10)
+  })
+
+  it('後ろに文字があっても壊さない', () => {
+    const got = applyTag('#me のこり', 3, 'memo')
+    expect(got.text).toBe('#memo  のこり')
+  })
+
+  it('タグのところを切り分けられる', () => {
+    expect(splitTags('これは #memo です')).toEqual([
+      { text: 'これは ', tag: false },
+      { text: '#memo', tag: true },
+      { text: ' です', tag: false },
+    ])
+  })
+
+  it('タグが無ければ、そのまま1つ', () => {
+    expect(splitTags('ふつう')).toEqual([{ text: 'ふつう', tag: false }])
+  })
+})

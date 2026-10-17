@@ -688,3 +688,155 @@ test.describe("お気に入り", () => {
     await expect(page.locator("[data-favorites]")).toHaveCount(0);
   });
 });
+
+test.describe("#タグ", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "さきに #memo と #media" },
+      { id: "b", text: "" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const hint = (page) => page.locator("[data-tag-hint]");
+
+  test("タグに色が付く", async ({ page }) => {
+    await expect(page.locator('[data-row="a"] [data-tag]').first()).toHaveText("#memo");
+  });
+
+  test("# を打つと、使ったことのあるタグが出る", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #me");
+    await expect(hint(page)).toBeVisible();
+    await expect(page.locator("[data-tag-option]")).toHaveText(["#media", "#memo"]);
+  });
+
+  test("Tab で選べる", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #me");
+    await page.keyboard.press("Tab");
+    await expect(hint(page)).toHaveCount(0);
+    await expect(page.locator('[data-row="b"] textarea')).toHaveValue("これは #media ");
+  });
+
+  test("↓ で選び直して Enter", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #me");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(page.locator('[data-row="b"] textarea')).toHaveValue("これは #memo ");
+  });
+
+  test("Escape で候補だけ閉じる（行は閉じない）", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #me");
+    await page.keyboard.press("Escape");
+    await expect(hint(page)).toHaveCount(0);
+    await expect(page.locator('[data-row="b"] textarea')).toBeVisible();
+  });
+
+  test("候補が無ければ出さない", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #xyz");
+    await expect(hint(page)).toHaveCount(0);
+  });
+
+  test("Enter は、候補が無ければこれまで通り改行", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("ふつうの行");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("つぎ");
+    await page.keyboard.press("Escape");
+    expect(await shape(page)).toEqual(["さきに #memo と #media", "ふつうの行", "つぎ"]);
+  });
+
+  test("押しても選べる", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("これは #me");
+    await page.locator('[data-tag-option="memo"]').click();
+    await expect(page.locator('[data-row="b"] textarea')).toHaveValue("これは #memo ");
+  });
+
+  test("#タグで絞り込める（探すと同じ）", async ({ page }) => {
+    await page.locator('[data-row="b"] [data-row-text]').click();
+    await page.keyboard.type("あたらしい #memo");
+    await page.keyboard.press("Escape");
+    await page.locator("[data-outline-search]").fill("#memo");
+    expect(await shape(page)).toEqual(["さきに #memo と #media", "あたらしい #memo"]);
+  });
+});
+
+test.describe("見た目の設定", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("taskspace-outline-v1", JSON.stringify(
+        Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, text: `行${i}` }))));
+    });
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const panel = (page) => page.locator("[data-view-panel]");
+  const openPanel = (page) => page.locator("[data-outline-view]").click();
+  const fontOf = (page) => page.locator('[data-row="n0"] [data-row-text]')
+    .evaluate((e) => parseFloat(getComputedStyle(e).fontSize));
+
+  test("字を大きくできて、覚えている", async ({ page }) => {
+    const before = await fontOf(page);
+    await openPanel(page);
+    await page.locator("[data-font-larger]").click();
+    await page.locator("[data-font-larger]").click();
+    expect(await fontOf(page)).toBeGreaterThan(before);
+
+    await page.reload();
+    await page.waitForSelector("[data-outliner]");
+    expect(await fontOf(page)).toBeGreaterThan(before);
+  });
+
+  test("小さくもできる。行き過ぎない", async ({ page }) => {
+    await openPanel(page);
+    for (let i = 0; i < 10; i++) await page.locator("[data-font-smaller]").click();
+    await expect(page.locator("[data-font-size]")).toHaveText("11px");
+  });
+
+  test("行揃えを変えられる", async ({ page }) => {
+    await openPanel(page);
+    await page.locator('[data-align="center"]').click();
+    await expect(page.locator('[data-row="n0"] [data-row-text]')).toHaveCSS("text-align", "center");
+  });
+
+  test("タイプライターを入れると、書いている行が同じ高さに来る", async ({ page }) => {
+    await openPanel(page);
+    await page.locator("[data-typewriter]").click();
+    await expect(page.locator("[data-typewriter]")).toContainText("ON");
+    await page.keyboard.press("Escape");
+
+    const whereIsEditing = async () => page.evaluate(() => {
+      const row = document.querySelector("[data-row] textarea")?.closest("[data-row]");
+      const pane = document.querySelector("[data-pane-id]");
+      if (!row || !pane) return null;
+      const r = row.getBoundingClientRect();
+      const p = pane.getBoundingClientRect();
+      return (r.top + r.height / 2 - p.top) / p.height;
+    });
+
+    // 真ん中あたりの行をいくつか。どれも同じ高さに来る
+    // （いちばん上の数行は、それより上に送れないので対象にしない）
+    await page.locator('[data-row="n15"] [data-row-text]').click();
+    const a = await whereIsEditing(page);
+    await page.locator('[data-row="n30"] [data-row-text]').click();
+    const b = await whereIsEditing(page);
+
+    expect(a).not.toBeNull();
+    expect(Math.abs(a - 0.6)).toBeLessThan(0.12);
+    expect(Math.abs(b - a)).toBeLessThan(0.1);
+  });
+
+  test("切っておけば、勝手に送らない", async ({ page }) => {
+    const pane = page.locator("[data-pane-id]").first();
+    await pane.evaluate((e) => { e.scrollTop = 0; });
+    await page.locator('[data-row="n2"] [data-row-text]').click();
+    expect(await pane.evaluate((e) => e.scrollTop)).toBe(0);
+  });
+});

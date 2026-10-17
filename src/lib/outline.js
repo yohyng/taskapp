@@ -552,3 +552,43 @@ export function rangeBetween(nodes, fromId, toId) {
   if (a < 0 || b < 0) return [toId];
   return order.slice(Math.min(a, b), Math.max(a, b) + 1);
 }
+
+// --- #タグの補完 ---
+
+// カーソルが #… の途中にいるか。いるなら、その始まりと打ちかけの文字。
+export function hashtagAtCursor(text, cursorPos) {
+  const before = String(text || "").slice(0, cursorPos);
+  const m = before.match(/#([^\s#.,!?。、！？]*)$/);
+  if (!m) return null;
+  return { start: m.index, query: m[1].toLowerCase() };
+}
+
+// 候補。打ちかけの文字で始まるものを、使われている順に。
+export function tagSuggestions(allTags, query, limit = 8) {
+  const q = String(query || "").toLowerCase();
+  return allTags.filter((t) => t.startsWith(q) && t !== q).slice(0, limit);
+}
+
+// 打ちかけの #… を、選んだタグで置き換える。後ろに空白を足して次を打てるように。
+export function applyTag(text, cursorPos, tag) {
+  const at = hashtagAtCursor(text, cursorPos);
+  if (!at) return { text, caret: cursorPos };
+  const next = `${text.slice(0, at.start)}#${tag} ${text.slice(cursorPos)}`;
+  return { text: next, caret: at.start + tag.length + 2 };
+}
+
+// 文字を、ふつうの部分と #タグ に切り分ける（色を付けて描くため）
+export function splitTags(text) {
+  const s = String(text || "");
+  const out = [];
+  const re = /#([^\s#.,!?。、！？]+)/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(s)) !== null) {
+    if (m.index > last) out.push({ text: s.slice(last, m.index), tag: false });
+    out.push({ text: m[0], tag: true });
+    last = m.index + m[0].length;
+  }
+  if (last < s.length) out.push({ text: s.slice(last), tag: false });
+  return out.length ? out : [{ text: s, tag: false }];
+}

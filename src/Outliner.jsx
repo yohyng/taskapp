@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2 } from "lucide-react";
+import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2, Settings2 } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
   extractImportItems, appendImported, buildExport, moveSubtreeTo,
@@ -8,6 +8,7 @@ import {
   countChars, hasStoredBody, truncateTitle,
   flattenTree, buildTree, mergeOutline,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
+  collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 
@@ -16,6 +17,13 @@ const OUTLINE_KEY = "taskspace-outline-v1";
 // 木はひとつ。枠（ペイン）をいくつ開いても、同じものを見ている。
 // 枠ごとに違うのは「どこにズームしているか」だけ。
 const OutlineContext = React.createContext(null);
+
+const OUTLINE_VIEW_KEY = "taskspace-outline-view";
+const DEFAULT_VIEW = { fontSize: 14, align: "left", typewriter: false, anchor: 0.6 };
+const readView = () => {
+  try { return { ...DEFAULT_VIEW, ...JSON.parse(localStorage.getItem(OUTLINE_VIEW_KEY) || "{}") }; }
+  catch { return { ...DEFAULT_VIEW }; }
+};
 
 const OUTLINE_TOMB_KEY = "taskspace-outline-deleted";
 const readTomb = () => {
@@ -32,6 +40,14 @@ export function OutlineProvider({ children }) {
   const [hist, setHist] = useState({ past: [], future: [] });
   const coalesceRef = useRef({ key: null, at: 0 });
   const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
+  const [view, setViewState] = useState(readView);
+  const setView = useCallback((patch) => {
+    setViewState((prev) => {
+      const next = { ...prev, ...patch };
+      try { localStorage.setItem(OUTLINE_VIEW_KEY, JSON.stringify(next)); } catch { /* noop */ }
+      return next;
+    });
+  }, []);
   const readyRef = useRef(false);                 // 読み込み前は送らない
   const syncedRef = useRef(new Map());            // 向こうと同じだと分かっている行
   const tombRef = useRef(readTomb());
@@ -167,10 +183,10 @@ export function OutlineProvider({ children }) {
   }, [undo, redo]);
 
   const value = useMemo(() => ({
-    nodes, setNodes: apply, setNodesRaw: applyRaw,
+    nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView,
     undo, redo, canUndo: hist.past.length > 0, canRedo: hist.future.length > 0,
     syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, hist, syncNote]);
+  }), [nodes, apply, applyRaw, undo, redo, hist, syncNote, view, setView]);
   return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
 }
 
@@ -232,23 +248,32 @@ function load() {
 }
 
 
-// 探している文字のところに印をつけて描く
+// 行の文字。探しているときは当たったところに印、ふだんは #タグ を色づけ。
 function Marked({ text, query }) {
-  const parts = splitByQuery(text, query);
-  if (parts.length === 1 && !parts[0].hit) return text;
-  return parts.map((p, i) => (p.hit
-    ? <mark key={i} className="rounded bg-amber-300/30 px-px text-inherit">{p.text}</mark>
+  if (String(query || "").trim()) {
+    const parts = splitByQuery(text, query);
+    if (parts.length === 1 && !parts[0].hit) return text;
+    return parts.map((p, i) => (p.hit
+      ? <mark key={i} className="rounded bg-amber-300/30 px-px text-inherit">{p.text}</mark>
+      : <span key={i}>{p.text}</span>));
+  }
+  const parts = splitTags(text);
+  if (parts.length === 1) return text;
+  return parts.map((p, i) => (p.tag
+    ? <span key={i} data-tag className="text-sky-300/80">{p.text}</span>
     : <span key={i}>{p.text}</span>));
 }
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView } = useOutline();
+  const [viewOpen, setViewOpen] = useState(false);
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [menuId, setMenuId] = useState(null);
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState([]);     // まとめて選んだ行
+  const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
   const anchorRef = useRef(null);                // Shift+クリックの起点
   const [note, setNote] = useState("");       // 持ち込みの結果を知らせる
   const searchRef = useRef(null);
@@ -277,6 +302,26 @@ export default function Outliner() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // タイプライター：書いている行を、枠の決まった高さに保つ。
+  // 画面ではなく「この枠」の中で合わせる（枠ごとに転がすため）。
+  const keepAtAnchor = useCallback(() => {
+    if (!view.typewriter || !editingId) return;
+    const row = listRef.current?.querySelector(`[data-row="${editingId}"]`);
+    const box = row?.closest("[data-pane-id]") || listRef.current?.parentElement;
+    if (!row || !box) return;
+    const r = row.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const want = b.top + b.height * (view.anchor ?? 0.6);
+    const delta = r.top + r.height / 2 - want;
+    if (Math.abs(delta) > 2) box.scrollTop += delta;
+  }, [view.typewriter, view.anchor, editingId]);
+
+  // 行が編集欄に変わると高さが少し動くので、整ってから合わせる
+  useEffect(() => {
+    const id = requestAnimationFrame(keepAtAnchor);
+    return () => cancelAnimationFrame(id);
+  }, [keepAtAnchor, nodes]);
 
   // ⌘/Ctrl+K で探す欄に移る（Quietliner と同じ）
   useEffect(() => {
@@ -334,6 +379,25 @@ export default function Outliner() {
 
   // 連続して打っているあいだは、取り消しの1手にまとめる
   const typeText = (id, text) => patch(id, { text }, { coalesce: `text:${id}` });
+
+  // #… を打っているあいだ、使ったことのあるタグを出す
+  function refreshTagHint(id, el) {
+    const at = hashtagAtCursor(el.value, el.selectionStart);
+    if (!at) { setTagHint(null); return; }
+    const items = tagSuggestions(allTags, at.query);
+    setTagHint(items.length ? { id, items, sel: 0 } : null);
+  }
+
+  // 候補を選んだとき。打ちかけの #… を置き換えて、続きを打てるようにする。
+  function takeTag(node, el, tag) {
+    const got = applyTag(el.value, el.selectionStart, tag);
+    typeText(node.id, got.text);
+    setTagHint(null);
+    requestAnimationFrame(() => {
+      const live = document.querySelector(`[data-row="${node.id}"] textarea`);
+      if (live) { live.focus(); live.setSelectionRange(got.caret, got.caret); }
+    });
+  }
 
   function exportJson() {
     const text = JSON.stringify(buildExport(nodes), null, 2);
@@ -412,6 +476,7 @@ export default function Outliner() {
   }
   const skipZoomRef = useRef(false);
 
+  const allTags = useMemo(() => collectAllTags(nodes), [nodes]);
   const pickedSet = useMemo(() => new Set(picked), [picked]);
   function clearPick() { setPicked([]); anchorRef.current = null; }
 
@@ -477,6 +542,15 @@ export default function Outliner() {
     const collapsed = selStart === selEnd;
     const meta = e.ctrlKey || e.metaKey;
     if (e.nativeEvent.isComposing) return; // かな漢字変換の途中は触らない
+
+    // タグの候補が出ているあいだは、そちらを先に操る
+    const hint = tagHint?.id === node.id ? tagHint : null;
+    if (hint) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setTagHint({ ...hint, sel: Math.min(hint.sel + 1, hint.items.length - 1) }); return; }
+      if (e.key === "ArrowUp") { e.preventDefault(); setTagHint({ ...hint, sel: Math.max(hint.sel - 1, 0) }); return; }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) { e.preventDefault(); takeTag(node, el, hint.items[hint.sel]); return; }
+      if (e.key === "Escape") { e.preventDefault(); setTagHint(null); return; }
+    }
 
     // Ctrl/⌘+Enter で完了を切り替える
     if (meta && e.key === "Enter") {
@@ -612,6 +686,59 @@ export default function Outliner() {
             </button>
           )}
         </div>
+        <div className="relative shrink-0">
+          <button
+            data-outline-view
+            onClick={() => setViewOpen((v) => !v)}
+            title="見た目"
+            className="rounded-md border border-white/10 p-1 text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200"
+          >
+            <Settings2 className="h-3 w-3" />
+          </button>
+          {viewOpen && (
+            <div data-view-panel className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
+              <div className="mb-1 text-[10px] text-neutral-500">字の大きさ</div>
+              <div className="mb-2 flex items-center gap-1">
+                <button data-font-smaller onClick={() => setView({ fontSize: Math.max(11, view.fontSize - 1) })} className="flex-1 rounded border border-white/10 py-1 text-[11px] text-neutral-300 hover:bg-white/[0.07]">−</button>
+                <span data-font-size className="w-10 text-center text-[11px] tabular-nums ts-text">{view.fontSize}px</span>
+                <button data-font-larger onClick={() => setView({ fontSize: Math.min(24, view.fontSize + 1) })} className="flex-1 rounded border border-white/10 py-1 text-[11px] text-neutral-300 hover:bg-white/[0.07]">＋</button>
+              </div>
+
+              <div className="mb-1 text-[10px] text-neutral-500">行揃え</div>
+              <div className="mb-2 flex gap-1">
+                {[["left", "左"], ["center", "中央"], ["right", "右"], ["justify", "均等"]].map(([key, label]) => (
+                  <button
+                    key={key}
+                    data-align={key}
+                    onClick={() => setView({ align: key })}
+                    className={classNames(
+                      "flex-1 rounded border py-1 text-[10px] transition",
+                      view.align === key ? "border-white/30 bg-white/15 ts-text" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                data-typewriter
+                onClick={() => setView({ typewriter: !view.typewriter })}
+                className={classNames(
+                  "flex w-full items-center justify-between rounded border px-2 py-1.5 text-[11px] transition",
+                  view.typewriter ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                )}
+              >
+                <span>タイプライター</span>
+                <span className="text-[10px]">{view.typewriter ? "ON" : "OFF"}</span>
+              </button>
+              <div className="mt-1 text-[10px] leading-relaxed text-neutral-600">
+                書いている行が、いつも同じ高さに来るように送ります。
+              </div>
+            </div>
+          )}
+        </div>
+
         <button
           data-outline-undo
           onClick={undo}
@@ -769,7 +896,19 @@ alter table outline_nodes disable row level security;
         />
       )}
 
-      <div ref={listRef} className="relative flex flex-col">
+      <div
+        ref={listRef}
+        data-outline-list
+        style={{
+          fontSize: `${view.fontSize}px`,
+          textAlign: view.align,
+          // 上の行も下の行も決まった高さに来られるよう、前後に余白を置く
+          // （これが無いと、最初の数行は押し下げられない）
+          paddingTop: view.typewriter ? "45vh" : undefined,
+          paddingBottom: view.typewriter ? "45vh" : undefined,
+        }}
+        className="relative flex flex-col"
+      >
         {drag && (
           <div
             data-drop-line
@@ -846,13 +985,14 @@ alter table outline_nodes disable row level security;
                   style={textStyle}
                   onChange={(e) => {
                     typeText(node.id, e.target.value);
+                    refreshTagHint(node.id, e.target);
                     e.target.style.height = "auto";
                     e.target.style.height = `${e.target.scrollHeight}px`;
                   }}
                   onKeyDown={(e) => onKeyDown(e, node)}
-                  onBlur={() => setEditingId((cur) => (cur === node.id ? null : cur))}
+                  onBlur={() => { setEditingId((cur) => (cur === node.id ? null : cur)); setTagHint(null); }}
                   className={classNames(
-                    "min-w-0 flex-1 resize-none bg-transparent px-1 py-0 text-[14px] leading-relaxed ts-text outline-none",
+                    "min-w-0 flex-1 resize-none bg-transparent px-1 py-0 text-[1em] leading-relaxed ts-text outline-none",
                     node.completed && "line-through opacity-50",
                   )}
                 />
@@ -868,12 +1008,33 @@ alter table outline_nodes disable row level security;
                   }}
                   style={textStyle}
                   className={classNames(
-                    "min-w-0 flex-1 cursor-text whitespace-pre-wrap break-words px-1 py-0 text-[14px] leading-relaxed",
+                    "min-w-0 flex-1 cursor-text whitespace-pre-wrap break-words px-1 py-0 text-[1em] leading-relaxed",
                     node.text ? "ts-text" : "text-neutral-600",
                     node.completed && "line-through opacity-50",
                   )}
                 >
                   {node.text ? <Marked text={node.text} query={query} /> : "空の行"}
+                </div>
+              )}
+
+              {tagHint?.id === node.id && (
+                <div
+                  data-tag-hint
+                  className="absolute left-10 top-full z-40 mt-0.5 w-44 overflow-hidden rounded-lg border border-white/15 ts-surface py-1 shadow-2xl"
+                >
+                  {tagHint.items.map((tag, i) => (
+                    <button
+                      key={tag}
+                      data-tag-option={tag}
+                      onMouseDown={(e) => { e.preventDefault(); takeTag(node, document.querySelector(`[data-row="${node.id}"] textarea`), tag); }}
+                      className={classNames(
+                        "block w-full px-2 py-1 text-left text-[11px] transition",
+                        i === tagHint.sel ? "bg-white/15 ts-text" : "text-neutral-400 hover:bg-white/[0.07]",
+                      )}
+                    >
+                      #{tag}
+                    </button>
+                  ))}
                 </div>
               )}
 
