@@ -1506,3 +1506,84 @@ test.describe("入れ子の縦線", () => {
     expect(await widthOf("c")).toBe("40px 100%");
   });
 });
+
+test.describe("行ごとの日付（メタデータ）", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "日付つき", date: "2026-01-02" },
+      { id: "b", text: "日付なし" },
+      { id: "y", text: "2026", children: [
+        { id: "m", text: "2026/03", children: [
+          { id: "d", text: "2026/03/01", children: [{ id: "e", text: "その日のメモ" }] },
+        ] },
+      ] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const stored = (page, id) => page.evaluate((x) => {
+    const walk = (ns) => ns.flatMap((n) => [n, ...walk(n.children || [])]);
+    return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).find((n) => n.id === x);
+  }, id);
+
+  test("持っている行には、日付が出る", async ({ page }) => {
+    await expect(page.locator('[data-row="a"] [data-row-date]')).toHaveText("01/02");
+    await expect(page.locator('[data-row="b"] [data-row-date]')).toHaveCount(0);
+  });
+
+  test("メニューから日付を付けられる", async ({ page }) => {
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-date-input]").fill("2026-05-05");
+    await expect.poll(async () => (await stored(page, "b")).date).toBe("2026-05-05");
+    await expect(page.locator('[data-row="b"] [data-row-date]')).toHaveText("05/05");
+  });
+
+  test("「今日」と「✕」も効く", async ({ page }) => {
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-date-today]").click();
+    const today = new Date().toISOString().slice(0, 10);
+    await expect.poll(async () => (await stored(page, "b")).date).toBe(today);
+
+    await page.locator("[data-row-date-clear]").click();
+    await expect.poll(async () => (await stored(page, "b")).date).toBe(null);
+  });
+
+  test("読み直しても、日付は残る", async ({ page }) => {
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-date-input]").fill("2026-07-07");
+    await expect.poll(async () => (await stored(page, "b")).date).toBe("2026-07-07");
+
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("header");
+    await fresh.locator("[data-pane-mode]").first().selectOption("outline");
+    await expect(fresh.locator('[data-row="b"] [data-row-date]')).toHaveText("07/07");
+    await fresh.close();
+  });
+
+  test("見出しから、まとめて日付を割り当てられる", async ({ page }) => {
+    expect((await stored(page, "e")).date).toBeFalsy();
+
+    await page.locator("[data-outline-view]").click();
+    await page.locator("[data-fill-dates]").click();
+
+    await expect.poll(async () => (await stored(page, "e")).date).toBe("2026-03-01");
+    // 手で入れてあったものは変えない
+    expect((await stored(page, "a")).date).toBe("2026-01-02");
+    await expect(page.locator("[data-outline-note]")).toContainText("日付を入れました");
+  });
+
+  test("まとめて割り当てたのも、元に戻せる", async ({ page }) => {
+    await page.locator("[data-outline-view]").click();
+    await page.locator("[data-fill-dates]").click();
+    await expect.poll(async () => (await stored(page, "e")).date).toBe("2026-03-01");
+
+    await page.keyboard.press("Escape");
+    await page.locator("[data-outline-undo]").click();
+    await expect.poll(async () => (await stored(page, "e")).date).toBeFalsy();
+  });
+});

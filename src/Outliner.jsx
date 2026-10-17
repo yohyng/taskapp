@@ -980,6 +980,26 @@ export default function Outliner() {
               </div>
 
               <div className="mb-2 border-t border-white/10 pt-2">
+                <div className="mb-1 text-[10px] text-neutral-500">日付</div>
+                <button
+                  data-fill-dates
+                  onClick={() => {
+                    const before = flattenTree(nodes).filter((r) => r.date).length;
+                    setNodes((prev) => fillDates(prev));
+                    const after = flattenTree(fillDates(nodes)).filter((r) => r.date).length;
+                    setNote(after > before ? `${after - before}件に日付を入れました` : "入れるものはありませんでした");
+                  }}
+                  className="mb-1 w-full rounded border border-white/10 px-2 py-1.5 text-left text-[11px] text-neutral-400 transition hover:bg-white/[0.07]"
+                >
+                  見出しから日付を割り当てる
+                </button>
+                <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                  「2026 ＞ 2026/01 ＞ 2026/01/02」のような並びを読んで、
+                  その下の行に日付を持たせます。手で入れた日付は変えません。
+                </div>
+              </div>
+
+              <div className="mb-2 border-t border-white/10 pt-2">
                 <div className="mb-1 text-[10px] text-neutral-500">片付け（いまだけ）</div>
                 <button
                   data-outline-clear
@@ -1359,6 +1379,15 @@ alter table outline_nodes disable row level security;
               )}
 
               <div className="flex shrink-0 items-center gap-0.5 self-start pt-0.5">
+                {node.date && !node.virtual && (
+                  <span
+                    data-row-date={node.date}
+                    title={`${node.date} のこと`}
+                    className="shrink-0 rounded border border-white/10 px-1 py-px text-[9px] tabular-nums text-neutral-500"
+                  >
+                    {node.date.slice(5).replace("-", "/")}
+                  </span>
+                )}
                 {node.favorite && <Star className="h-3 w-3 shrink-0 fill-amber-300 text-amber-300" />}
                 <span
                   data-chars
@@ -1395,6 +1424,34 @@ alter table outline_nodes disable row level security;
                       {node.collapsed ? "▶ 展開" : "▼ 折りたたむ"}
                     </button>
                   )}
+
+                  <div className="my-1 border-t border-white/10" />
+                  <div className="px-2 py-0.5 text-[10px] text-neutral-600">日付</div>
+                  <div className="flex items-center gap-1 px-1.5 pb-1">
+                    <input
+                      type="date"
+                      data-row-date-input
+                      value={node.date || ""}
+                      onChange={(e) => patch(node.id, { date: e.target.value || null })}
+                      className="min-w-0 flex-1 rounded border border-white/10 bg-black/25 px-1 py-1 text-[10px] ts-text outline-none"
+                    />
+                    <button
+                      data-row-date-today
+                      onClick={() => patch(node.id, { date: new Date().toISOString().slice(0, 10) })}
+                      title="今日にする"
+                      className="rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                    >
+                      今日
+                    </button>
+                    <button
+                      data-row-date-clear
+                      onClick={() => patch(node.id, { date: null })}
+                      title="日付を外す"
+                      className="rounded border border-white/10 px-1.5 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                    >
+                      ✕
+                    </button>
+                  </div>
 
                   <div className="my-1 border-t border-white/10" />
                   <div className="px-2 py-0.5 text-[10px] text-neutral-600">見出し</div>
