@@ -161,6 +161,11 @@ export function OutlineProvider({ children }) {
       const here = new Set(rows.map((r) => r.id));
       const changed = rows.filter((r) => syncedRef.current.get(r.id) !== JSON.stringify(r));
       const gone = [...syncedRef.current.keys()].filter((id) => !here.has(id));
+      // いま手元にある行は、もう「消したもの」ではない。
+      // 印を残したままだと、次に読み込んだときにまた消される。
+      let revived = false;
+      for (const id of here) if (tombRef.current.delete(id)) revived = true;
+      if (revived) writeTomb(tombRef.current);
       if (!changed.length && !gone.length) return;
       if (gone.length) {
         gone.forEach((id) => tombRef.current.add(id));

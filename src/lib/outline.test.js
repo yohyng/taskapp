@@ -738,3 +738,23 @@ describe('id の無い書き出しを重ねる', () => {
     expect(done.nodes[0].completed).toBe(true)
   })
 })
+
+describe('消した印の使いどころ（戻り止め）', () => {
+  it('手元にある行は、印が残っていても消さない', () => {
+    // 消す → 取り消す → 読み直す、の流れ。印は残っているが行は生きている。
+    const node = makeNode('戻した行')
+    const got = mergeOutline([node], [], new Set([node.id]))
+    expect(texts(got)).toEqual(['戻した行'])
+  })
+
+  it('向こうにだけ残っている行は、印のとおり戻さない', () => {
+    const node = makeNode('消した行')
+    expect(mergeOutline([], [node], new Set([node.id]))).toEqual([])
+  })
+
+  it('印のない行は、どちらにあっても残る', () => {
+    const a = makeNode('てもと')
+    const b = makeNode('むこう')
+    expect(texts(mergeOutline([a], [b], new Set())).sort()).toEqual(['てもと', 'むこう'])
+  })
+})

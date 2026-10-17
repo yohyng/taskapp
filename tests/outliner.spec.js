@@ -1115,3 +1115,113 @@ test.describe("なぞって選ぶ", () => {
     expect(await shape(page)).toEqual(["A", "  B", "  C", "D"]);
   });
 });
+
+// 保存まわりの戻り止め。「リロードしたら一部消えていた」への手当て。
+test.describe("保存して読み直す", () => {
+  const seed = (page, items) => page.addInitScript((data) =>
+    localStorage.setItem("taskspace-outline-v1", JSON.stringify(data)), items);
+  const reopen = async (page) => {
+    // フィクスチャの仕込みが効かない、まっさらな窓で開き直す
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("header");
+    await fresh.locator("[data-pane-mode]").first().selectOption("outline");
+    await fresh.waitForSelector("[data-outliner]");
+    return fresh;
+  };
+  const shapeOf = (p) => p.evaluate(() =>
+    [...document.querySelectorAll("[data-row]")].map((e) => {
+      const t = e.querySelector("[data-row-text]");
+      return "  ".repeat(Number(e.getAttribute("data-depth"))) + (t?.textContent || "").trim();
+    }));
+
+  test("消して取り消した行は、読み直しても残る", async ({ page }) => {
+    await seed(page, [{ id: "a", text: "のこす" }, { id: "b", text: "いちど消す" }]);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-delete]").click();
+    expect(await shape(page)).toEqual(["のこす"]);
+
+    await page.locator("[data-outline-undo]").click();
+    expect(await shape(page)).toEqual(["のこす", "いちど消す"]);
+
+    const fresh = await reopen(page);
+    expect(await shapeOf(fresh)).toEqual(["のこす", "いちど消す"]);
+    await fresh.close();
+  });
+
+  test("消した行は、読み直しても戻ってこない", async ({ page }) => {
+    await seed(page, [{ id: "a", text: "のこす" }, { id: "b", text: "消す" }]);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator('[data-row="b"]').hover();
+    await page.locator('[data-row-menu="b"]').click();
+    await page.locator("[data-row-delete]").click();
+
+    const fresh = await reopen(page);
+    expect(await shapeOf(fresh)).toEqual(["のこす"]);
+    await fresh.close();
+  });
+
+  test("取り込んだ行は、読み直しても残る", async ({ page }) => {
+    await seed(page, [{ id: "a", text: "もとからある" }]);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "q.json", mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ items: [{ id: "u1", text: "取り込んだ行" }] })),
+    });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "取り込んだ行"]);
+
+    const fresh = await reopen(page);
+    expect(await shapeOf(fresh)).toEqual(["もとからある", "取り込んだ行"]);
+    await fresh.close();
+  });
+
+  test("消した行と同じ内容を取り込み直しても、残る", async ({ page }) => {
+    await seed(page, [{ id: "a", text: "のこす" }, { id: "u1", text: "消してから取り込み直す" }]);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator('[data-row="u1"]').hover();
+    await page.locator('[data-row-menu="u1"]').click();
+    await page.locator("[data-row-delete]").click();
+    expect(await shape(page)).toEqual(["のこす"]);
+
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "q.json", mimeType: "application/json",
+      buffer: Buffer.from(JSON.stringify({ items: [{ id: "u1", text: "消してから取り込み直す" }] })),
+    });
+    await expect.poll(() => shape(page)).toEqual(["のこす", "消してから取り込み直す"]);
+
+    const fresh = await reopen(page);
+    expect(await shapeOf(fresh)).toEqual(["のこす", "消してから取り込み直す"]);
+    await fresh.close();
+  });
+
+  test("書いた文字は、読み直しても残る", async ({ page }) => {
+    await seed(page, [{ id: "a", text: "" }]);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("ちゃんと保存される");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("つぎの行も");
+    await page.keyboard.press("Escape");
+
+    const fresh = await reopen(page);
+    expect(await shapeOf(fresh)).toEqual(["ちゃんと保存される", "つぎの行も"]);
+    await fresh.close();
+  });
+});

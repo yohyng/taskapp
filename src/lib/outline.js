@@ -596,12 +596,14 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set()) {
   const localRows = flattenTree(localNodes);
   const remoteRows = flattenTree(remoteNodes);
   const byId = new Map();
+  // 消した印は「向こうから戻ってこないため」のもの。
+  // 手元にある行には使わない。使うと、消したあとに取り消した行や、
+  // 取り込み直した行まで、読み直すたびに消えてしまう。
   for (const row of remoteRows) {
     if (deletedIds.has(row.id)) continue;
     byId.set(row.id, row);
   }
   for (const row of localRows) {
-    if (deletedIds.has(row.id)) { byId.delete(row.id); continue; }
     const there = byId.get(row.id);
     if (!there) { byId.set(row.id, row); continue; }
     const mine = row.updatedAt || "";
