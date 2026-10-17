@@ -511,23 +511,31 @@ export async function loadOutlineRows() {
 }
 
 // 変わった行だけ送り、消した行は向こうからも消す
+// 一度に送る量。取り込みや一括削除では万単位になるので、必ず小分けにする。
+//   送る側（upsert）は中身が大きいので 500
+//   消す側（delete）は id が URL に並ぶので、もっと細かく 200
+export function chunk(list, size) {
+  const out = []
+  for (let at = 0; at < list.length; at += size) out.push(list.slice(at, at + size))
+  return out
+}
+
 export async function saveOutlineRows(rows, deletedIds = []) {
   if (!isSupabaseEnabled || outlineTableMissing) return null
-  if (deletedIds.length) {
-    const { error } = await supabase.from(OUTLINE_TABLE).delete().in('id', deletedIds)
+
+  // 消すほうも小分けにする。まとめて投げると URL が長すぎて届かず、
+  // 消したはずの行が次の読み込みで戻ってくる。
+  for (const part of chunk(deletedIds, 200)) {
+    const { error } = await supabase.from(OUTLINE_TABLE).delete().in('id', part)
     if (error) {
       if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
-      // 黙って先へ進むと、消したはずの行が他の端末で生き返る
       console.error('[db] outline delete error', error)
       return error.message || String(error)
     }
   }
-  if (!rows.length) return null
-  // 取り込みのあとは万単位になることがある。一度に送ると弾かれるので小分けにする。
-  const CHUNK = 500
-  for (let at = 0; at < rows.length; at += CHUNK) {
-    const part = rows.slice(at, at + CHUNK).map(outlineNodeToRow)
-    const { error } = await supabase.from(OUTLINE_TABLE).upsert(part, { onConflict: 'id' })
+
+  for (const part of chunk(rows, 500)) {
+    const { error } = await supabase.from(OUTLINE_TABLE).upsert(part.map(outlineNodeToRow), { onConflict: 'id' })
     if (error) {
       if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
       console.error('[db] outline save error', error)

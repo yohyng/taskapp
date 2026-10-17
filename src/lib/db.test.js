@@ -73,3 +73,29 @@ describe('アウトラインの置き場', () => {
     expect(typeof isOutlineTableMissing()).toBe('boolean')
   })
 })
+
+describe('小分けにして送る', () => {
+  it('ちょうど割り切れるとき', async () => {
+    const { chunk } = await import('./db.js')
+    expect(chunk([1, 2, 3, 4], 2)).toEqual([[1, 2], [3, 4]])
+  })
+
+  it('余りも落とさない', async () => {
+    const { chunk } = await import('./db.js')
+    expect(chunk([1, 2, 3], 2)).toEqual([[1, 2], [3]])
+  })
+
+  it('空なら何も送らない', async () => {
+    const { chunk } = await import('./db.js')
+    expect(chunk([], 200)).toEqual([])
+  })
+
+  it('万単位でも、全部の行が1度ずつ入る', async () => {
+    const { chunk } = await import('./db.js')
+    const all = Array.from({ length: 9668 }, (_, i) => i)
+    const parts = chunk(all, 200)
+    expect(parts.length).toBe(49)
+    expect(parts.flat()).toEqual(all)
+    expect(Math.max(...parts.map((p) => p.length))).toBe(200)
+  })
+})

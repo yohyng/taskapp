@@ -34,7 +34,9 @@ const readTomb = () => {
   try { return new Set(JSON.parse(localStorage.getItem(OUTLINE_TOMB_KEY) || "[]")); } catch { return new Set(); }
 };
 const writeTomb = (set) => {
-  try { localStorage.setItem(OUTLINE_TOMB_KEY, JSON.stringify([...set].slice(-500))); } catch { /* noop */ }
+  // まとめて消したときは万単位になる。ここで切ると、切られたぶんが
+  // 次の読み込みで戻ってくるので、多めに持つ。
+  try { localStorage.setItem(OUTLINE_TOMB_KEY, JSON.stringify([...set].slice(-20000))); } catch { /* noop */ }
 };
 
 export function OutlineProvider({ children }) {
@@ -180,6 +182,12 @@ export function OutlineProvider({ children }) {
           return;
         }
         setSyncNote((cur) => (cur.startsWith("error:") ? "" : cur));
+        // 向こうから本当に消えたなら、もう印は要らない。
+        // 万単位の印を抱えると、こんどは置き場のほうが溢れる。
+        if (gone.length) {
+          gone.forEach((id) => tombRef.current.delete(id));
+          writeTomb(tombRef.current);
+        }
         const next = new Map(syncedRef.current);
         gone.forEach((id) => next.delete(id));
         changed.forEach((r) => next.set(r.id, JSON.stringify(r)));
