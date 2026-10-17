@@ -5187,9 +5187,19 @@ function useTaskBlock({
       // 消したあとだと cur は DOM から外れていて、隣が引けない。
       // 行き先は消す前に決めておく。
       const all = Array.from(document.querySelectorAll("[data-task-id][tabindex]"));
-      const prev = all[all.indexOf(cur) - 1] || null;
+      const prevId = all[all.indexOf(cur) - 1]?.getAttribute("data-task-id") || null;
       removeTask?.(task.id);
-      setTimeout(() => prev?.focus(), 0);
+      // 描き直しで要素が作り直されることがあるので、id で引き直して当てる。
+      // 混んでいると1回では間に合わないので、数回ぶんだけ待つ。
+      if (prevId) {
+        let tries = 0;
+        const land = () => {
+          const el = document.querySelector(`[data-task-id="${prevId}"][tabindex]`);
+          if (el) { el.focus(); return; }
+          if (tries++ < 5) requestAnimationFrame(land);
+        };
+        requestAnimationFrame(land);
+      }
     }
   }
 
