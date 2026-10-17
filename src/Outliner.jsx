@@ -695,6 +695,18 @@ export default function Outliner() {
     } catch { setNote("コピーできませんでした"); }
   }
 
+  // いまだけの口：中身をぜんぶ空にする。
+  // ふつうの書き換えと同じ道を通すので、⌘Z で戻せるし、
+  // 向こう（Supabase）の行も、このあとの保存で消える。
+  const [confirmClear, setConfirmClear] = useState(false);
+  function clearAll() {
+    setNodes(() => [makeNode("")]);
+    setZoomId(null);
+    clearPick();
+    setConfirmClear(false);
+    setNote("ぜんぶ消しました（⌘Z で戻せます）");
+  }
+
   function addAtEnd() {
     const made = makeNode("");
     applyShown((list) => [...list, made]);
@@ -903,6 +915,27 @@ export default function Outliner() {
                     {label}
                   </button>
                 ))}
+              </div>
+
+              <div className="mb-2 border-t border-white/10 pt-2">
+                <div className="mb-1 text-[10px] text-neutral-500">片付け（いまだけ）</div>
+                <button
+                  data-outline-clear
+                  onClick={() => (confirmClear ? clearAll() : setConfirmClear(true))}
+                  onBlur={() => setConfirmClear(false)}
+                  className={classNames(
+                    "mb-1 w-full rounded border px-2 py-1.5 text-left text-[11px] transition",
+                    confirmClear
+                      ? "border-red-400/50 bg-red-400/15 text-red-100"
+                      : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                  )}
+                >
+                  {confirmClear ? "もう一度押すと、ぜんぶ消す" : "アウトラインをぜんぶ消す"}
+                </button>
+                <div className="text-[10px] leading-relaxed text-neutral-600">
+                  この端末からも Supabase からも消えます。⌘Z で戻せますが、
+                  念のため先に ↓ で書き出しておくと安心です。
+                </div>
               </div>
 
               <button

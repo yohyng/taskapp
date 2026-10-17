@@ -1286,3 +1286,62 @@ test.describe("なぞり選択が、送っても続く", () => {
     await expect.poll(async () => (await page.locator("[data-row]").count())).toBe(60 - picked);
   });
 });
+
+// いまだけの口。使い終わったら、この describe ごと外す。
+test.describe("ぜんぶ消す", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "A", children: [{ id: "a1", text: "A1" }] },
+      { id: "b", text: "B" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const openPanel = (page) => page.locator("[data-outline-view]").click();
+  const clear = (page) => page.locator("[data-outline-clear]");
+  // 空の行は「空の行」という案内を出すので、置いてある中身のほうを見る
+  const stored = (page) => page.evaluate(() =>
+    JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+
+  test("一度押しただけでは消えない", async ({ page }) => {
+    await openPanel(page);
+    await clear(page).click();
+    await expect(clear(page)).toContainText("もう一度押すと");
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+
+  test("二度押すと、空になる", async ({ page }) => {
+    await openPanel(page);
+    await clear(page).click();
+    await clear(page).click();
+    await expect.poll(() => stored(page)).toEqual([""]);
+    await expect(page.locator("[data-outline-note]")).toContainText("ぜんぶ消しました");
+  });
+
+  test("⌘Z で戻せる", async ({ page }) => {
+    await openPanel(page);
+    await clear(page).click();
+    await clear(page).click();
+    await expect.poll(() => stored(page)).toEqual([""]);
+
+    await page.locator("[data-outline-undo]").click();
+    expect(await shape(page)).toEqual(["A", "  A1", "B"]);
+  });
+
+  test("消したあと、読み直しても戻ってこない", async ({ page }) => {
+    await openPanel(page);
+    await clear(page).click();
+    await clear(page).click();
+    await expect.poll(() => stored(page)).toEqual([""]);
+
+    const fresh = await page.context().newPage();
+    await fresh.goto("/");
+    await fresh.waitForSelector("header");
+    await fresh.locator("[data-pane-mode]").first().selectOption("outline");
+    await fresh.waitForSelector("[data-outliner]");
+    expect(await fresh.evaluate(() =>
+      JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text))).toEqual([""]);
+    await fresh.close();
+  });
+});
