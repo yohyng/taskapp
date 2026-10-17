@@ -1045,3 +1045,73 @@ test.describe("ほかのアプリから取り込む", () => {
     expect(await shape(page)).toEqual(["もとからある"]);
   });
 });
+
+test.describe("なぞって選ぶ", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "A" }, { id: "b", text: "B" }, { id: "c", text: "C" }, { id: "d", text: "D" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const pickedIds = (page) => page.evaluate(() =>
+    [...document.querySelectorAll("[data-picked]")].map((e) => e.getAttribute("data-row")));
+  const rowBox = (page, id) => page.locator(`[data-row="${id}"]`).boundingBox();
+
+  test("余白から下へなぞると、通った行が選ばれる", async ({ page }) => {
+    const a = await rowBox(page, "a");
+    const c = await rowBox(page, "c");
+    // 行の右側の余白から始める
+    await page.mouse.move(a.x + a.width - 8, a.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(a.x + a.width - 8, c.y + c.height - 2, { steps: 8 });
+    await expect(page.locator("[data-select-band]")).toBeVisible();
+    await page.mouse.up();
+
+    expect(await pickedIds(page)).toEqual(["a", "b", "c"]);
+    await expect(page.locator("[data-pick-bar]")).toContainText("3件");
+  });
+
+  test("離すと枠は消え、選んだままになる", async ({ page }) => {
+    const a = await rowBox(page, "a");
+    const b = await rowBox(page, "b");
+    await page.mouse.move(a.x + a.width - 8, a.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(a.x + a.width - 8, b.y + b.height - 2, { steps: 6 });
+    await page.mouse.up();
+    await expect(page.locator("[data-select-band]")).toHaveCount(0);
+    expect(await pickedIds(page)).toEqual(["a", "b"]);
+  });
+
+  test("文字の上から始めても、ほかの行にまたげば選択になる", async ({ page }) => {
+    const a = await page.locator('[data-row="a"] [data-row-text]').boundingBox();
+    const c = await rowBox(page, "c");
+    await page.mouse.move(a.x + 4, a.y + a.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(a.x + 4, c.y + c.height / 2, { steps: 8 });
+    await page.mouse.up();
+    expect(await pickedIds(page)).toEqual(["a", "b", "c"]);
+  });
+
+  test("同じ行の中で動かすだけなら、選択にならない（文字を選べる）", async ({ page }) => {
+    // 文字そのものの上から始める（行の左端は、なぞり始めの余白）
+    const t = await page.locator('[data-row="a"] [data-row-text]').boundingBox();
+    await page.mouse.move(t.x + 4, t.y + t.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(t.x + 40, t.y + t.height / 2, { steps: 4 });
+    await page.mouse.up();
+    expect(await pickedIds(page)).toEqual([]);
+  });
+
+  test("なぞったあと、まとめて字下げできる", async ({ page }) => {
+    const b = await rowBox(page, "b");
+    const c = await rowBox(page, "c");
+    await page.mouse.move(b.x + b.width - 8, b.y + 2);
+    await page.mouse.down();
+    await page.mouse.move(b.x + b.width - 8, c.y + c.height - 2, { steps: 6 });
+    await page.mouse.up();
+    await page.locator("[data-pick-indent]").click();
+    expect(await shape(page)).toEqual(["A", "  B", "  C", "D"]);
+  });
+});

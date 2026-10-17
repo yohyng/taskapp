@@ -319,6 +319,7 @@ export default function Outliner() {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState([]);     // まとめて選んだ行
   const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
+  const [band, setBand] = useState(null);       // なぞって選ぶときの枠
   const anchorRef = useRef(null);                // Shift+クリックの起点
   const [note, setNote] = useState("");       // 持ち込みの結果を知らせる
   const searchRef = useRef(null);
@@ -570,6 +571,56 @@ export default function Outliner() {
     anchorRef.current = id;
     setEditingId(null);
   }
+  // 余白をなぞって、通った行をまとめて選ぶ。
+  // 文字の上から始めたときは、ほかの行にまたいだ時点で切り替える
+  //（同じ行の中では、ふつうの文字選択のままにする）。
+  function startBand(e, fromId = null) {
+    if (e.button !== 0) return;
+    const list = listRef.current;
+    if (!list) return;
+    const start = { x: e.clientX, y: e.clientY };
+    let acting = !fromId;      // 余白からなら、すぐ選び始める
+    if (acting) e.preventDefault();
+
+    const rowAt = (x, y) => document.elementFromPoint(x, y)?.closest("[data-row]")?.getAttribute("data-row") || null;
+
+    const move = (ev) => {
+      const far = Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 8;
+      if (!acting) {
+        // 文字から始めたときは、別の行に入ったら選択に切り替える
+        const over = rowAt(ev.clientX, ev.clientY);
+        if (!far || !over || over === fromId) return;
+        acting = true;
+        window.getSelection()?.removeAllRanges();
+        setEditingId(null);
+        anchorRef.current = fromId;
+      }
+      ev.preventDefault();
+      setBand({
+        left: Math.min(start.x, ev.clientX), top: Math.min(start.y, ev.clientY),
+        width: Math.abs(ev.clientX - start.x), height: Math.abs(ev.clientY - start.y),
+      });
+      // 枠に重なった行を拾う
+      const top = Math.min(start.y, ev.clientY);
+      const bottom = Math.max(start.y, ev.clientY);
+      const hit = [...list.querySelectorAll("[data-row]")].filter((el) => {
+        const r = el.getBoundingClientRect();
+        return r.bottom > top && r.top < bottom;
+      }).map((el) => el.getAttribute("data-row"));
+      if (fromId && !hit.includes(fromId)) hit.unshift(fromId);
+      setPicked(hit);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setBand(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  }
+
   // 画面の順にそろえる（まとめて動かすときに順番が要る）
   const orderedPick = () => visibleRows(listed).map((r) => r.node.id).filter((id) => pickedSet.has(id));
 
@@ -995,9 +1046,23 @@ alter table outline_nodes disable row level security;
         />
       )}
 
+      {band && (
+        <div
+          data-select-band
+          className="pointer-events-none fixed z-[60] rounded border border-sky-400/60 bg-sky-400/10"
+          style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
+        />
+      )}
+
       <div
         ref={listRef}
         data-outline-list
+        onPointerDown={(e) => {
+          // 行の中身（文字・つまみ・ボタン）の上は、それぞれの操作にまかせる
+          if (e.target.closest("[data-row-text], button, textarea, [data-tag-hint]")) return;
+          clearPick();
+          startBand(e);
+        }}
         style={{
           fontSize: `${view.fontSize}px`,
           textAlign: view.align,
@@ -1098,6 +1163,7 @@ alter table outline_nodes disable row level security;
               ) : (
                 <div
                   data-row-text
+                  onPointerDown={(e) => { if (!e.shiftKey && !e.metaKey && !e.ctrlKey) startBand(e, node.id); }}
                   onClick={(e) => {
                     // Shift / ⌘ クリックはまとめて選ぶ（Quietliner と同じ）
                     if (e.shiftKey) { e.preventDefault(); pickTo(node.id); return; }
