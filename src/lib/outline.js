@@ -31,6 +31,8 @@ export function ensureNode(input) {
     favorite: Boolean(input?.favorite),
     collapsed: Boolean(input?.collapsed),
     completed: Boolean(input?.completed),
+    // いつのことか。日付ビューで並べ替えるのに使う。
+    date: input?.date || null,
     // 見た目も持ち物。ここで落とすと、読み直しで色と見出しが消える。
     headingLevel: input?.headingLevel ? Number(input.headingLevel) : null,
     textColor: input?.textColor || null,
@@ -544,6 +546,7 @@ export function flattenTree(nodes, parentId = null, out = []) {
       collapsed: !!node.collapsed,
       completed: !!node.completed,
       favorite: !!node.favorite,
+      date: node.date ?? null,
       headingLevel: node.headingLevel ?? null,
       textColor: node.textColor ?? null,
       bgColor: node.bgColor ?? null,
@@ -561,6 +564,7 @@ export function buildTree(rows) {
   for (const r of rows) {
     byId.set(r.id, {
       ...ensureNode({ ...r, children: [] }),
+      date: r.date ?? null,
       headingLevel: r.headingLevel ?? null,
       textColor: r.textColor ?? null,
       bgColor: r.bgColor ?? null,
@@ -752,4 +756,107 @@ export function splitTags(text) {
   }
   if (last < s.length) out.push({ text: s.slice(last), tag: false });
   return out.length ? out : [{ text: s, tag: false }];
+}
+
+// --- 日付のプロパティ ---
+
+// 文字から日付らしきものを読む。年だけ・年月だけのこともある。
+//   2026/01/02 ・ 2026-01-02 ・ 20260102 ・ 2026/01 ・ 2026
+// 返すのは { y, m, d }（分からないところは null）。
+export function dateHintOf(text) {
+  const s = String(text || "").trim();
+  if (!s) return null;
+
+  // 区切りのある形（先頭にあるものだけを見る。文中の数字は拾わない）
+  let m = s.match(/^(20\d{2})[/-](\d{1,2})[/-](\d{1,2})/);
+  if (m) return { y: +m[1], m: +m[2], d: +m[3] };
+  m = s.match(/^(20\d{2})[/-](\d{1,2})(?![/-]?\d)/);
+  if (m) return { y: +m[1], m: +m[2], d: null };
+  // くっついた8桁（20260107NOL… のような書き方）
+  m = s.match(/^(20\d{2})(\d{2})(\d{2})/);
+  if (m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) {
+    return { y: +m[1], m: +m[2], d: +m[3] };
+  }
+  m = s.match(/^(20\d{2})(?!\d)/);
+  if (m) return { y: +m[1], m: null, d: null };
+  return null;
+}
+
+const pad = (n) => String(n).padStart(2, "0");
+
+export function dateKeyOf(hint) {
+  if (!hint?.y || !hint.m || !hint.d) return null;
+  return `${hint.y}-${pad(hint.m)}-${pad(hint.d)}`;
+}
+
+// 木をたどって、日付が分かる行に date を入れる。
+// 見出しが「2026 > 2026/01 > 2026/01/02」のように並ぶ書き方が多いので、
+// 上から受け継いだ年・月と、その行自身の書き方を合わせて決める。
+export function fillDates(nodes, inherited = { y: null, m: null, d: null }) {
+  return nodes.map((node) => {
+    const own = dateHintOf(node.text);
+    const here = {
+      y: own?.y ?? inherited.y,
+      m: own?.m ?? (own?.y ? null : inherited.m),
+      d: own?.d ?? (own ? null : inherited.d),
+    };
+    const key = dateKeyOf(here);
+    return {
+      ...node,
+      // 既に入っているものは触らない（手で直したぶんを消さない）
+      date: node.date || key || null,
+      children: fillDates(node.children || [], here),
+    };
+  });
+}
+
+// 日付ビュー。年＞年/月＞年/月/日 に並べ替えて見せる。
+// 元の木は触らない。見出しは、その場で作る仮の行（id は date: で始まる）。
+//   newestYearFirst … 年は新しい順（月日は古い順）。書いたものを見返す向き。
+export function groupByDate(nodes, { newestYearFirst = true } = {}) {
+  const rows = [];
+  const walk = (list) => {
+    for (const node of list) {
+      // 日付の見出しそのもの（2026 / 2026/01 / 2026/01/02）は、並べ替えると
+      // 二重になるので置いていき、その中身だけを拾う。
+      const own = dateHintOf(node.text);
+      const isHeading = !!own && String(node.text || "").trim().length <= 10;
+      if (isHeading) { walk(node.children || []); continue; }
+      // 見出しでない行は、中身ごとそのまま持っていく（下へは降りない）
+      rows.push(node);
+    }
+  };
+  walk(nodes);
+
+  const years = new Map();
+  const undated = [];
+  for (const node of rows) {
+    if (!node.date) { undated.push(node); continue; }
+    const [y, m, d] = node.date.split("-");
+    if (!years.has(y)) years.set(y, new Map());
+    const months = years.get(y);
+    if (!months.has(m)) months.set(m, new Map());
+    const days = months.get(m);
+    if (!days.has(d)) days.set(d, []);
+    days.get(d).push(node);
+  }
+
+  const sortKeys = (map, desc = false) =>
+    [...map.keys()].sort((a, b) => (desc ? b.localeCompare(a) : a.localeCompare(b)));
+
+  const out = sortKeys(years, newestYearFirst).map((y) => ({
+    id: `date:${y}`, text: y, virtual: true, collapsed: true, children:
+      sortKeys(years.get(y)).map((m) => ({
+        id: `date:${y}-${m}`, text: `${y}/${m}`, virtual: true, collapsed: true, children:
+          sortKeys(years.get(y).get(m)).map((d) => ({
+            id: `date:${y}-${m}-${d}`, text: `${y}/${m}/${d}`, virtual: true, defaultOpen: true, collapsed: false,
+            children: years.get(y).get(m).get(d),
+          })),
+      })),
+  }));
+
+  if (undated.length) {
+    out.push({ id: "date:none", text: "日付なし", virtual: true, collapsed: true, children: undated });
+  }
+  return out;
 }

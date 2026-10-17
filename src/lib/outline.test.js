@@ -782,3 +782,129 @@ describe('取り込んだものは畳んでおく', () => {
     expect(texts(got.nodes)).toEqual(['2025', '  TRAY', '    メモ'])
   })
 })
+
+import { dateHintOf, dateKeyOf, fillDates } from './outline.js'
+
+describe('日付を読む', () => {
+  it('よくある書き方を読める', () => {
+    expect(dateHintOf('2026/01/02')).toEqual({ y: 2026, m: 1, d: 2 })
+    expect(dateHintOf('2026-01-02 のこと')).toEqual({ y: 2026, m: 1, d: 2 })
+    expect(dateHintOf('20260107NOL感動学イベントトーク')).toEqual({ y: 2026, m: 1, d: 7 })
+    expect(dateHintOf('2026/01')).toEqual({ y: 2026, m: 1, d: null })
+    expect(dateHintOf('2026')).toEqual({ y: 2026, m: null, d: null })
+  })
+
+  it('日付でないものは読まない', () => {
+    expect(dateHintOf('ふつうの行')).toBe(null)
+    expect(dateHintOf('')).toBe(null)
+    // 文の途中の数字は拾わない（誤爆を避ける）
+    expect(dateHintOf('めも 2026/01/02 について')).toBe(null)
+    // ありえない月日は、8桁として読まない
+    expect(dateHintOf('20269999')).toBe(null)   // 月日としてありえないので読まない
+  })
+
+  it('そろっていなければ日付にしない', () => {
+    expect(dateKeyOf({ y: 2026, m: 1, d: 2 })).toBe('2026-01-02')
+    expect(dateKeyOf({ y: 2026, m: 1, d: null })).toBe(null)
+    expect(dateKeyOf(null)).toBe(null)
+  })
+})
+
+describe('木から日付を入れる', () => {
+  it('年＞年月＞年月日 の並びから決まる', () => {
+    const tree = [{ text: '2026', children: [
+      { text: '2026/01', children: [
+        { text: '2026/01/02', children: [{ text: '正月である' }] },
+      ] },
+    ] }]
+    const got = flattenTree(fillDates(tree))
+    const by = (t) => got.find((r) => r.text === t)
+    expect(by('2026/01/02').date).toBe('2026-01-02')
+    expect(by('正月である').date).toBe('2026-01-02')   // 子は受け継ぐ
+    expect(by('2026/01').date).toBe(null)              // 日が無いので入れない
+    expect(by('2026').date).toBe(null)
+  })
+
+  it('日付の無い枝には入れない', () => {
+    const got = fillDates([{ text: 'TRAY', children: [{ text: 'メモ' }] }])
+    expect(flattenTree(got).every((r) => !r.date)).toBe(true)
+  })
+
+  it('途中の行が日を持っていれば、そちらが勝つ', () => {
+    const tree = [{ text: '2026/01', children: [
+      { text: '2026/01/05', children: [{ text: '中身' }] },
+      { text: '2026/01/09', children: [{ text: 'べつの中身' }] },
+    ] }]
+    const got = flattenTree(fillDates(tree))
+    expect(got.find((r) => r.text === '中身').date).toBe('2026-01-05')
+    expect(got.find((r) => r.text === 'べつの中身').date).toBe('2026-01-09')
+  })
+
+  it('手で入れた日付は、上書きしない', () => {
+    const tree = [{ text: '2026/01/02', date: '2020-05-05', children: [] }]
+    expect(fillDates(tree)[0].date).toBe('2020-05-05')
+  })
+})
+
+import { groupByDate } from './outline.js'
+
+describe('日付ビュー', () => {
+  const tree = () => fillDates([
+    { text: '2026', children: [
+      { text: '2026/01', children: [
+        { text: '2026/01/02', children: [{ text: '正月のこと' }] },
+        { text: '2026/01/07', children: [{ text: 'トークイベント' }] },
+      ] },
+      { text: '2026/03', children: [{ text: '2026/03/01', children: [{ text: '三月' }] }] },
+    ] },
+    { text: '2025', children: [{ text: '2025/12', children: [{ text: '2025/12/24', children: [{ text: 'クリスマス' }] }] }] },
+    { text: 'TRAY', children: [{ text: '日付のないメモ' }] },
+  ])
+
+  const shapeOf = (ns, d = 0, out = []) => {
+    for (const n of ns) { out.push('  '.repeat(d) + n.text); shapeOf(n.children || [], d + 1, out); }
+    return out
+  }
+
+  it('年＞年/月＞年/月/日 に並べ替わる', () => {
+    expect(shapeOf(groupByDate(tree()))).toEqual([
+      '2026', '  2026/01', '    2026/01/02', '      正月のこと',
+      '    2026/01/07', '      トークイベント',
+      '  2026/03', '    2026/03/01', '      三月',
+      '2025', '  2025/12', '    2025/12/24', '      クリスマス',
+      '日付なし', '  TRAY', '    日付のないメモ',
+    ])
+  })
+
+  it('年は新しい順、月日は古い順', () => {
+    const got = groupByDate(tree())
+    expect(got.map((n) => n.text)).toEqual(['2026', '2025', '日付なし'])
+    expect(got[0].children.map((n) => n.text)).toEqual(['2026/01', '2026/03'])
+  })
+
+  it('古い順にもできる', () => {
+    const got = groupByDate(tree(), { newestYearFirst: false })
+    expect(got.map((n) => n.text)).toEqual(['2025', '2026', '日付なし'])
+  })
+
+  it('日付の見出しそのものは、二重に出さない', () => {
+    // 元の木にある「2026」「2026/01」は、組み直した見出しに置き換わる
+    const flat = shapeOf(groupByDate(tree()))
+    expect(flat.filter((t) => t.trim() === '2026')).toHaveLength(1)
+    expect(flat.filter((t) => t.trim() === '2026/01')).toHaveLength(1)
+  })
+
+  it('見出しは仮の行として印がつく（元の木は触らない）', () => {
+    const base = tree()
+    const got = groupByDate(base)
+    expect(got[0].virtual).toBe(true)
+    expect(got[0].id).toBe('date:2026')
+    expect(base.length).toBe(3)   // 元はそのまま
+  })
+
+  it('日付が無いものは、まとめて最後に置く', () => {
+    const got = groupByDate(tree())
+    expect(got.at(-1).text).toBe('日付なし')
+    expect(got.at(-1).children.map((n) => n.text)).toEqual(['TRAY'])
+  })
+})

@@ -1408,3 +1408,101 @@ test.describe("取り込んだ中身は畳んで入る", () => {
     await expect.poll(() => shape(page)).toEqual(["2025", "  さきにあった", "  あとから"]);
   });
 });
+
+test.describe("日付ビュー", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "y26", text: "2026", children: [
+        { id: "m1", text: "2026/01", children: [
+          { id: "d2", text: "2026/01/02", children: [{ id: "e1", text: "正月のこと" }] },
+          { id: "d7", text: "2026/01/07", children: [{ id: "e2", text: "トークイベント" }] },
+        ] },
+      ] },
+      { id: "y25", text: "2025", children: [
+        { id: "m12", text: "2025/12", children: [{ id: "d24", text: "2025/12/24", children: [{ id: "e3", text: "クリスマス" }] }] },
+      ] },
+      { id: "tray", text: "TRAY", children: [{ id: "t1", text: "日付のないメモ" }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+  const toggle = (page) => page.locator("[data-date-view]");
+
+  test("押すと、年ごとに畳まれた形で並ぶ", async ({ page }) => {
+    await toggle(page).click();
+    expect(await shape(page)).toEqual(["2026", "2025", "日付なし"]);
+  });
+
+  test("年を開くと 月、月を開くと 日 が出る", async ({ page }) => {
+    await toggle(page).click();
+    await page.locator('[data-fold="date:2026"]').click();
+    expect(await shape(page)).toEqual(["2026", "  2026/01", "2025", "日付なし"]);
+
+    await page.locator('[data-fold="date:2026-01"]').click();
+    expect(await shape(page)).toEqual([
+      "2026", "  2026/01", "    2026/01/02", "      正月のこと",
+      "    2026/01/07", "      トークイベント", "2025", "日付なし",
+    ]);
+  });
+
+  test("年は新しい順、日付なしは最後", async ({ page }) => {
+    await toggle(page).click();
+    const rows = await shape(page);
+    expect(rows.indexOf("2026")).toBeLessThan(rows.indexOf("2025"));
+    expect(rows.at(-1)).toBe("日付なし");
+  });
+
+  test("元の並びは変わらない（戻せば元どおり）", async ({ page }) => {
+    const before = await shape(page);
+    await toggle(page).click();
+    await toggle(page).click();
+    expect(await shape(page)).toEqual(before);
+    // 置いてある中身も、そのまま
+    const stored = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+    expect(stored).toEqual(["2026", "2025", "TRAY"]);
+  });
+
+  test("日付ビューの中でも、文字は直せる", async ({ page }) => {
+    await toggle(page).click();
+    await page.locator('[data-fold="date:2026"]').click();
+    await page.locator('[data-fold="date:2026-01"]').click();
+
+    await page.locator('[data-row="e1"] [data-row-text]').click();
+    await page.keyboard.press("End");
+    await page.keyboard.type("！");
+    await page.keyboard.press("Escape");
+
+    const stored = await page.evaluate(() => {
+      const walk = (ns) => ns.flatMap((n) => [n.text, ...walk(n.children || [])]);
+      return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+    });
+    expect(stored).toContain("正月のこと！");
+  });
+
+  test("日付の見出しは、動かしたり消したりできない", async ({ page }) => {
+    await toggle(page).click();
+    const head = page.locator('[data-row="date:2026"]');
+    await head.hover();
+    await expect(head.locator("[data-row-menu]")).toHaveCount(0);
+  });
+});
+
+test.describe("入れ子の縦線", () => {
+  test("深さのぶんだけ縦線が引かれる", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "おや", children: [{ id: "b", text: "こ", children: [{ id: "c", text: "まご" }] }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+
+    const widthOf = (id) => page.locator(`[data-row="${id}"]`)
+      .evaluate((e) => getComputedStyle(e).backgroundSize);
+    // 根は線なし、深くなるほど線の帯が広がる
+    expect(await widthOf("a")).toBe("auto");
+    expect(await widthOf("b")).toBe("20px 100%");
+    expect(await widthOf("c")).toBe("40px 100%");
+  });
+});

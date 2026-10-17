@@ -9,6 +9,7 @@ import {
   flattenTree, buildTree, mergeOutline,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
+  groupByDate, fillDates,
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
@@ -340,6 +341,9 @@ export default function Outliner() {
   const [picked, setPicked] = useState([]);     // まとめて選んだ行
   const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
   const [band, setBand] = useState(null);       // なぞって選ぶときの枠
+  const [dateView, setDateView] = useState(false);     // 日付の順に並べて見る
+  // 日付ビューで、既定と違う開き方にした見出し（年月は畳む、日は開くが既定）
+  const [flippedDates, setFlippedDates] = useState(new Set());
   const anchorRef = useRef(null);                // Shift+クリックの起点
   const [note, setNote] = useState("");       // 持ち込みの結果を知らせる
   const searchRef = useRef(null);
@@ -418,8 +422,30 @@ export default function Outliner() {
   const zoomNode = zoomPath?.at(-1) || null;
   const shown = zoomNode ? zoomNode.children : nodes;
   // 探しているあいだは、当たった行とその親だけを出す
+  // 日付の見出しの開き／閉じ
+  const flipDate = (id) => setFlippedDates((prev) => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
   const searching = query.trim().length > 0;
-  const listed = useMemo(() => (searching ? filterByQuery(shown, query) : shown), [shown, query, searching]);
+  const filtered = useMemo(() => (searching ? filterByQuery(shown, query) : shown), [shown, query, searching]);
+  // 日付ビューでは、年＞年/月＞年/月/日 に組み直して見せる（元の木は触らない）
+  const listed = useMemo(() => {
+    if (!dateView) return filtered;
+    const open = (node) => ({
+      ...node,
+      collapsed: node.virtual
+        ? (node.defaultOpen ? flippedDates.has(node.id) : !flippedDates.has(node.id))
+        : node.collapsed,
+      children: (node.children || []).map(open),
+    });
+    // 行に日付が入っていなくても、見出しの並びから割り出して並べる
+    return groupByDate(fillDates(filtered)).map(open);
+  }, [dateView, filtered, flippedDates]);
+  // 日付ビューと検索中は、形を変える操作をしない（見えている並びが元と違うため）
+  const frozen = searching || dateView;
   const rows = useMemo(() => visibleRows(listed), [listed]);
 
   const edit = useCallback((id, caret = -1) => {
@@ -491,17 +517,19 @@ export default function Outliner() {
 
       if (/\.zip$/i.test(name)) {
         const got = await parseZip(await file.arrayBuffer());
-        // 取り込んだぶんは畳んで入れる（何千行も開いた状態だと見失う）
-        result = { ...mergeByText(nodes, got.items, { collapseNew: true }), how: `zip の中の ${got.files} ファイル` };
+        // 取り込んだぶんは畳んで入れる（何千行も開いた状態だと見失う）。
+        // あわせて、見出しから日付を拾って行に持たせる（日付ビュー用）。
+        result = { ...mergeByText(nodes, fillDates(got.items), { collapseNew: true }), how: `zip の中の ${got.files} ファイル` };
       } else {
         const text = await file.text();
         const looksJson = /\.json$/i.test(name) || /^\s*[[{]/.test(text);
         if (looksJson) {
-          result = { ...importOutline(nodes, JSON.parse(text)), how: "Quietliner の書き出し" };
+          const got = importOutline(nodes, JSON.parse(text));
+          result = { ...got, nodes: fillDates(got.nodes), how: "Quietliner の書き出し" };
         } else {
           const got = parseByFormat(name, text);
           result = {
-            ...mergeByText(nodes, got.items, { collapseNew: true }),
+            ...mergeByText(nodes, fillDates(got.items), { collapseNew: true }),
             how: got.format === "workflowy-html" ? "WorkFlowy の HTML" : "箇条書きの書き出し",
           };
         }
@@ -523,7 +551,7 @@ export default function Outliner() {
   // ● を掴んで木ごと動かす。落ちる場所は、すぐ上の行と横の動きで決める。
   function startDrag(e, node) {
     if (e.button !== undefined && e.button !== 0) return;
-    if (searching) return; // 探している最中は並べ替えない（見えている形が違うため）
+    if (frozen) return; // 見えている並びが元の木と違うときは、並べ替えない
     e.preventDefault();
     const list = listRef.current;
     if (!list) return;
@@ -796,7 +824,7 @@ export default function Outliner() {
     }
     // 探しているあいだは、見えていない行が隣にいる。くっつけると
     // 画面に無いものに文字が混ざるので、つなぎ合わせはやらない。
-    if (searching && (e.key === "Backspace" || e.key === "Delete")) {
+    if (frozen && (e.key === "Backspace" || e.key === "Delete")) {
       if (e.key === "Backspace" && collapsed && selStart === 0 && value.length === 0) {
         e.preventDefault();
         const got = deleteNodeSafe(shown, node.id);
@@ -904,6 +932,18 @@ export default function Outliner() {
             </button>
           )}
         </div>
+        <button
+          data-date-view
+          onClick={() => setDateView((v) => !v)}
+          title="日付の順に並べて見る（元の並びは変わりません）"
+          className={classNames(
+            "shrink-0 rounded-md border px-2 py-1 text-[11px] transition",
+            dateView ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-500 hover:bg-white/[0.07] hover:text-neutral-200",
+          )}
+        >
+          日付
+        </button>
+
         <div className="relative shrink-0">
           <button
             data-outline-view
@@ -1197,16 +1237,29 @@ alter table outline_nodes disable row level security;
               data-dragging={drag?.id === node.id ? "true" : undefined}
               data-picked={pickedSet.has(node.id) ? "true" : undefined}
               data-heading={node.headingLevel || ""}
-              style={{ marginLeft: depth * INDENT, background: node.bgColor || undefined }}
+              style={{
+                paddingLeft: depth * INDENT + 4,
+                background: node.bgColor || undefined,
+                // 親のところに縦線を引く（WorkFlowy と同じ見え方）
+                ...(depth > 0 ? {
+                  backgroundImage: `repeating-linear-gradient(to right, var(--ts-guide) 0 1px, transparent 1px ${INDENT}px)`,
+                  backgroundPosition: "11px 0",
+                  backgroundSize: `${depth * INDENT}px 100%`,
+                  backgroundRepeat: "no-repeat",
+                } : {}),
+              }}
               className={classNames(
-                "group/row relative flex items-start gap-1 rounded px-1 py-[3px] hover:bg-white/[0.03]",
+                "group/row relative flex items-start gap-1 rounded py-[3px] pr-1 hover:bg-white/[0.03]",
                 drag?.id === node.id && "opacity-40",
                 pickedSet.has(node.id) && "bg-sky-400/15 ring-1 ring-sky-400/30",
               )}
             >
               <button
                 data-fold={node.id}
-                onClick={() => setNodes((prev) => toggleCollapse(prev, node.id))}
+                onClick={() => {
+                  if (node.virtual) { flipDate(node.id); return; }
+                  setNodes((prev) => toggleCollapse(prev, node.id));
+                }}
                 title={hasKids ? (node.collapsed ? "展開" : "折りたたむ") : ""}
                 disabled={!hasKids}
                 className={classNames(
@@ -1222,9 +1275,9 @@ alter table outline_nodes disable row level security;
 
               <button
                 data-zoom={node.id}
-                onPointerDown={(e) => startDrag(e, node)}
+                onPointerDown={(e) => { if (!node.virtual) startDrag(e, node); }}
                 onClick={() => {
-                  if (skipZoomRef.current) return;
+                  if (skipZoomRef.current || node.virtual) return;
                   setZoomId(node.id);
                   setEditingId(null);
                 }}
@@ -1238,7 +1291,7 @@ alter table outline_nodes disable row level security;
                 <span className="sr-only">ズーム</span>
               </button>
 
-              {editingId === node.id ? (
+              {editingId === node.id && !node.virtual ? (
                 <textarea
                   autoFocus
                   data-outline-input
@@ -1265,6 +1318,8 @@ alter table outline_nodes disable row level security;
                   data-row-text
                   onPointerDown={(e) => { if (!e.shiftKey && !e.metaKey && !e.ctrlKey) startBand(e, node.id); }}
                   onClick={(e) => {
+                    // 日付の見出しは、押したら開く／閉じる
+                    if (node.virtual) { flipDate(node.id); return; }
                     // Shift / ⌘ クリックはまとめて選ぶ（Quietliner と同じ）
                     if (e.shiftKey) { e.preventDefault(); pickTo(node.id); return; }
                     if (e.metaKey || e.ctrlKey) { e.preventDefault(); togglePick(node.id); return; }
@@ -1312,14 +1367,14 @@ alter table outline_nodes disable row level security;
                 >
                   {chars > 0 ? chars : ""}
                 </span>
-                <button
+                {!node.virtual && <button
                   data-row-menu={node.id}
                   onClick={() => setMenuId((v) => (v === node.id ? null : node.id))}
                   title="この行の設定"
                   className="rounded p-0.5 text-neutral-600 opacity-0 transition hover:bg-white/10 hover:text-neutral-200 group-hover/row:opacity-100"
                 >
                   <MoreHorizontal className="h-3.5 w-3.5" />
-                </button>
+                </button>}
               </div>
 
               {menuId === node.id && (
