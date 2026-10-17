@@ -257,3 +257,13 @@ test.describe("枠ごとに転がす", () => {
     expect(h).toBeLessThanOrEqual(700 + 1);
   });
 });
+
+test("転がす棒は細く、配色に馴染む", async ({ page }) => {
+  const pane = page.locator("[data-pane-id]").first();
+  expect(await pane.evaluate((e) => getComputedStyle(e).scrollbarWidth)).toBe("thin");
+  // 色は文字の色から作る（薄く、溝は透かす）
+  const color = await pane.evaluate((e) => getComputedStyle(e).scrollbarColor);
+  expect(color).not.toBe("auto");
+  expect(color).toMatch(/0\.16/);              // 棒は薄い
+  expect(color).toMatch(/rgba\(0, 0, 0, 0\)|transparent/); // 溝は透ける
+});

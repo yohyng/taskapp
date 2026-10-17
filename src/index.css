@@ -13,6 +13,35 @@
   display: none;
 }
 
+/* 転がすための棒は、できるだけ目立たせない。
+   機械まかせだと白い太い棒が出て、枠と枠のあいだで目を引いてしまう。
+   色は文字の色から作るので、明るい配色でもそのまま馴染む。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ts-text) 16%, transparent) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--ts-text) 16%, transparent);
+  border-radius: 999px;
+  /* まわりに少し余白を置いて、細く見せる */
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--ts-text) 32%, transparent);
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
 /* --- アプリ配色（設定パネルから変更） ---
    --ts-bg / --ts-text を起点にする。Tailwind v4 は色を CSS 変数経由で
    出力する（例: bg-white/10 → color-mix(..., var(--color-white) 10%, ...)）ので、
