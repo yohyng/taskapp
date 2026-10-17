@@ -386,7 +386,14 @@ function countNodes(list) {
 // id を持たない書き出し（.md や Notion）は、同じ文字の行を手がかりに重ねる。
 // 同じ親の下に同じ文字の行があれば、それを使い回して中だけ足す。
 // こうしないと、同じ書き出しを2回読むたびに丸ごと増える。
-export function mergeByText(current, incoming) {
+// 中に行を持つところを、ぜんぶ畳む。
+// 取り込んだ直後に何千行も開いていると、どこに入ったか分からなくなる。
+export function collapseDeep(node) {
+  const children = (node.children || []).map(collapseDeep);
+  return { ...node, children, collapsed: children.length ? true : !!node.collapsed };
+}
+
+export function mergeByText(current, incoming, { collapseNew = false } = {}) {
   let added = 0;
   let matched = 0;
 
@@ -415,7 +422,7 @@ export function mergeByText(current, incoming) {
         if (raw.completed !== undefined) same.completed = !!raw.completed;
       } else {
         added += 1 + countAll(raw.children);
-        out.push(node);
+        out.push(collapseNew ? collapseDeep(node) : node);
       }
     }
     return out;

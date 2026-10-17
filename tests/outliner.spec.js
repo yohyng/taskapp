@@ -938,6 +938,11 @@ test.describe("ほかのアプリから取り込む", () => {
   });
   const put = (page, name, body, mimeType = "text/plain") =>
     page.locator("[data-outline-file]").setInputFiles({ name, mimeType, buffer: Buffer.from(body) });
+  // 取り込んだぶんは畳んで入るので、置いてある中身のほうを見る
+  const tree = (page) => page.evaluate(() => {
+    const walk = (ns, d = 0) => ns.flatMap((n) => ["  ".repeat(d) + n.text, ...walk(n.children || [], d + 1)]);
+    return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+  });
 
   test("WorkFlowy の .md（字下げの箇条書き）を読める", async ({ page }) => {
     await put(page, "WF.md", [
@@ -950,9 +955,11 @@ test.describe("ほかのアプリから取り込む", () => {
       "    - [x] おわったこと",
     ].join("\n"), "text/markdown");
 
-    await expect.poll(() => shape(page)).toEqual([
+    await expect.poll(() => tree(page)).toEqual([
       "もとからある", "2025", "  TRAY", "    メモひとつ", "  TASK LIST", "    やること", "    おわったこと",
     ]);
+    // 画面には、畳まれた根だけが出る
+    expect(await shape(page)).toEqual(["もとからある", "2025"]);
     // 題（Home）は入れ物にしない。チェック済みは完了として入る。
     const done = await page.evaluate(() => {
       const find = (ns) => ns.flatMap((n) => [n, ...find(n.children || [])]);
@@ -964,11 +971,11 @@ test.describe("ほかのアプリから取り込む", () => {
   test("同じ .md を2回読んでも増えない", async ({ page }) => {
     const md = ["Home", "", "- 2025", "  - メモ", "  - メモ"].join("\n");
     await put(page, "WF.md", md, "text/markdown");
-    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
+    await expect.poll(() => tree(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
 
     await put(page, "WF.md", md, "text/markdown");
     await expect(page.locator("[data-outline-note]")).toContainText("既にあった");
-    expect(await shape(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
+    expect(await tree(page)).toEqual(["もとからある", "2025", "  メモ", "  メモ"]);
   });
 
   test("WorkFlowy の .html を読める", async ({ page }) => {
@@ -980,7 +987,7 @@ test.describe("ほかのアプリから取り込む", () => {
         </li>
       </ul>`, "text/html");
 
-    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025", "  TRAY"]);
+    await expect.poll(() => tree(page)).toEqual(["もとからある", "2025", "  TRAY"]);
   });
 
   test("Notion の .md は、見出しの下に入れ子になる", async ({ page }) => {
@@ -993,7 +1000,7 @@ test.describe("ほかのアプリから取り込む", () => {
       "- べつの話",
     ].join("\n"), "text/markdown");
 
-    await expect.poll(() => shape(page)).toEqual([
+    await expect.poll(() => tree(page)).toEqual([
       "もとからある", "Note", "  NOMLAB NOTE", "    打ち合わせ", "      決まったこと", "  Work", "    べつの話",
     ]);
   });
@@ -1035,7 +1042,7 @@ test.describe("ほかのアプリから取り込む", () => {
     await page.locator("[data-outline-file]").setInputFiles({
       name: "notion.zip", mimeType: "application/zip", buffer: Buffer.from(zip),
     });
-    await expect.poll(() => shape(page)).toEqual(["もとからある", "Note", "  章", "    中身"]);
+    await expect.poll(() => tree(page)).toEqual(["もとからある", "Note", "  章", "    中身"]);
     await expect(page.locator("[data-outline-note]")).toContainText("zip の中の 1 ファイル");
   });
 
@@ -1343,5 +1350,61 @@ test.describe("ぜんぶ消す", () => {
     expect(await fresh.evaluate(() =>
       JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text))).toEqual([""]);
     await fresh.close();
+  });
+});
+
+test.describe("取り込んだ中身は畳んで入る", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "keep", text: "もとからある" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test(".md は、畳んだ状態で入る", async ({ page }) => {
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "WF.md", mimeType: "text/markdown",
+      buffer: Buffer.from(["Home", "", "- 2025", "  - TRAY", "    - メモ", "- 2024"].join("\n")),
+    });
+
+    // 見えているのは根だけ
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025", "2024"]);
+    // 中身はちゃんと入っている
+    const all = await page.evaluate(() => {
+      const walk = (ns) => ns.flatMap((n) => [n.text, ...walk(n.children || [])]);
+      return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+    });
+    expect(all).toEqual(["もとからある", "2025", "TRAY", "メモ", "2024"]);
+  });
+
+  test("開けば中が出てくる", async ({ page }) => {
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "WF.md", mimeType: "text/markdown",
+      buffer: Buffer.from(["Home", "", "- 2025", "  - TRAY"].join("\n")),
+    });
+    await expect.poll(() => shape(page)).toEqual(["もとからある", "2025"]);
+
+    const id = await page.locator("[data-row]").last().getAttribute("data-row");
+    await page.locator(`[data-fold="${id}"]`).click();
+    expect(await shape(page)).toEqual(["もとからある", "2025", "  TRAY"]);
+  });
+
+  test("もとからある行の開き具合は、変わらない", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "2025", children: [{ id: "a1", text: "さきにあった" }] },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    expect(await shape(page)).toEqual(["2025", "  さきにあった"]);
+
+    await page.locator("[data-outline-file]").setInputFiles({
+      name: "WF.md", mimeType: "text/markdown",
+      buffer: Buffer.from(["Home", "", "- 2025", "  - あとから"].join("\n")),
+    });
+    // 開いたまま、中に足される
+    await expect.poll(() => shape(page)).toEqual(["2025", "  さきにあった", "  あとから"]);
   });
 });

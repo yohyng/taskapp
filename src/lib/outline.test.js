@@ -758,3 +758,27 @@ describe('消した印の使いどころ（戻り止め）', () => {
     expect(texts(mergeOutline([a], [b], new Set())).sort()).toEqual(['てもと', 'むこう'])
   })
 })
+
+describe('取り込んだものは畳んでおく', () => {
+  const incoming = [{ text: '2025', children: [{ text: 'TRAY', children: [{ text: 'メモ' }] }] }]
+
+  it('中に行があるところは、畳んだ状態で入る', () => {
+    const got = mergeByText([], incoming, { collapseNew: true })
+    expect(texts(got.nodes)).toEqual(['2025'])              // 畳んであるので中は出ない
+    const all = flattenTree(got.nodes)
+    expect(all.map((r) => r.text)).toEqual(['2025', 'TRAY', 'メモ'])   // 中身は入っている
+    expect(all.find((r) => r.text === 'TRAY').collapsed).toBe(true)
+    expect(all.find((r) => r.text === 'メモ').collapsed).toBe(false)   // 子が無い行は畳まない
+  })
+
+  it('いまある行の開き具合は、変えない', () => {
+    const now = [n('2025', [n('TRAY')])]                     // 開いている
+    const got = mergeByText(now, incoming, { collapseNew: true })
+    expect(findNode(got.nodes, idOf(now, '2025')).collapsed).toBe(false)
+  })
+
+  it('畳まない指定なら、これまで通り開いたまま', () => {
+    const got = mergeByText([], incoming)
+    expect(texts(got.nodes)).toEqual(['2025', '  TRAY', '    メモ'])
+  })
+})

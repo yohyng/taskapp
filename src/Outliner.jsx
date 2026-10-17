@@ -491,7 +491,8 @@ export default function Outliner() {
 
       if (/\.zip$/i.test(name)) {
         const got = await parseZip(await file.arrayBuffer());
-        result = { ...mergeByText(nodes, got.items), how: `zip の中の ${got.files} ファイル` };
+        // 取り込んだぶんは畳んで入れる（何千行も開いた状態だと見失う）
+        result = { ...mergeByText(nodes, got.items, { collapseNew: true }), how: `zip の中の ${got.files} ファイル` };
       } else {
         const text = await file.text();
         const looksJson = /\.json$/i.test(name) || /^\s*[[{]/.test(text);
@@ -500,7 +501,7 @@ export default function Outliner() {
         } else {
           const got = parseByFormat(name, text);
           result = {
-            ...mergeByText(nodes, got.items),
+            ...mergeByText(nodes, got.items, { collapseNew: true }),
             how: got.format === "workflowy-html" ? "WorkFlowy の HTML" : "箇条書きの書き出し",
           };
         }
