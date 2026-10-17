@@ -500,14 +500,38 @@ function outlineNodeToRow(n) {
 // 読む。置き場が無ければ null を返し、手元のものだけで動かす。
 export async function loadOutlineRows() {
   if (!isSupabaseEnabled) return null
-  const { data, error } = await supabase.from(OUTLINE_TABLE).select('*').order('sort_order')
-  if (error) {
-    if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
-    console.error('[db] outline load error', error)
-    return null
+  // 一度に返る数には上限がある（既定で 1000 行）。
+  // そのまま使うと、1000 行より先が「無いもの」として扱われ、
+  // 消しても消えない・読み直すたびに別のぶんが戻る、という形で表に出る。
+  const PAGE = 1000
+  const out = []
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(OUTLINE_TABLE).select('*').order('id').range(from, from + PAGE - 1)
+    if (error) {
+      if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+      console.error('[db] outline load error', error)
+      return null
+    }
+    out.push(...(data || []))
+    if (!data || data.length < PAGE) break
+    if (from > 500000) break   // 念のための止め
   }
   outlineTableMissing = false
-  return (data || []).map(outlineRowToNode)
+  return out.map(outlineRowToNode)
+}
+
+// ぜんぶ消す。手元が知っている id に頼らず、表そのものを空にする。
+// （知っている ぶんだけ消すと、読めていなかった行が残って戻ってくる）
+export async function clearOutlineRows() {
+  if (!isSupabaseEnabled || outlineTableMissing) return null
+  const { error } = await supabase.from(OUTLINE_TABLE).delete().neq('id', '')
+  if (error) {
+    if (looksLikeMissingTable(error)) { outlineTableMissing = true; return null }
+    console.error('[db] outline clear error', error)
+    return error.message || String(error)
+  }
+  return null
 }
 
 // 変わった行だけ送り、消した行は向こうからも消す

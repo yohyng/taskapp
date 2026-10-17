@@ -10,7 +10,7 @@ import {
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
 } from "./lib/outline";
-import { loadOutlineRows, saveOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
+import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
@@ -220,11 +220,18 @@ export function OutlineProvider({ children }) {
     };
   }, [undo, redo]);
 
+  // ぜんぶ消したあとに、同期の覚えも白紙に戻す
+  const resetSync = useCallback(() => {
+    tombRef.current = new Set();
+    writeTomb(tombRef.current);
+    syncedRef.current = new Map();
+  }, []);
+
   const value = useMemo(() => ({
-    nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView,
+    nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync,
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -324,7 +331,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
   const [zoomId, setZoomId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -707,11 +714,17 @@ export default function Outliner() {
   // ふつうの書き換えと同じ道を通すので、⌘Z で戻せるし、
   // 向こう（Supabase）の行も、このあとの保存で消える。
   const [confirmClear, setConfirmClear] = useState(false);
-  function clearAll() {
+  async function clearAll() {
     setNodes(() => [makeNode("")]);
     setZoomId(null);
     clearPick();
     setConfirmClear(false);
+    setNote("消しています…");
+    // 手元が知っている id に頼らず、向こうの表そのものを空にする。
+    // 読めていなかった行が残っていると、次の読み込みで戻ってくるため。
+    const err = await clearOutlineRows();
+    if (err) { setNote(`向こうを空にできませんでした：${err}`); return; }
+    resetSync();
     setNote("ぜんぶ消しました（⌘Z で戻せます）");
   }
 
