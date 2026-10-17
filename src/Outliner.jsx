@@ -335,6 +335,16 @@ function Marked({ text, query }) {
 export default function Outliner() {
   const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
+  // 狭い画面では、設定を下から出すシートにする。
+  // ぶら下げたままだと枠の外に出てしまい、指が届かない。
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 640px)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const sync = () => setNarrow(mq.matches);
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
   const [drive, setDrive] = useState(readDriveSetting);
   const saveDrive = (patchIt) => {
     const next = { ...drive, ...patchIt };
@@ -1054,8 +1064,35 @@ export default function Outliner() {
           >
             <Settings2 className="h-3 w-3" />
           </button>
+          {viewOpen && narrow && (
+            <div
+              data-view-backdrop
+              onClick={() => setViewOpen(false)}
+              className="fixed inset-0 z-40"
+            />
+          )}
           {viewOpen && (
-            <div data-view-panel className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
+            <div
+              data-view-panel
+              className={classNames(
+                "z-50 overflow-y-auto overscroll-contain rounded-lg border border-white/15 ts-surface p-2 shadow-2xl",
+                narrow
+                  ? "fixed inset-x-2 bottom-2 max-h-[72vh] w-auto"
+                  : "absolute right-0 top-full mt-1 max-h-[80vh] w-52",
+              )}
+            >
+              {narrow && (
+                <div className="mb-1 flex items-center justify-between">
+                  <span className="text-[10px] text-neutral-500">見た目と置き場</span>
+                  <button
+                    data-view-close
+                    onClick={() => setViewOpen(false)}
+                    className="rounded border border-white/10 px-2 py-1 text-[11px] text-neutral-300"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              )}
               <div className="mb-1 text-[10px] text-neutral-500">字の大きさ</div>
               <div className="mb-2 flex items-center gap-1">
                 <button data-font-smaller onClick={() => setView({ fontSize: Math.max(11, view.fontSize - 1) })} className="flex-1 rounded border border-white/10 py-1 text-[11px] text-neutral-300 hover:bg-white/[0.07]">−</button>
@@ -1107,14 +1144,14 @@ export default function Outliner() {
                         setNote(`つながりました（フォルダ：${got.folder || "?"}）`);
                       } catch (e) { setNote(`つながりません：${e?.message || e}`); }
                     }}
-                    className="flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                    className="min-h-[34px] flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
                   >
                     つながるか試す
                   </button>
                   <button
                     data-drive-backup
                     onClick={() => runBackup(true)}
-                    className="flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                    className="min-h-[34px] flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
                   >
                     いま控える
                   </button>

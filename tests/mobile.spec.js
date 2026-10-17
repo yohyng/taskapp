@@ -213,3 +213,43 @@ test.describe("浮くものが画面に収まる", () => {
     expect(await fits(page, "[data-quick-find]")).toBe(true);
   });
 });
+
+test.describe("スマホでアウトラインの設定を触る", () => {
+  const panel = (page) => page.locator("[data-view-panel]");
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("header");
+    await page.locator("[data-pane-mode]").first().selectOption("outline");
+    await page.locator("[data-outline-view]").click();
+    await expect(panel(page)).toBeVisible();
+  });
+
+  test("設定は画面の中に収まる", async ({ page }) => {
+    const vp = page.viewportSize();
+    const box = await panel(page).boundingBox();
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(vp.height + 1);
+    expect(box.width).toBeLessThanOrEqual(vp.width);
+  });
+
+  test("置き場のボタンに指が届く", async ({ page }) => {
+    const vp = page.viewportSize();
+    for (const sel of ["[data-drive-url]", "[data-drive-token]", "[data-drive-test]", "[data-drive-backup]"]) {
+      const el = panel(page).locator(sel);
+      await el.scrollIntoViewIfNeeded();
+      const box = await el.boundingBox();
+      expect(box, sel).toBeTruthy();
+      expect(box.y + box.height, sel).toBeLessThanOrEqual(vp.height + 1);
+      if (sel.endsWith("test]") || sel.endsWith("backup]")) expect(box.height, sel).toBeGreaterThanOrEqual(32);
+    }
+    // 実際に押せる（覆いかぶさっているものが無い）
+    await panel(page).locator("[data-drive-test]").click();
+    await expect(page.locator("[data-outline-note]")).toContainText("つながりません");
+  });
+
+  test("外を押すと閉じる", async ({ page }) => {
+    await page.locator("[data-view-backdrop]").click({ position: { x: 5, y: 5 } });
+    await expect(panel(page)).toHaveCount(0);
+  });
+});
