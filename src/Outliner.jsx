@@ -13,6 +13,7 @@ import {
 } from "./lib/outline";
 import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
+import { bigGet, bigPut } from "./lib/localstore";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
@@ -40,6 +41,9 @@ const readKnown = () => {
 const writeKnown = (ids) => {
   try { localStorage.setItem(OUTLINE_KNOWN_KEY, JSON.stringify([...ids])); } catch { /* 入らなければ諦める */ }
 };
+
+// 手元に写した時刻（localStorage と IndexedDB の、どちらが新しいかを見る）
+const OUTLINE_SAVED_KEY = "taskspace-outline-saved-at";
 
 const OUTLINE_TOMB_KEY = "taskspace-outline-deleted";
 const readTomb = () => {
@@ -79,22 +83,48 @@ export function OutlineProvider({ children }) {
   const timerRef = useRef(null);
 
   // 手元には必ず残す。向こうが無くても使えるように。
-  // 入りきらないこともある（大きな書き出しを取り込んだとき）。
-  // 黙って落とすと、閉じた瞬間に消えるので知らせる。
+  // localStorage は 5MB ほどで頭打ちになるので、入らないときは
+  // IndexedDB のほうに置く（iPad で溢れるのはここ）。
   const tooBigRef = useRef(false);
+  const bigReadRef = useRef(false);   // IndexedDB を読み終えたか
   useEffect(() => {
+    const text = JSON.stringify(nodes);
+    const at = new Date().toISOString();
     let failed = false;
     try {
-      localStorage.setItem(OUTLINE_KEY, JSON.stringify(nodes));
+      localStorage.setItem(OUTLINE_KEY, text);
+      localStorage.setItem(OUTLINE_SAVED_KEY, at);
     } catch {
       failed = true;
+      // 入らなかったぶんは、こちらにだけ残す（中途半端な写しは消す）
+      try { localStorage.removeItem(OUTLINE_KEY); } catch { /* noop */ }
     }
+    // 大きいほうにも必ず置く。読み終える前に書くと、まだ読んでいない
+    // 中身を上書きしてしまうので、読み終えるまでは触らない。
+    if (bigReadRef.current) bigPut(OUTLINE_KEY, { at, nodes });
     // 知らせは、変わったときだけ出す（毎回 setState すると描き直しが続く）
     if (failed !== tooBigRef.current) {
       tooBigRef.current = failed;
       setSyncNote((cur) => (failed ? "too-big" : (cur === "too-big" ? "" : cur)));
     }
   }, [nodes]);
+
+  // 置ききれずに IndexedDB にあるぶんを、起きたときに読む。
+  // localStorage の写しより新しければ、そちらを使う。
+  useEffect(() => {
+    let alive = true;
+    bigGet(OUTLINE_KEY).then((got) => {
+      if (!alive) { return; }
+      bigReadRef.current = true;
+      if (!got?.nodes?.length) { bigPut(OUTLINE_KEY, { at: new Date().toISOString(), nodes: nodesRef.current }); return; }
+      let mineAt = "";
+      try { mineAt = localStorage.getItem(OUTLINE_SAVED_KEY) || ""; } catch { /* noop */ }
+      const minePresent = (() => { try { return !!localStorage.getItem(OUTLINE_KEY); } catch { return false; } })();
+      if (!minePresent || (got.at || "") > mineAt) applyRaw(() => got.nodes.map(ensureNode));
+    });
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 書き換えはここを通す。前の姿を履歴に積む。
   // 字を打っているあいだは1手にまとめる（1文字ずつ戻るのは使いにくい）。
@@ -840,6 +870,8 @@ export default function Outliner() {
         if (/^(taskspace-|notion-like-taskdb|ts-)/.test(key)) store[key] = localStorage.getItem(key);
       }
     } catch { /* 読めないものは諦める */ }
+    // アウトラインは大きいと localStorage に無いので、いまの木をそのまま入れる
+    store["taskspace-outline-v1"] = JSON.stringify(nodes);
     return { app: "taskspace", at: new Date().toISOString(), store };
   }
 
@@ -1365,13 +1397,14 @@ export default function Outliner() {
       </div>
 
       {syncNote === "too-big" && (
-        <div data-outline-toobig className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
-          <div className="mb-1 font-semibold">この端末に置ききれませんでした</div>
+        <div data-outline-toobig className="mb-2 flex items-start justify-between gap-2 rounded border border-white/10 bg-white/[0.03] p-2 text-[10px] leading-relaxed text-neutral-400">
           <div>
-            中身が大きすぎて、ブラウザの保管場所に入りません。閉じると戻ってしまいます。
-            いらない行を消すか、書き出して分けてください。
-            {!isOutlineTableMissing() && " Supabase には送っているので、そちらには残ります。"}
+            中身が大きいので、この端末では別の置き場（IndexedDB）に残しています。
+            閉じても消えません{!isOutlineTableMissing() && "。Supabase にも送っています"}。
           </div>
+          <button onClick={dismissSync} className="shrink-0 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]">
+            閉じる
+          </button>
         </div>
       )}
 

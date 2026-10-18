@@ -1766,3 +1766,55 @@ test.describe("書くことに集中（イマーシブ）", () => {
     await expect(page.locator("[data-immersive]")).toContainText("ON");
   });
 });
+
+test.describe("大きくて localStorage に入らないとき", () => {
+  // 置ききれない状況を作る（setItem を断る）
+  const refuseLocal = (page) => page.addInitScript(() => {
+    const real = Storage.prototype.setItem;
+    Storage.prototype.setItem = function setItem(key, value) {
+      if (key === "taskspace-outline-v1" && String(value).length > 200) {
+        throw new DOMException("QuotaExceededError", "QuotaExceededError");
+      }
+      return real.call(this, key, value);
+    };
+  });
+
+  test("IndexedDB に残り、開き直しても消えない", async ({ page }) => {
+    await refuseLocal(page);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await page.locator("[data-row] [data-row-text]").first().click();
+    await page.keyboard.type("あ".repeat(300));
+    await page.keyboard.press("Escape");
+    // localStorage には入っていない
+    expect(await page.evaluate(() => localStorage.getItem("taskspace-outline-v1"))).toBeNull();
+    // IndexedDB には入っている
+    await expect.poll(async () => page.evaluate(() => new Promise((done) => {
+      const req = indexedDB.open("taskspace", 1);
+      req.onsuccess = () => {
+        const get = req.result.transaction("big", "readonly").objectStore("big").get("taskspace-outline-v1");
+        get.onsuccess = () => done(JSON.stringify(get.result?.nodes || []).includes("ああ"));
+        get.onerror = () => done(false);
+      };
+      req.onerror = () => done(false);
+    })), { timeout: 10000 }).toBe(true);
+
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await expect(page.getByText("あああ", { exact: false }).first()).toBeVisible();
+  });
+
+  test("知らせは出るが、脅かさない", async ({ page }) => {
+    await refuseLocal(page);
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await page.locator("[data-row] [data-row-text]").first().click();
+    await page.keyboard.type("い".repeat(300));
+    const note = page.locator("[data-outline-toobig]");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("閉じても消えません");
+  });
+});
