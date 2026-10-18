@@ -916,3 +916,20 @@ export function imageUrlOf(text) {
   if (md) return raw;                     // ![](…) と書いてあるなら、拡張子が無くても絵として扱う
   return null;
 }
+
+// --- すぐ伝える（ほかの端末から届いた行を、木に入れる） ---
+
+// rows … 入れ替える行（flattenTree と同じ形）、goneIds … 消えた行
+// 木は作り直すが、届いていない行はそのまま残す。
+export function applyRemoteRows(nodes, rows = [], goneIds = []) {
+  const flat = flattenTree(nodes);
+  const byId = new Map(flat.map((r) => [r.id, r]));
+  for (const row of rows) {
+    const here = byId.get(row.id);
+    // 手元のほうが新しければ、そのままにする（打っている途中を消さない）
+    if (here && (here.updatedAt || "") > (row.updatedAt || "")) continue;
+    byId.set(row.id, row);
+  }
+  for (const id of goneIds) byId.delete(id);
+  return buildTree([...byId.values()]);
+}

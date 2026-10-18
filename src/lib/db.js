@@ -457,7 +457,36 @@ export function outlineTableSql() {
 create index if not exists outline_nodes_parent_idx on outline_nodes (parent_id, sort_order);
 -- すでに表を作ってあるときは、こちらだけで足りる
 alter table outline_nodes add column if not exists date text;
-alter table outline_nodes add column if not exists image_width integer;`
+alter table outline_nodes add column if not exists image_width integer;
+-- ほかの端末の変化を、すぐ受け取るため
+alter table outline_nodes replica identity full;
+alter publication supabase_realtime add table outline_nodes;`
+}
+
+// --- すぐ伝える（Supabase Realtime） ---
+
+// outline_nodes の変化を受け取る。返ってくるのは、やめるための関数。
+// 置き場が無い・Realtime が有効でない環境では、何もせず null を返す。
+export function subscribeOutline(onRows) {
+  if (!isSupabaseEnabled || outlineTableMissing) return null
+  const channel = supabase
+    .channel('outline-nodes')
+    .on('postgres_changes', { event: '*', schema: 'public', table: OUTLINE_TABLE }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        const id = payload.old?.id
+        if (id) onRows({ gone: [id] })
+        return
+      }
+      if (payload.new) onRows({ rows: [outlineRowToNode(payload.new)] })
+    })
+    .subscribe()
+  return () => { try { supabase.removeChannel(channel) } catch { /* すでに閉じている */ } }
+}
+
+// Realtime を使うための SQL（表を作ったあと、1回だけ）
+export function outlineRealtimeSql() {
+  return `alter table outline_nodes replica identity full;
+alter publication supabase_realtime add table outline_nodes;`
 }
 
 // 置き場が無いときのエラーを見分ける（テーブル未作成）

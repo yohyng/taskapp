@@ -980,3 +980,40 @@ describe('ほかの端末で消えた行', () => {
     expect(got.map((n) => n.id).sort()).toEqual(['a', 'b'])
   })
 })
+
+import { applyRemoteRows } from './outline.js'
+
+describe('ほかの端末から届いた行', () => {
+  const tree = () => [
+    { id: 'a', text: 'おや', children: [{ id: 'b', text: 'こ', children: [] }] },
+  ].map(ensureNode)
+
+  const row = (over) => ({ parentId: null, sortOrder: 0, text: '', children: [], ...over })
+
+  it('書き換わった行は、入れ替わる', () => {
+    const got = applyRemoteRows(tree(), [row({ id: 'b', parentId: 'a', text: 'なおった', updatedAt: '2030-01-01' })])
+    expect(got[0].children[0].text).toBe('なおった')
+  })
+
+  it('新しい行は、親の下に入る', () => {
+    const got = applyRemoteRows(tree(), [row({ id: 'c', parentId: 'a', sortOrder: 1, text: 'あたらしい', updatedAt: '2030-01-01' })])
+    expect(got[0].children.map((n) => n.id)).toEqual(['b', 'c'])
+  })
+
+  it('消えた行は、消える', () => {
+    const got = applyRemoteRows(tree(), [], ['b'])
+    expect(got[0].children).toEqual([])
+  })
+
+  it('手元のほうが新しいときは、上書きしない（打っている途中を消さない）', () => {
+    const mine = [{ id: 'a', text: 'いま書いている', children: [], updatedAt: '2031-01-01' }].map(ensureNode)
+    mine[0].updatedAt = '2031-01-01'
+    const got = applyRemoteRows(mine, [row({ id: 'a', text: 'ふるい', updatedAt: '2030-01-01' })])
+    expect(got[0].text).toBe('いま書いている')
+  })
+
+  it('届いていない行は、そのまま残る', () => {
+    const got = applyRemoteRows(tree(), [row({ id: 'z', text: 'よそ', updatedAt: '2030-01-01' })])
+    expect(got.map((n) => n.id).sort()).toEqual(['a', 'z'])
+  })
+})
