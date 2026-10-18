@@ -3210,19 +3210,23 @@ function App() {
       ? prev
       : rememberPanes(prev.filter((p) => p.id !== id).map((p) => ({ ...p, weight: 1 })))));
   }
-  // 枠と枠のあいだをつまんで、左右の取り分を付け替える
+  // 枠と枠のあいだをつまんで、取り分を付け替える。
+  // 横に並んでいるときは左右、縦に積んでいるときは上下。
   const panesRef = useRef(null);
   function startPaneResize(e, index) {
     e.preventDefault();
     const row = panesRef.current;
     if (!row) return;
-    const total = row.getBoundingClientRect().width;
-    const from = e.clientX;
+    const box = row.getBoundingClientRect();
+    // 並びは画面の広さで変わるので、そのときの向きを見て決める
+    const upright = getComputedStyle(row).flexDirection.startsWith("column");
+    const total = upright ? box.height : box.width;
+    const from = upright ? e.clientY : e.clientX;
     const base = panes.map((p) => p.weight ?? 1);
     const sum = base[index - 1] + base[index];
     const move = (ev) => {
       // 動かした距離を、2つの枠が分け合っている取り分に換算する
-      const share = ((ev.clientX - from) / total) * panes.length;
+      const share = (((upright ? ev.clientY : ev.clientX) - from) / total) * panes.length;
       const left = Math.max(0.25, Math.min(sum - 0.25, base[index - 1] + share));
       setPanes((prev) => prev.map((p, i) => {
         if (i === index - 1) return { ...p, weight: left };
@@ -4110,10 +4114,14 @@ function App() {
                     data-pane-handle={i}
                     onPointerDown={(e) => startPaneResize(e, i)}
                     onDoubleClick={evenPanes}
-                    title="ドラッグで幅を変える／ダブルクリックで均等に戻す"
-                    className="group/handle hidden w-2 shrink-0 cursor-col-resize touch-none items-center justify-center lg:flex"
+                    title="ドラッグで取り分を変える／ダブルクリックで均等に戻す"
+                    className={classNames(
+                      "group/handle flex shrink-0 touch-none items-center justify-center",
+                      // 縦に積んでいるときは上下、横に並んでいるときは左右
+                      "h-2 w-full cursor-row-resize lg:h-auto lg:w-2 lg:cursor-col-resize",
+                    )}
                   >
-                    <span className="h-10 w-[3px] rounded-full bg-white/10 transition group-hover/handle:bg-sky-400/60" />
+                    <span className="h-[3px] w-10 rounded-full bg-white/10 transition group-hover/handle:bg-sky-400/60 lg:h-10 lg:w-[3px]" />
                   </div>
                 )}
                 <div
@@ -4122,7 +4130,7 @@ function App() {
                   style={panes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
                   className={classNames(
                     // 枠ごとに転がす。隣や画面ぜんたいを巻き込まない。
-                    "ts-pane min-w-0 flex-1 overflow-y-auto overscroll-contain",
+                    "ts-pane min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain",
                     panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
                   )}
                 >

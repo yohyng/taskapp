@@ -267,3 +267,63 @@ test("転がす棒は細く、配色に馴染む", async ({ page }) => {
   expect(color).toMatch(/0\.16/);              // 棒は薄い
   expect(color).toMatch(/rgba\(0, 0, 0, 0\)|transparent/); // 溝は透ける
 });
+
+test.describe("縦に積んだときの上下のつまみ", () => {
+  // 狭い画面では枠が縦に積まれる
+  test.use({ viewport: { width: 420, height: 800 } });
+
+  const panes = (page) => page.locator("[data-pane-id]");
+
+  test.beforeEach(async ({ page }) => {
+    await page.locator("[data-pane-add]").click();
+    await expect(panes(page)).toHaveCount(2);
+  });
+
+  test("縦に積んでいるときも、つまみが出る", async ({ page }) => {
+    const handle = page.locator("[data-pane-handle]");
+    await expect(handle).toBeVisible();
+    const box = await handle.boundingBox();
+    const first = await panes(page).first().boundingBox();
+    // 上下に分かれている（左右ではない）
+    expect(box.width).toBeGreaterThan(first.width / 2);
+  });
+
+  test("上下にドラッグすると、取り分が変わる", async ({ page }) => {
+    const before = (await panes(page).first().boundingBox()).height;
+    const handle = page.locator("[data-pane-handle]");
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 150, { steps: 10 });
+    await page.mouse.up();
+    const after = (await panes(page).first().boundingBox()).height;
+    expect(after).toBeGreaterThan(before + 80);
+  });
+
+  test("両押しで均等に戻る", async ({ page }) => {
+    const handle = page.locator("[data-pane-handle]");
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 150, { steps: 8 });
+    await page.mouse.up();
+    await handle.dblclick();
+    const [a, b] = await panes(page).all();
+    const ha = (await a.boundingBox()).height;
+    const hb = (await b.boundingBox()).height;
+    expect(Math.abs(ha - hb)).toBeLessThan(8);
+  });
+
+  test("読み直しても、取り分を覚えている", async ({ page }) => {
+    const handle = page.locator("[data-pane-handle]");
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 140, { steps: 8 });
+    await page.mouse.up();
+    const after = (await panes(page).first().boundingBox()).height;
+    await page.reload();
+    await page.waitForSelector("header");
+    expect((await panes(page).first().boundingBox()).height).toBeCloseTo(after, -1);
+  });
+});
