@@ -1700,3 +1700,69 @@ test.describe("何も無いときの始まり", () => {
     expect(await idOf()).toBe(first);
   });
 });
+
+test.describe("書くことに集中（イマーシブ）", () => {
+  const gear = async (page) => {
+    await page.locator("[data-outline-view]").click();
+    await expect(page.locator("[data-view-panel]")).toBeVisible();
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "ひとつめ" },
+      { id: "b", text: "ふたつめ" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("はじめは OFF で、打っても何も消えない", async ({ page }) => {
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("あ");
+    await expect(page.locator("[data-outline-top]")).toBeVisible();
+    await expect(page.locator("[data-outliner]")).not.toHaveAttribute("data-calm", "");
+  });
+
+  test("ON にして打つと、まわりが引っ込む", async ({ page }) => {
+    await gear(page);
+    await page.locator("[data-immersive]").click();
+    await page.keyboard.press("Escape");
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("しずかに");
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
+    await expect(page.locator("[data-outline-top]")).toHaveCSS("opacity", "0");
+    await expect(page.locator('[data-row="b"] [data-row-actions]')).toHaveCSS("opacity", "0");
+  });
+
+  test("打っている行は、はっきり出たまま", async ({ page }) => {
+    await gear(page);
+    await page.locator("[data-immersive]").click();
+    await page.keyboard.press("Escape");
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("ここ");
+    await expect(page.locator('[data-row="a"]')).toHaveCSS("opacity", "1");
+    await expect(page.locator('[data-row="b"]')).not.toHaveCSS("opacity", "1");
+  });
+
+  test("マウスを動かせば、すぐ戻る", async ({ page }) => {
+    await gear(page);
+    await page.locator("[data-immersive]").click();
+    await page.keyboard.press("Escape");
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("しずかに");
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
+    await page.mouse.move(300, 300);
+    await expect(page.locator("[data-outliner]")).not.toHaveAttribute("data-calm", "");
+  });
+
+  test("設定は覚えている", async ({ page }) => {
+    await gear(page);
+    await page.locator("[data-immersive]").click();
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await gear(page);
+    await expect(page.locator("[data-immersive]")).toContainText("ON");
+  });
+});

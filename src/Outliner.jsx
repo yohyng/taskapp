@@ -25,7 +25,7 @@ const OutlineContext = React.createContext(null);
 const OutlineApiContext = React.createContext(null);
 
 const OUTLINE_VIEW_KEY = "taskspace-outline-view";
-const DEFAULT_VIEW = { fontSize: 14, align: "left", typewriter: false, anchor: 0.6 };
+const DEFAULT_VIEW = { fontSize: 14, align: "left", typewriter: false, anchor: 0.6, immersive: false };
 const readView = () => {
   try { return { ...DEFAULT_VIEW, ...JSON.parse(localStorage.getItem(OUTLINE_VIEW_KEY) || "{}") }; }
   catch { return { ...DEFAULT_VIEW }; }
@@ -232,11 +232,26 @@ export function OutlineProvider({ children }) {
     syncedRef.current = new Map();
   }, []);
 
+  // 向こう（Supabase）の姿に、この端末をそのまま合わせる。
+  // 端末ごとに中身が食い違ったとき、どれか1台を正として揃えるための口。
+  // 突き合わせではなく置き換えなので、この端末だけの書きかけは消える。
+  const pullRemote = useCallback(async () => {
+    const rows = await loadOutlineRows();
+    if (!rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
+    const remote = buildTree(rows);
+    tombRef.current = new Set();
+    writeTomb(tombRef.current);
+    syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+    readyRef.current = true;
+    apply(() => (remote.length ? remote : [ensureNode({ id: "start", text: "" })]));
+    return { ok: true, count: flattenTree(remote).length };
+  }, [apply]);
+
   const value = useMemo(() => ({
-    nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync,
+    nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -332,7 +347,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync, pullRemote } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
   // ぶら下げたままだと枠の外に出てしまい、指が届かない。
@@ -358,6 +373,31 @@ export default function Outliner() {
   const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
   const [band, setBand] = useState(null);       // なぞって選ぶときの枠
   const [dateView, setDateView] = useState(false);     // 日付の順に並べて見る
+  // 書くことに集中：打っているあいだは、細かい表示を引っ込める。
+  // 指やマウスが動いたら、すぐ戻す（押したいものが見えないと困るので）。
+  const [calm, setCalm] = useState(false);
+  const calmTimer = useRef(null);
+  const wake = useCallback(() => {
+    clearTimeout(calmTimer.current);
+    setCalm(false);
+  }, []);
+  const hush = useCallback(() => {
+    if (!view.immersive) return;
+    clearTimeout(calmTimer.current);
+    calmTimer.current = setTimeout(() => setCalm(true), 450);
+  }, [view.immersive]);
+  useEffect(() => {
+    if (!view.immersive) { setCalm(false); return; }
+    window.addEventListener("pointermove", wake);
+    window.addEventListener("pointerdown", wake);
+    return () => {
+      window.removeEventListener("pointermove", wake);
+      window.removeEventListener("pointerdown", wake);
+      clearTimeout(calmTimer.current);
+    };
+  }, [view.immersive, wake]);
+  // 書いていない（どの行も開いていない）ときは、静かにしない
+  useEffect(() => { if (!editingId) setCalm(false); }, [editingId]);
   // 日付ビューで、既定と違う開き方にした見出し（年月は畳む、日は開くが既定）
   const [flippedDates, setFlippedDates] = useState(new Set());
   const anchorRef = useRef(null);                // Shift+クリックの起点
@@ -1018,8 +1058,18 @@ export default function Outliner() {
   }
 
   return (
-    <div data-outliner className="mx-auto w-full max-w-3xl px-1 py-2">
-      <div className="mb-2 flex items-center gap-1">
+    <div
+      data-outliner
+      data-calm={calm ? "" : undefined}
+      className="mx-auto w-full max-w-3xl px-1 py-2"
+    >
+      <div
+        data-outline-top
+        className={classNames(
+          "mb-2 flex items-center gap-1 transition-opacity duration-500",
+          calm && "pointer-events-none opacity-0",
+        )}
+      >
         <div className="relative min-w-0 flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-neutral-600" />
           <input
@@ -1184,6 +1234,24 @@ export default function Outliner() {
               </div>
 
               <div className="mb-2 border-t border-white/10 pt-2">
+                <div className="mb-1 text-[10px] text-neutral-500">端末どうしを揃える</div>
+                <button
+                  data-outline-pull
+                  onClick={async () => {
+                    setNote("向こうを読んでいます…");
+                    const got = await pullRemote();
+                    setNote(got.ok ? `向こうに合わせました（${got.count} 行）` : `合わせられません：${got.why}`);
+                  }}
+                  className="mb-1 w-full rounded border border-white/10 px-2 py-1.5 text-left text-[11px] text-neutral-400 transition hover:bg-white/[0.07]"
+                >
+                  向こう（Supabase）に合わせる
+                </button>
+                <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                  この端末の中身を、向こうの姿でそっくり入れ替えます。
+                  端末ごとに違ってしまったときは、正しい1台で入れ直したあと、
+                  ほかの端末でこれを押すと揃います（⌘Z で戻せます）。
+                </div>
+
                 <div className="mb-1 text-[10px] text-neutral-500">片付け（いまだけ）</div>
                 <button
                   data-outline-clear
@@ -1202,6 +1270,22 @@ export default function Outliner() {
                   この端末からも Supabase からも消えます。⌘Z で戻せますが、
                   念のため先に ↓ で書き出しておくと安心です。
                 </div>
+              </div>
+
+              <button
+                data-immersive
+                onClick={() => setView({ immersive: !view.immersive })}
+                className={classNames(
+                  "mb-1 flex w-full items-center justify-between rounded border px-2 py-1.5 text-[11px] transition",
+                  view.immersive ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                )}
+              >
+                <span>書くことに集中</span>
+                <span className="text-[10px]">{view.immersive ? "ON" : "OFF"}</span>
+              </button>
+              <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
+                打っているあいだ、まわりの細かい表示を引っ込めます。
+                指やマウスを動かすか、Esc で戻ります。
               </div>
 
               <button
@@ -1364,7 +1448,13 @@ alter table outline_nodes disable row level security;
       )}
 
       {favorites.length > 0 && (
-        <div data-favorites className="mb-2 flex flex-wrap items-center gap-1">
+        <div
+          data-favorites
+          className={classNames(
+            "mb-2 flex flex-wrap items-center gap-1 transition-opacity duration-500",
+            calm && "pointer-events-none opacity-0",
+          )}
+        >
           <Star className="h-3 w-3 shrink-0 fill-amber-300/70 text-amber-300/70" />
           {favorites.map((fav) => (
             <button
@@ -1380,7 +1470,13 @@ alter table outline_nodes disable row level security;
         </div>
       )}
 
-      <div className="mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500">
+      <div
+        data-outline-crumbs
+        className={classNames(
+          "mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500 transition-opacity duration-500",
+          calm && "pointer-events-none opacity-0",
+        )}
+      >
         <button
           data-crumb
           onClick={() => setZoomId(null)}
@@ -1482,7 +1578,7 @@ alter table outline_nodes disable row level security;
                 paddingLeft: depth * INDENT + 4,
                 background: node.bgColor || undefined,
                 // 親のところに縦線を引く（WorkFlowy と同じ見え方）
-                ...(depth > 0 ? {
+                ...(depth > 0 && !calm ? {
                   backgroundImage: `repeating-linear-gradient(to right, var(--ts-guide) 0 1px, transparent 1px ${INDENT}px)`,
                   backgroundPosition: "11px 0",
                   backgroundSize: `${depth * INDENT}px 100%`,
@@ -1490,9 +1586,11 @@ alter table outline_nodes disable row level security;
                 } : {}),
               }}
               className={classNames(
-                "group/row relative flex items-start gap-1 rounded py-[3px] pr-1 hover:bg-white/[0.03]",
+                "group/row relative flex items-start gap-1 rounded py-[3px] pr-1 transition-opacity duration-500 hover:bg-white/[0.03]",
                 drag?.id === node.id && "opacity-40",
                 pickedSet.has(node.id) && "bg-sky-400/15 ring-1 ring-sky-400/30",
+                // 書くことに集中：いま打っている行のまわりだけ残す
+                calm && editingId !== node.id && "opacity-25",
               )}
             >
               <button
@@ -1506,6 +1604,7 @@ alter table outline_nodes disable row level security;
                 className={classNames(
                   "mt-[5px] shrink-0 rounded p-px text-neutral-500 transition hover:text-neutral-200",
                   !hasKids && "invisible",
+                  calm && "opacity-0",
                   // 畳むつまみは、薄くても出しておく。ホバーで出すだけだと
                   // 触る機械では一生見えず、閉じられないままになる。
                   hasKids && !node.collapsed && "opacity-30 group-hover/row:opacity-100 focus:opacity-100",
@@ -1526,6 +1625,7 @@ alter table outline_nodes disable row level security;
                 className={classNames(
                   "mt-[8px] grid h-[7px] w-[7px] shrink-0 place-items-center rounded-full transition",
                   node.collapsed ? "bg-white/70 ring-[5px] ring-white/15" : "bg-white/55 hover:ring-[5px] hover:ring-white/15",
+                  calm && "opacity-0",
                   hasStoredBody(node) && !node.collapsed && "ring-[3px] ring-white/10",
                 )}
               >
@@ -1542,6 +1642,7 @@ alter table outline_nodes disable row level security;
                   value={node.text}
                   style={textStyle}
                   onChange={(e) => {
+                    hush();
                     typeText(node.id, e.target.value);
                     refreshTagHint(node.id, e.target);
                     e.target.style.height = "auto";
@@ -1641,7 +1742,13 @@ alter table outline_nodes disable row level security;
                 </div>
               )}
 
-              <div className="flex shrink-0 items-center gap-0.5 self-start pt-0.5">
+              <div
+                data-row-actions
+                className={classNames(
+                  "flex shrink-0 items-center gap-0.5 self-start pt-0.5 transition-opacity duration-500",
+                  calm && "pointer-events-none opacity-0",
+                )}
+              >
                 {node.date && !node.virtual && (
                   <span
                     data-row-date={node.date}
