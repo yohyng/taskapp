@@ -608,9 +608,13 @@ export function buildTree(rows) {
 
 // 手元と向こうを突き合わせる。同じ行は新しいほうを採り、
 // 片方にしかない行は残す（消したものは、消した印で外す）。
-export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set()) {
+// knownIds … 前に「向こうにもある」と確かめた行の id。
+// 向こうから消えていて、しかも前に確かめていた行は、ほかの端末で
+// 消されたということ。手元にも残さない（残すと送り返して復活する）。
+export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), knownIds = null) {
   const localRows = flattenTree(localNodes);
   const remoteRows = flattenTree(remoteNodes);
+  const remoteIds = new Set(remoteRows.map((r) => r.id));
   const byId = new Map();
   // 消した印は「向こうから戻ってこないため」のもの。
   // 手元にある行には使わない。使うと、消したあとに取り消した行や、
@@ -621,7 +625,12 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set()) {
   }
   for (const row of localRows) {
     const there = byId.get(row.id);
-    if (!there) { byId.set(row.id, row); continue; }
+    if (!there) {
+      // 向こうに無い行。前に確かめたことがあるなら、向こうで消された。
+      if (knownIds && knownIds.has(row.id) && !remoteIds.has(row.id)) continue;
+      byId.set(row.id, row);
+      continue;
+    }
     const mine = row.updatedAt || "";
     const theirs = there.updatedAt || "";
     byId.set(row.id, mine >= theirs ? row : there);

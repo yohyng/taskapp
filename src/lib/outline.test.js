@@ -960,3 +960,23 @@ describe('画像の行', () => {
     expect(got).toBe('https://drive.google.com/thumbnail?id=1AbC-dEf&sz=w1600')
   })
 })
+
+describe('ほかの端末で消えた行', () => {
+  const local = [{ id: 'a', text: 'のこる', children: [] }, { id: 'b', text: '消された', children: [] }]
+  const remote = [{ id: 'a', text: 'のこる', children: [] }]
+
+  it('前に確かめた行が向こうから消えていたら、手元からも消す', () => {
+    const got = mergeOutline(local, remote, new Set(), new Set(['a', 'b']))
+    expect(got.map((n) => n.id)).toEqual(['a'])
+  })
+
+  it('まだ送っていない行（この端末で書いたばかり）は残す', () => {
+    const got = mergeOutline(local, remote, new Set(), new Set(['a']))
+    expect(got.map((n) => n.id).sort()).toEqual(['a', 'b'])
+  })
+
+  it('確かめた覚えが無いとき（これまで通り）は、残す', () => {
+    const got = mergeOutline(local, remote, new Set())
+    expect(got.map((n) => n.id).sort()).toEqual(['a', 'b'])
+  })
+})

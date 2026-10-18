@@ -31,6 +31,16 @@ const readView = () => {
   catch { return { ...DEFAULT_VIEW }; }
 };
 
+// 前に「向こうにもある」と確かめた行の id。
+// これがあると、ほかの端末で消された行を、手元から送り返さずに済む。
+const OUTLINE_KNOWN_KEY = "taskspace-outline-known";
+const readKnown = () => {
+  try { return new Set(JSON.parse(localStorage.getItem(OUTLINE_KNOWN_KEY) || "[]")); } catch { return new Set(); }
+};
+const writeKnown = (ids) => {
+  try { localStorage.setItem(OUTLINE_KNOWN_KEY, JSON.stringify([...ids])); } catch { /* 入らなければ諦める */ }
+};
+
 const OUTLINE_TOMB_KEY = "taskspace-outline-deleted";
 const readTomb = () => {
   try { return new Set(JSON.parse(localStorage.getItem(OUTLINE_TOMB_KEY) || "[]")); } catch { return new Set(); }
@@ -150,9 +160,10 @@ export function OutlineProvider({ children }) {
       if (absentOutlineColumns().length) setSyncNote(`missing-col:${absentOutlineColumns().join(",")}`);
       const remote = buildTree(rows);
       applyRaw((mine) => {
-        const merged = mergeOutline(mine, remote, tombRef.current);
+        const merged = mergeOutline(mine, remote, tombRef.current, readKnown());
         // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
         syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+        writeKnown(new Set(syncedRef.current.keys()));
         return merged.length ? merged : mine;
       });
     });
@@ -197,6 +208,7 @@ export function OutlineProvider({ children }) {
         gone.forEach((id) => next.delete(id));
         changed.forEach((r) => next.set(r.id, JSON.stringify(r)));
         syncedRef.current = next;
+        writeKnown(new Set(next.keys()));
       });
     }, 800);
     return () => clearTimeout(timerRef.current);
@@ -230,6 +242,7 @@ export function OutlineProvider({ children }) {
     tombRef.current = new Set();
     writeTomb(tombRef.current);
     syncedRef.current = new Map();
+    writeKnown(new Set());
   }, []);
 
   // 向こう（Supabase）の姿に、この端末をそのまま合わせる。
@@ -242,6 +255,7 @@ export function OutlineProvider({ children }) {
     tombRef.current = new Set();
     writeTomb(tombRef.current);
     syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+    writeKnown(new Set(syncedRef.current.keys()));
     readyRef.current = true;
     apply(() => (remote.length ? remote : [ensureNode({ id: "start", text: "" })]));
     return { ok: true, count: flattenTree(remote).length };
