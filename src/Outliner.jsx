@@ -298,15 +298,11 @@ function classNames(...xs) {
   return xs.filter(Boolean).join(" ");
 }
 
+// 何も無いときの始まり。空の行をひとつだけ。
+// 案内の行を作ると、入れ直すたびに向こうへ足され、端末ごとに増えてしまう。
+// id を決め打ちにしてあるのも同じ理由（同じ行として重なる）。
 function defaultOutline() {
-  return [
-    ensureNode({ text: "Quietliner", children: [
-      { text: "Enter で次の行、Shift+Enter で行の中の改行" },
-      { text: "Tab で字下げ、Shift+Tab で戻す" },
-      { text: "Alt+↑↓ で行ごと入れ替え、Ctrl/⌘+Enter で完了" },
-      { text: "行頭の ● を押すと、その行の中に入る（ズーム）" },
-    ] }),
-  ];
+  return [ensureNode({ id: "start", text: "" })];
 }
 
 function load() {

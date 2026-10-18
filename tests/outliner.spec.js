@@ -1676,3 +1676,27 @@ test.describe("画像の行", () => {
     await expect(page.locator('[data-row="a"] [data-row-image]')).toHaveAttribute("src", "https://example.com/new.webp");
   });
 });
+
+test.describe("何も無いときの始まり", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.removeItem("taskspace-outline-v1"));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("案内の行は作らない（空の行がひとつだけ）", async ({ page }) => {
+    await expect(page.locator("[data-row]")).toHaveCount(1);
+    await expect(page.getByText("Quietliner", { exact: true })).toHaveCount(0);
+  });
+
+  test("入れ直しても、同じ1行のまま（増えない）", async ({ page }) => {
+    const idOf = () => page.locator("[data-row]").first().getAttribute("data-row");
+    const first = await idOf();
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+    await expect(page.locator("[data-row]")).toHaveCount(1);
+    expect(await idOf()).toBe(first);
+  });
+});
