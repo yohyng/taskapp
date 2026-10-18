@@ -327,3 +327,35 @@ test.describe("縦に積んだときの上下のつまみ", () => {
     expect((await panes(page).first().boundingBox()).height).toBeCloseTo(after, -1);
   });
 });
+
+test.describe("枠のつまみと範囲選択", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.locator("[data-pane-add]").click();
+    await expect(page.locator("[data-pane-id]")).toHaveCount(2);
+  });
+
+  const dragHandle = async (page, dy) => {
+    const handle = page.locator("[data-pane-handle]");
+    const box = await handle.boundingBox();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + dy, { steps: 10 });
+  };
+
+  test("つまみを掴んでも、後ろは範囲選択されない", async ({ page }) => {
+    await dragHandle(page, 120);
+    await expect(page.locator("[data-marquee]")).toHaveCount(0);
+    await page.mouse.up();
+    await expect(page.locator("[data-marquee]")).toHaveCount(0);
+  });
+
+  test("ふつうの空き地をなぞれば、これまで通り選べる", async ({ page }) => {
+    const pane = page.locator("[data-pane-id]").first();
+    const box = await pane.boundingBox();
+    await page.mouse.move(box.x + box.width - 20, box.y + box.height - 30);
+    await page.mouse.down();
+    await page.mouse.move(box.x + box.width - 120, box.y + box.height - 140, { steps: 10 });
+    await expect(page.locator("[data-marquee]")).toHaveCount(1);
+    await page.mouse.up();
+  });
+});

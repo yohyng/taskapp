@@ -4112,7 +4112,7 @@ function App() {
                   // 枠と枠のあいだのつまみ。狭い画面では縦に積むので出さない。
                   <div
                     data-pane-handle={i}
-                    onPointerDown={(e) => startPaneResize(e, i)}
+                    onPointerDown={(e) => { e.stopPropagation(); startPaneResize(e, i); }}
                     onDoubleClick={evenPanes}
                     title="ドラッグで取り分を変える／ダブルクリックで均等に戻す"
                     className={classNames(
@@ -8779,6 +8779,8 @@ function MarqueeSelect({ onSelect }) {
         // 前に出ているもの（ポップアップやメニュー）の上は、本文の空き地ではない。
         // ここを拾っていないと、後ろの一覧まで範囲選択が走る。
         "[data-quick-add-dialog],[data-block-menu],[data-format-bar],[role='dialog']," +
+        // 枠と枠のあいだのつまみ。ここを掴むのは幅の調整で、範囲選択ではない。
+        "[data-pane-handle]," +
         "button,input,textarea,select,a,[contenteditable='true']"
       );
     }
@@ -8844,6 +8846,7 @@ function MarqueeSelect({ onSelect }) {
   if (!rect) return null;
   return (
     <div
+      data-marquee
       className="pointer-events-none fixed z-[250] rounded-sm border border-sky-400/70 bg-sky-400/10"
       style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     />
