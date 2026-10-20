@@ -102,13 +102,40 @@ export function lastBackupAt() {
   try { return localStorage.getItem(LAST_BACKUP_KEY) || ""; } catch { return ""; }
 }
 
+// 文字をそのまま送ると、1万行のアウトラインで数 MB になる。
+// Safari は大きな POST をよく取りこぼす（「Load failed」はこれ）。
+// 縮めてから送る。使えない環境では、そのまま送る。
+export async function gzipBase64(text) {
+  if (typeof CompressionStream === "undefined") return null;
+  try {
+    const packed = new Blob([text]).stream().pipeThrough(new CompressionStream("gzip"));
+    const bytes = new Uint8Array(await new Response(packed).arrayBuffer());
+    let out = "";
+    // 一度に渡すと引数が多すぎると言われるので、小分けにする
+    for (let at = 0; at < bytes.length; at += 8192) {
+      out += String.fromCharCode(...bytes.subarray(at, at + 8192));
+    }
+    return btoa(out);
+  } catch { return null; }
+}
+
+export const mb = (n) => `${(n / 1048576).toFixed(1)}MB`;
+
 // ドライブに控えを置く。中身は呼ぶ側が作る（タスクもアウトラインも設定も）。
 export async function backupToDrive(payload, setting = readDriveSetting()) {
   if (!setting.url) throw new Error("置き場が決まっていません");
-  const res = await fetch(setting.url, {
-    method: "POST",
-    body: JSON.stringify({ kind: "backup", token: setting.token || "", json: JSON.stringify(payload) }),
-  });
+  const text = JSON.stringify(payload);
+  const packed = await gzipBase64(text);
+  const body = JSON.stringify(packed
+    ? { kind: "backup", token: setting.token || "", gzipBase64: packed }
+    : { kind: "backup", token: setting.token || "", json: text });
+  let res;
+  try {
+    res = await fetch(setting.url, { method: "POST", body });
+  } catch (e) {
+    // Safari はここで「Load failed」としか言わないので、大きさを添える
+    throw new Error(`送れませんでした（${mb(body.length)}）：${e?.message || e}`);
+  }
   if (!res.ok) throw new Error(`置き場が答えません（${res.status}）`);
   const got = await res.json().catch(() => { throw new Error("置き場の返事を読めませんでした"); });
   if (got.error) throw new Error(got.error);

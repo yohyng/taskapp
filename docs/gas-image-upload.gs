@@ -40,7 +40,13 @@ function doPost(e) {
       const box = subFolder(folder, "backups");
       const name = "taskspace-" + new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-") + ".json";
       // 控えは backups/ にそのまま。名前が日付順なので、並べればそのまま時系列。
-      const file = box.createFile(name, body.json || "{}", "application/json");
+      // 大きいものは縮めて送られてくる（Safari が大きな POST を落とすため）。
+      var text = body.json || "{}";
+      if (body.gzipBase64) {
+        var packed = Utilities.newBlob(Utilities.base64Decode(body.gzipBase64), "application/x-gzip", name + ".gz");
+        text = Utilities.ungzip(packed).getDataAsString();
+      }
+      const file = box.createFile(name, text, "application/json");
       prune(box, KEEP_BACKUPS);
       return reply({ ok: true, id: file.getId(), name: name });
     }

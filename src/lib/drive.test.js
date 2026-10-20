@@ -78,6 +78,13 @@ describe('つながるか試す', () => {
   })
 })
 
+// 縮めて送られたぶんを、もとに戻す
+async function ungzip(b64) {
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))
+  const out = new Blob([bin]).stream().pipeThrough(new DecompressionStream('gzip'))
+  return new Response(out).text()
+}
+
 describe('控え', () => {
   it('控えると、いつ控えたか覚える', async () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
@@ -90,7 +97,9 @@ describe('控え', () => {
 
     const sent = JSON.parse(globalThis.fetch.mock.calls[0][1].body)
     expect(sent.kind).toBe('backup')
-    expect(JSON.parse(sent.json)).toEqual({ hello: 1 })
+    // 大きさ対策で縮めて送る。縮められない環境では、そのまま。
+    const text = sent.json ?? await ungzip(sent.gzipBase64)
+    expect(JSON.parse(text)).toEqual({ hello: 1 })
   })
 
   it('断られたときは、覚えない', async () => {

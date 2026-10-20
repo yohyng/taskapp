@@ -38,6 +38,13 @@ async function fakeGas(page, reply = { url: "https://drive.google.com/thumbnail?
   return sent;
 }
 
+// 縮めて送られてきたぶんを、もとに戻す
+const unpack = (page, body) => (body.json ? Promise.resolve(body.json) : page.evaluate(async (b64) => {
+  const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const out = new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(out).text();
+}, body.gzipBase64));
+
 // 行に画像を貼り付ける
 const pasteImage = (page) => page.evaluate(() => {
   const el = document.querySelector("[data-row] textarea[data-row-text]");
@@ -132,6 +139,38 @@ test.describe("画像を貼る", () => {
 });
 
 test.describe("控え（バックアップ）", () => {
+  test("大きい控えは、縮めて送る", async ({ page }) => {
+    await withDrive(page);
+    // 大きめの中身を入れておく
+    await page.addInitScript(() => localStorage.setItem(
+      "taskspace-outline-v1",
+      JSON.stringify(Array.from({ length: 400 }, (_, i) => ({ id: `n${i}`, text: "ながい行".repeat(40) })))));
+    await page.reload();
+    await page.waitForSelector("header");
+    const sent = await fakeGas(page, { ok: true, name: "taskspace.json" });
+    await open(page);
+    await gear(page);
+    await page.locator("[data-drive-backup]").click();
+    await expect(note(page)).toContainText("控えました");
+    expect(sent[0].kind).toBe("backup");
+    expect(sent[0].gzipBase64, "縮めて送っている").toBeTruthy();
+    expect(sent[0].json, "生のままは送らない").toBeUndefined();
+    // 縮めたぶん、だいぶ小さい
+    expect(sent[0].gzipBase64.length).toBeLessThan(20000);
+  });
+
+  test("送れなかったら、大きさを添えて知らせる", async ({ page }) => {
+    await withDrive(page);
+    await page.reload();
+    await page.waitForSelector("header");
+    await page.route(`${GAS}**`, (route) => route.abort("failed"));
+    await open(page);
+    await gear(page);
+    await page.locator("[data-drive-backup]").click();
+    await expect(note(page)).toContainText("送れませんでした");
+    await expect(note(page)).toContainText("MB");
+  });
+
   test("いま控える、で中身一式が飛ぶ", async ({ page }) => {
     await withDrive(page);
     await page.reload();
@@ -142,7 +181,7 @@ test.describe("控え（バックアップ）", () => {
     await page.locator("[data-drive-backup]").click();
     await expect(note(page)).toContainText("控えました");
     expect(sent[0].kind).toBe("backup");
-    const store = JSON.parse(sent[0].json).store;
+    const store = JSON.parse(await unpack(page, sent[0])).store;
     expect(store["taskspace-outline-v1"]).toBeTruthy();
     // 合言葉は控えに入れない
     expect(store["taskspace-drive-token"]).toBeUndefined();
