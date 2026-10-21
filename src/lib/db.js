@@ -467,10 +467,10 @@ alter publication supabase_realtime add table outline_nodes;`
 
 // outline_nodes の変化を受け取る。返ってくるのは、やめるための関数。
 // 置き場が無い・Realtime が有効でない環境では、何もせず null を返す。
-export function subscribeOutline(onRows) {
-  if (!isSupabaseEnabled || outlineTableMissing) return null
+export function subscribeOutline(onRows, onStatus = () => {}) {
+  if (!isSupabaseEnabled || outlineTableMissing) { onStatus('off'); return null }
   const channel = supabase
-    .channel('outline-nodes')
+    .channel(`outline-nodes-${Math.random().toString(36).slice(2, 8)}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: OUTLINE_TABLE }, (payload) => {
       if (payload.eventType === 'DELETE') {
         const id = payload.old?.id
@@ -479,8 +479,18 @@ export function subscribeOutline(onRows) {
       }
       if (payload.new) onRows({ rows: [outlineRowToNode(payload.new)] })
     })
-    .subscribe()
+    // つながった・切れたを、呼んだ側に伝える。
+    // 携帯や iPad はしまうと websocket が切られるので、戻ったら繋ぎ直す。
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') onStatus('live')
+      else if (status === 'CLOSED') onStatus('closed')
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') onStatus('error')
+    })
   return () => { try { supabase.removeChannel(channel) } catch { /* すでに閉じている */ } }
+}
+
+export function supabaseReady() {
+  return isSupabaseEnabled && !outlineTableMissing
 }
 
 // Realtime を使うための SQL（表を作ったあと、1回だけ）

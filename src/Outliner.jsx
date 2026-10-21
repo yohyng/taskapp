@@ -11,7 +11,7 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
 } from "./lib/outline";
-import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline } from "./lib/db";
+import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
@@ -90,6 +90,11 @@ export function OutlineProvider({ children }) {
   const timerRef = useRef(null);
   const retryRef = useRef(null);
   const [retry, setRetry] = useState(0);        // 断られたあとの、やり直し
+  // いまどうつながっているか。画面の隅に小さく出して、切れていたら分かるようにする。
+  //   off … 置き場が無い（この端末だけ）／ live … 受け取れている
+  //   closed・error … 切れた（しまっている間など。戻れば繋ぎ直す）
+  const [link, setLink] = useState(() => (supabaseReady() ? "waking" : "off"));
+  const [syncedAt, setSyncedAt] = useState("");
 
   // 手元には必ず残す。向こうが無くても使えるように。
   // localStorage は 5MB ほどで頭打ちになるので、入らないときは
@@ -171,6 +176,7 @@ export function OutlineProvider({ children }) {
         writeIds(OUTLINE_KNOWN_KEY, known);
         return merged.length ? merged : mine;
       });
+      setSyncedAt(new Date().toISOString());
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -178,6 +184,8 @@ export function OutlineProvider({ children }) {
   // ほかの端末の変化を、すぐ受け取る（Supabase Realtime）。
   // 細かく届くので、少しためてから一度に入れる。
   const inboxRef = useRef({ rows: new Map(), gone: new Set() });
+  const wakeRef = useRef(null);          // 戻ってきたときに、繋ぎ直して読む
+  const cleanupRef = useRef(null);
   const inboxTimer = useRef(null);
   const takeInbox = useCallback(() => {
     const box = inboxRef.current;
@@ -194,6 +202,7 @@ export function OutlineProvider({ children }) {
     const known = new Set(next.keys());
     knownRef.current = known;
     writeIds(OUTLINE_KNOWN_KEY, known);
+    setSyncedAt(new Date().toISOString());
   }, [applyRaw]);
 
   const listen = useCallback(() => subscribeOutline(({ rows = [], gone = [] }) => {
@@ -207,7 +216,7 @@ export function OutlineProvider({ children }) {
     for (const id of gone) { box.gone.add(id); box.rows.delete(id); }
     clearTimeout(inboxTimer.current);
     inboxTimer.current = setTimeout(takeInbox, 250);
-  }), [takeInbox]);
+  }, setLink), [takeInbox]);
 
   // 起き抜けの読み込み。
   //   1. この端末の控え（IndexedDB のほうが新しければ、そちら）
@@ -217,6 +226,7 @@ export function OutlineProvider({ children }) {
   useEffect(() => {
     let alive = true;
     let stop = null;
+    let every = null;
     (async () => {
       const got = await bigGet(OUTLINE_KEY);
       if (!alive) return;
@@ -234,10 +244,33 @@ export function OutlineProvider({ children }) {
       bigPut(OUTLINE_KEY, { at: new Date().toISOString(), nodes: nodesRef.current });
       pullOnce();
       stop = listen();
+
+      // 端末をしまうと websocket は切られる（iPad・携帯はとくに）。
+      // 戻ってきたとき・つながり直したときに、繋ぎ直して読み直す。
+      // 気づかないうちに切れたまま、が いちばん困る。
+      const again = () => {
+        if (document.visibilityState !== "visible") return;
+        pullOnce();
+        if (stop) stop();
+        setLink("waking");
+        stop = listen();
+      };
+      wakeRef.current = again;
+      document.addEventListener("visibilitychange", again);
+      window.addEventListener("online", again);
+      // 受け取りが効いていない置き場（Realtime を入れていない等）でも
+      // 置いていかれないよう、見ているあいだは、ときどき読み直す。
+      every = setInterval(() => { if (document.visibilityState === "visible") pullOnce(); }, 60000);
+      cleanupRef.current = () => {
+        document.removeEventListener("visibilitychange", again);
+        window.removeEventListener("online", again);
+      };
     })();
     return () => {
       alive = false;
       clearTimeout(inboxTimer.current);
+      clearInterval(every);
+      if (cleanupRef.current) cleanupRef.current();
       if (stop) stop();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -369,9 +402,10 @@ export function OutlineProvider({ children }) {
 
   const value = useMemo(() => ({
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,
+    link, syncedAt, refresh: () => wakeRef.current?.(),
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, link, syncedAt]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -467,7 +501,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync, pullRemote } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync, pullRemote, link, syncedAt, refresh } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
   // ぶら下げたままだと枠の外に出てしまい、指が届かない。
@@ -1214,6 +1248,30 @@ export default function Outliner() {
             </button>
           )}
         </div>
+        <button
+          data-outline-link
+          data-link={link}
+          onClick={refresh}
+          title={{
+            live: "ほかの端末とつながっています（押すと読み直す）",
+            waking: "つなぎ直しています（押すと読み直す）",
+            closed: "切れています（押すとつなぎ直す）",
+            error: "つながりません（押すとつなぎ直す）",
+            off: "この端末だけで動いています",
+          }[link]}
+          className={classNames(
+            "shrink-0 rounded-md border px-1.5 py-1 text-[10px] transition",
+            link === "live" ? "border-emerald-400/30 text-emerald-300/80 hover:bg-emerald-400/10"
+              : link === "off" ? "border-white/10 text-neutral-600 hover:bg-white/[0.07]"
+                : "border-amber-400/40 text-amber-300/90 hover:bg-amber-400/10",
+          )}
+        >
+          {link === "live" ? "●" : link === "waking" ? "◌" : link === "off" ? "○" : "▲"}
+          {syncedAt && link === "live" && (
+            <span className="ml-1 tabular-nums text-neutral-500">{syncedAt.slice(11, 16)}</span>
+          )}
+        </button>
+
         <button
           data-date-view
           onClick={() => setDateView((v) => !v)}

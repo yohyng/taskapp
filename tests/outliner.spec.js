@@ -1818,3 +1818,24 @@ test.describe("大きくて localStorage に入らないとき", () => {
     await expect(note).toContainText("閉じても消えません");
   });
 });
+
+test.describe("つながりの様子", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("置き場が無いときは「この端末だけ」と出る", async ({ page }) => {
+    // テストでは Supabase の鍵を空にしてあるので、こちらになる
+    const chip = page.locator("[data-outline-link]");
+    await expect(chip).toBeVisible();
+    await expect(chip).toHaveAttribute("data-link", "off");
+    await expect(chip).toHaveAttribute("title", /この端末だけ/);
+  });
+
+  test("押しても壊れない（読み直しを試みるだけ）", async ({ page }) => {
+    await page.locator("[data-outline-link]").click();
+    await expect(page.locator("[data-outliner]")).toBeVisible();
+  });
+});
