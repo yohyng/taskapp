@@ -89,7 +89,16 @@ export function OutlineProvider({ children }) {
   const knownRef = useRef(new Set());   // 向こうにもあると確かめた id
   const timerRef = useRef(null);
   const retryRef = useRef(null);
-  const [retry, setRetry] = useState(0);        // 断られたあとの、やり直し
+  const sendingRef = useRef(false);
+  const stoppedRef = useRef(false);
+  const [retry, setRetry] = useState(0);        // 送信後・失敗後に差分を確かめ直す
+  useEffect(() => {
+    stoppedRef.current = false;
+    return () => {
+      stoppedRef.current = true;
+      clearTimeout(retryRef.current);
+    };
+  }, []);
   // いまどうつながっているか。画面の隅に小さく出して、切れていたら分かるようにする。
   //   off … 置き場が無い（この端末だけ）／ live … 受け取れている
   //   closed・error … 切れた（しまっている間など。戻れば繋ぎ直す）
@@ -301,15 +310,17 @@ export function OutlineProvider({ children }) {
   }, []);
 
 
-  // 書き込み：変わった行だけ、少し待ってから送る
+  // 書き込み：同時に送るのは1件だけ。送信中の編集は、完了後に最新の木から拾う。
   useEffect(() => {
     if (!readyRef.current) return;
     clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      const rows = flattenTree(nodes);
+    timerRef.current = setTimeout(async () => {
+      if (sendingRef.current || stoppedRef.current) return;
+      const rows = flattenTree(nodesRef.current);
+      const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
-      const changed = rows.filter((r) => syncedRef.current.get(r.id) !== JSON.stringify(r));
-      const gone = [...syncedRef.current.keys()].filter((id) => !here.has(id));
+      const changed = rows.filter((r) => before.get(r.id) !== JSON.stringify(r));
+      const gone = [...before.keys()].filter((id) => !here.has(id));
       // いま手元にある行は、もう「消したもの」ではない。
       // 印を残したままだと、次に読み込んだときにまた消される。
       let revived = false;
@@ -320,33 +331,42 @@ export function OutlineProvider({ children }) {
         gone.forEach((id) => tombRef.current.add(id));
         writeIds(OUTLINE_TOMB_KEY, tombRef.current);
       }
-      saveOutlineRows(changed, gone).then((err) => {
+      sendingRef.current = true;
+      try {
+        let err;
+        try {
+          err = await saveOutlineRows(changed, gone);
+        } catch (error) {
+          // 通信が例外で終わっても、送信中のまま止めず最新の内容を送り直す。
+          err = error?.message || String(error);
+        }
+        if (stoppedRef.current) return;
         if (isOutlineTableMissing()) { setSyncNote("missing-table"); return; }
         if (err) {
-          // 断られたときに黙っていると、同期しているつもりで消える。
-          // いちばん多いのは、新しい表に RLS がかかっていて書けない場合。
           setSyncNote(`error:${err}`);
-          // そのままだと、次に手を加えるまで送り直されない。
-          // 間をおいて、ひとりでにもう一度試す。
           clearTimeout(retryRef.current);
           retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
           return;
         }
+        clearTimeout(retryRef.current);
         setSyncNote((cur) => (cur.startsWith("error:") ? "" : cur));
-        // 向こうから本当に消えたなら、もう印は要らない。
-        // 万単位の印を抱えると、こんどは置き場のほうが溢れる。
         if (gone.length) {
           gone.forEach((id) => tombRef.current.delete(id));
           writeIds(OUTLINE_TOMB_KEY, tombRef.current);
         }
         const next = new Map(syncedRef.current);
+        // 確かめたのは送った時点の行だけ。待っている間の編集まで同期済みにしない。
         gone.forEach((id) => next.delete(id));
-        changed.forEach((r) => next.set(r.id, JSON.stringify(r)));
+        changed.forEach((row) => next.set(row.id, JSON.stringify(row)));
         syncedRef.current = next;
         const known = new Set(next.keys());
         knownRef.current = known;
         writeIds(OUTLINE_KNOWN_KEY, known);
-      });
+        // 送信中に待機タイマーが過ぎた編集・削除も、操作を待たずに拾い直す。
+        setRetry((n) => n + 1);
+      } finally {
+        sendingRef.current = false;
+      }
     }, 800);
     return () => clearTimeout(timerRef.current);
   }, [nodes, retry]);

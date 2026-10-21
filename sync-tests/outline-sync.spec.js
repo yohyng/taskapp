@@ -11,8 +11,25 @@ export async function loadOutlineRows() {
   return JSON.parse(sessionStorage.getItem("test-outline-remote"));
 }
 export async function saveOutlineRows(rows, gone) {
-  window.__outlineSync.writes.push(structuredClone({ rows, gone }));
-  return null;
+  const state = window.__outlineSync;
+  const sent = structuredClone({ rows, gone });
+  state.writes.push(sent);
+  state.active += 1;
+  state.maxActive = Math.max(state.maxActive, state.active);
+  try {
+    const error = state.hold
+      ? await new Promise((resolve, reject) => state.pending.push({ resolve, reject }))
+      : null;
+    if (error) return error;
+    const remote = JSON.parse(sessionStorage.getItem("test-outline-remote")) || [];
+    const byId = new Map(remote.map((row) => [row.id, row]));
+    for (const id of sent.gone) byId.delete(id);
+    for (const row of sent.rows) byId.set(row.id, row);
+    sessionStorage.setItem("test-outline-remote", JSON.stringify([...byId.values()]));
+    return null;
+  } finally {
+    state.active -= 1;
+  }
 }
 export function subscribeOutline(_onRows, onStatus) {
   onStatus("live");
@@ -52,7 +69,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = loc
       sessionStorage.setItem(remoteKey, JSON.stringify(remote));
       sessionStorage.setItem("test-outline-seeded", "1");
     }
-    window.__outlineSync = { reads: 0, writes: [] };
+    window.__outlineSync = { reads: 0, writes: [], pending: [], hold: false, active: 0, maxActive: 0 };
   }, { key: KEY, remoteKey: REMOTE_KEY, local, remote, known });
   await page.clock.install();
   await page.goto("/sync-tests/fixture.html");
@@ -149,3 +166,116 @@ test("全件削除のあとも書き始められ、新しい行だけを送る",
   expect(sent[0].text).toBe("ここから続きを書く");
   expect(["a", "b"]).not.toContain(sent[0].id);
 });
+
+// 送信の返事を止め、入力の待機時間より長く通信がかかった場合を再現する。
+const holdWrites = (page) => page.evaluate(() => { window.__outlineSync.hold = true; });
+async function releaseWrite(page, { error = null, reject = false } = {}) {
+  await page.evaluate(({ error, reject }) => {
+    const state = window.__outlineSync;
+    state.hold = false;
+    const pending = state.pending.shift();
+    if (!pending) throw new Error("止めている送信がありません");
+    if (reject) pending.reject(new Error(error));
+    else pending.resolve(error);
+  }, { error, reject });
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.active)).toBe(0);
+}
+const remoteRows = (page) => page.evaluate((key) => JSON.parse(sessionStorage.getItem(key)), REMOTE_KEY);
+const inputFor = (page, id) => page.locator(`[data-row="${id}"] [data-outline-input]`);
+async function editRow(page, id, text) {
+  const input = inputFor(page, id);
+  if (!await input.count()) await page.locator(`[data-row="${id}"] [data-row-text]`).click();
+  await input.fill(text);
+}
+async function startHeldWrite(page) {
+  await holdWrites(page);
+  await editRow(page, "a", "先に送る内容");
+  await page.clock.fastForward(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+}
+
+test("送信中に同じ行を続けて編集しても、重ねて送らず最新の内容を続けて送る", async ({ page }) => {
+  await open(page);
+  await startHeldWrite(page);
+  await editRow(page, "a", "待っている間の編集");
+  await page.clock.fastForward(1_000);
+  expect(await writes(page)).toHaveLength(1);
+  await editRow(page, "a", "最後に残したい内容");
+  await page.clock.fastForward(1_000);
+  expect(await writes(page)).toHaveLength(1);
+
+  await releaseWrite(page);
+  await page.clock.fastForward(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(2);
+  const sent = await writes(page);
+  expect(sent[0].rows.find((row) => row.id === "a").text).toBe("先に送る内容");
+  expect(sent[1].rows.find((row) => row.id === "a").text).toBe("最後に残したい内容");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("最後に残したい内容");
+  expect(await page.evaluate(() => window.__outlineSync.maxActive)).toBe(1);
+  await page.clock.fastForward(2_000);
+  expect(await writes(page)).toHaveLength(2);
+});
+
+test("送信中に別の行を編集したときも、その差分だけを続けて送る", async ({ page }) => {
+  await open(page);
+  await startHeldWrite(page);
+  await editRow(page, "b", "あとで編集した別の行");
+  await page.clock.fastForward(1_000);
+  expect(await writes(page)).toHaveLength(1);
+  await releaseWrite(page);
+  await page.clock.fastForward(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(2);
+  const sent = await writes(page);
+  expect(sent[1].rows.map((row) => row.id)).toEqual(["b"]);
+  const remote = await remoteRows(page);
+  expect(remote.find((row) => row.id === "a").text).toBe("先に送る内容");
+  expect(remote.find((row) => row.id === "b").text).toBe("あとで編集した別の行");
+  expect(await page.evaluate(() => window.__outlineSync.maxActive)).toBe(1);
+});
+
+test("新しい行の送信中にその行を削除しても、完了後に削除を送って向こうへ残さない", async ({ page }) => {
+  await open(page);
+  await holdWrites(page);
+  await editRow(page, "a", "前に同期した行");
+  await inputFor(page, "a").press("End");
+  await inputFor(page, "a").press("Enter");
+  const input = page.locator("[data-outline-input]");
+  await input.fill("送っている間に消す行");
+  const id = await input.evaluate((el) => el.closest("[data-row]").dataset.row);
+  await page.clock.fastForward(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  await input.fill("");
+  await input.press("Backspace");
+  await expect(page.locator(`[data-row="${id}"]`)).toHaveCount(0);
+  await page.clock.fastForward(1_000);
+  expect(await writes(page)).toHaveLength(1);
+
+  await releaseWrite(page);
+  await page.clock.fastForward(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(2);
+  expect((await writes(page))[1].gone).toContain(id);
+  expect((await remoteRows(page)).some((row) => row.id === id)).toBe(false);
+  expect(await page.evaluate(() => window.__outlineSync.maxActive)).toBe(1);
+});
+
+for (const reject of [false, true]) {
+  test(`送信が${reject ? "例外" : "エラーの返事"}で失敗しても、最新の編集を再試行する`, async ({ page }) => {
+    await open(page);
+    await startHeldWrite(page);
+    await editRow(page, "a", "失敗後に送り直す最新の内容");
+    await page.clock.fastForward(1_000);
+    expect(await writes(page)).toHaveLength(1);
+    await releaseWrite(page, { error: "一時的な通信失敗", reject });
+    await expect(page.getByText("Supabase に送れませんでした：一時的な通信失敗")).toBeVisible();
+    await page.clock.fastForward(14_000);
+    expect(await writes(page)).toHaveLength(1);
+    await page.clock.runFor(2_000);
+    await expect.poll(async () => (await writes(page)).length).toBe(2);
+    expect((await writes(page))[1].rows.find((row) => row.id === "a").text).toBe("失敗後に送り直す最新の内容");
+    expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("失敗後に送り直す最新の内容");
+    await expect(page.getByText("Supabase に送れませんでした：一時的な通信失敗")).toHaveCount(0);
+    expect(await page.evaluate(() => window.__outlineSync.maxActive)).toBe(1);
+    await page.clock.fastForward(16_000);
+    expect(await writes(page)).toHaveLength(2);
+  });
+}
