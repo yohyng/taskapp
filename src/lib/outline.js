@@ -600,12 +600,12 @@ export function moveSubtreeTo(nodes, dragId, prevVisibleId, targetDepth) {
 // --- 木 ⇄ 行（Supabase に置くときの形） ---
 
 // 木を平らにする。親と並び順を持たせれば、行の集まりから元に戻せる。
-export function flattenTree(nodes, parentId = null, out = []) {
-  nodes.forEach((node, i) => {
-    out.push({
+// 行の保存と送信で、属性を落とさず同じ形にする。
+export function outlineRow(node, parentId = null, sortOrder = 0) {
+  return {
       id: node.id,
       parentId,
-      sortOrder: i,
+      sortOrder,
       text: node.text || "",
       collapsed: !!node.collapsed,
       completed: !!node.completed,
@@ -617,7 +617,12 @@ export function flattenTree(nodes, parentId = null, out = []) {
       imageWidth: node.imageWidth ?? null,
       createdAt: node.createdAt || null,
       updatedAt: node.updatedAt || null,
-    });
+  };
+}
+
+export function flattenTree(nodes, parentId = null, out = []) {
+  nodes.forEach((node, i) => {
+    out.push(outlineRow(node, parentId, i));
     flattenTree(node.children || [], node.id, out);
   });
   return out;

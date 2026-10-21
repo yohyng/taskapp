@@ -88,6 +88,8 @@ export function OutlineProvider({ children }) {
   const knownRef = useRef(new Set());   // 向こうにもあると確かめた id
   const queueRef = useRef({ sequence: 0, pending: new Map() });
   const revisionRef = useRef(0);
+  const rowSaveRef = useRef(false);
+  const nodeCountRef = useRef(0);
   const timerRef = useRef(null);
   const retryRef = useRef(null);
   const sendingRef = useRef(false);
@@ -126,13 +128,16 @@ export function OutlineProvider({ children }) {
     const snapshot = nodesRef.current;
     const at = new Date().toISOString();
     const record = outlineCheckpoint(snapshot, queueRef.current, tombRef.current, knownRef.current, ++revisionRef.current, at);
+    if (rowSaveRef.current) record.large = true;
     let localOk = false;
-    try {
-      localStorage.setItem(OUTLINE_KEY, JSON.stringify(record));
-      localStorage.setItem(OUTLINE_SAVED_KEY, at);
-      localOk = true;
-    } catch {
-      // 大きい置き場への確定前には、前の保存済みの写しも消さない。
+    if (!rowSaveRef.current) {
+      try {
+        localStorage.setItem(OUTLINE_KEY, JSON.stringify(record));
+        localStorage.setItem(OUTLINE_SAVED_KEY, at);
+        localOk = true;
+      } catch {
+        // 大きい置き場への確定前には、前の保存済みの写しも消さない。
+      }
     }
     const state = localWriteRef.current;
     const version = ++state.version;
@@ -143,7 +148,7 @@ export function OutlineProvider({ children }) {
     state.pending?.finish(finished);
     state.pending = { nodes: snapshot, record, localOk, version, finish };
     if (localOk) finish(true);
-    markLocal(localOk ? "saved" : "saving", !localOk, !localOk);
+    markLocal(localOk ? "saved" : "saving", !localOk && !rowSaveRef.current, !localOk);
     if (state.running) return finished;
     state.running = true;
     const drain = async () => {
@@ -161,12 +166,22 @@ export function OutlineProvider({ children }) {
               if (here && (here.legacy || here.revision <= attempt.record.revision)) localStorage.removeItem(OUTLINE_KEY);
             } catch { /* 読めない別の控えは触らない */ }
           }
+          // 差分保存が使えない場合だけ、本文と未送信記録を小さい置き場へ退避する。
+          if (!bigOk && rowSaveRef.current && !attempt.localOk) {
+            try {
+              // 新しい入力を、古い保存失敗の返事で上書きしない。
+              if (attempt.version === state.version) {
+                localStorage.setItem(OUTLINE_KEY, JSON.stringify(attempt.record));
+                attempt.localOk = true;
+              }
+            } catch { /* 最新の木は画面に残し、再試行と書き出しへつなげる */ }
+          }
           attempt.finish(!stoppedRef.current && (attempt.localOk || bigOk));
           if (stoppedRef.current) return;
           // 古い保存の返事で、あとから打った内容まで保存済みにしない。
           if (attempt.version !== state.version || attempt.nodes !== nodesRef.current) continue;
           const ok = attempt.localOk || bigOk;
-          markLocal(ok ? "saved" : "error", !attempt.localOk, false);
+          markLocal(ok ? "saved" : "error", !attempt.localOk && !rowSaveRef.current, false);
           if (!ok) localRetryRef.current = setTimeout(() => setLocalRetry((n) => n + 1), 15000);
         }
       } finally {
@@ -186,6 +201,8 @@ export function OutlineProvider({ children }) {
   // 削除の意図は送信待ちの間も有効。戻した行の印は、その場で外す。
   const prepareLocal = useCallback((before, after) => {
     const change = prepareOutlineChange(before, after);
+    nodeCountRef.current += change.added.length - change.removed.length;
+    if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
     queueRef.current = queueOutlineRows(queueRef.current, changedOutlineRows(before, change.nodes));
     for (const id of change.removed) tombRef.current.add(id);
     for (const id of change.added) tombRef.current.delete(id);
@@ -214,6 +231,8 @@ export function OutlineProvider({ children }) {
   const applyRaw = useCallback((updater) => {
     const prev = nodesRef.current;
     const next = typeof updater === "function" ? updater(prev) : updater;
+    nodeCountRef.current = flattenTree(next).length;
+    if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
     nodesRef.current = next;
     setNodes(next);
   }, []);
@@ -359,7 +378,8 @@ export function OutlineProvider({ children }) {
       queueRef.current = queue;
       tombRef.current = deleted;
       knownRef.current = known;
-      revisionRef.current = chosen?.revision || 0;
+      revisionRef.current = Math.max(chosen?.revision || 0, got?.revision || 0, initial?.revision || 0);
+      rowSaveRef.current = chosen?.large === true;
       applyRaw(() => restored.map(ensureNode));
       // 本文と記録を読み終えたここから、ひとまとめに保存してよい。
       bigReadRef.current = true;

@@ -1,4 +1,4 @@
-import { flattenTree, buildTree } from "./outline.js";
+import { flattenTree, buildTree, outlineRow } from "./outline.js";
 
 export const OUTLINE_FORMAT = "taskspace-outline/1";
 
@@ -109,4 +109,30 @@ export function replayOutlineRows(base, current, pending) {
     else if (edits.has(op.id)) rows.set(op.id, edits.get(op.id));
   }
   return buildTree([...rows.values()]);
+}
+
+// 保存済みの枝と同じ参照なら、その先は見ない。文字編集では対象の行だけ、
+// 構造変更では並び順が変わった行も取り引きへ渡す。
+export function outlineRowDelta(before, after) {
+  if (!before) { const rows = flattenTree(after); return { rows, gone: [], count: rows.length }; }
+  const rows = [];
+  const walk = (left, right, parentId = null) => {
+    if (left === right) return true;
+    if (left.length !== right.length || left.some((node, i) => node.id !== right[i].id)) return false;
+    for (let i = 0; i < left.length; i++) {
+      const old = left[i], node = right[i];
+      if (old === node) continue;
+      if (fields.some((key) => old[key] !== node[key])) rows.push(outlineRow(node, parentId, i));
+      if (!walk(old.children || [], node.children || [], node.id)) return false;
+    }
+    return true;
+  };
+  if (walk(before, after)) return { rows, gone: [], count: null };
+  const old = new Map(flattenTree(before).map((row) => [row.id, JSON.stringify(row)]));
+  const all = flattenTree(after);
+  const present = new Set(all.map((row) => row.id));
+  return {
+    rows: all.filter((row) => old.get(row.id) !== JSON.stringify(row)),
+    gone: [...old.keys()].filter((id) => !present.has(id)), count: all.length,
+  };
 }

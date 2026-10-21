@@ -197,3 +197,167 @@ test("本文と未送信記録の保存が中断したら、両方とも前の�
   expect(got.saved.nodes[0].text).toBe("新しい本文");
   expect(got.saved.sync.pending).toEqual([{ id: "a", version: 1, kind: "put" }]);
 });
+
+
+async function rowScenario(page, scenario) {
+  return page.evaluate(async (scenario) => {
+    const { bigGet, bigPut, bigDelete } = await import("/src/lib/localstore.js");
+    const { ensureNode, updateNode } = await import("/src/lib/outline.js");
+    const key = "taskspace-outline-v1";
+    const make = (nodes, revision, pending = [], deleted = []) => ({
+      format: "taskspace-outline/1", revision, at: "2035-01-01", nodes,
+      sync: { sequence: revision, pending, deleted, known: [] },
+    });
+    const node = (id, children = []) => ensureNode({ id, text: id, children });
+    const original = make([node("a"), node("b")], 1);
+    const nativePut = IDBObjectStore.prototype.put;
+    if (scenario === "migration") {
+      const db = await new Promise((resolve, reject) => {
+        const req = indexedDB.open("taskspace", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("big");
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction("big", "readwrite");
+        tx.objectStore("big").put(original, key);
+        tx.oncomplete = resolve;
+        tx.onabort = reject;
+      });
+      db.close();
+    } else if (scenario === "large") {
+      original.nodes = Array.from({ length: 25 }, (_, r) => node("r"+r,
+        Array.from({ length: 19 }, (_, g) => node("g"+r+"-"+g,
+          Array.from({ length: 20 }, (_, c) => node("n"+r+"-"+g+"-"+c))))));
+      if (!await bigPut(key, original)) throw new Error("大量行の準備に失敗");
+    } else if (!await bigPut(key, original)) throw new Error("準備の保存に失敗");
+
+    if (scenario === "clear") {
+      const removed = await bigDelete(key);
+      return { removed, after: await bigGet(key) };
+    }
+    const nextNodes = scenario === "large"
+      ? updateNode(original.nodes, "n24-18-19", { text: "1行だけ編集" })
+      : [{ ...original.nodes[0], text: "新しい本文" }];
+    const next = make(nextNodes, 2,
+      [{ id: scenario === "large" ? "n24-18-19" : "a", kind: "put", version: 2 }]);
+    if (scenario !== "large") {
+      next.sync.pending.push({ id: "b", kind: "delete", version: 2 });
+      next.sync.deleted = ["b"];
+    }
+    let rows = 0, headers = 0, wholeBody = false;
+    const stringify = JSON.stringify;
+    JSON.stringify = function (value, ...rest) {
+      if (value === next.nodes || value?.nodes === next.nodes) wholeBody = true;
+      return stringify.call(this, value, ...rest);
+    };
+    IDBObjectStore.prototype.put = function (...args) {
+      if (Array.isArray(args[1])) {
+        if (args[1][1] === "row") rows++;
+        if (args[1][1] === "meta") headers++;
+        if (args[0]?.nodes) wholeBody = true;
+      }
+      const req = nativePut.apply(this, args);
+      if (scenario === "abort" || scenario === "migration") {
+        if (Array.isArray(args[1]) && args[1][1] === "meta") req.addEventListener("success", () => this.transaction.abort());
+      }
+      return req;
+    };
+    let ok;
+    try { ok = await bigPut(key, next); }
+    finally { IDBObjectStore.prototype.put = nativePut; JSON.stringify = stringify; }
+    const after = await bigGet(key);
+    const recovered = (scenario === "abort" || scenario === "migration") ? await bigPut(key, next) : null;
+    const recovery = recovered ? await bigGet(key) : null;
+    return { ok, rows, headers, wholeBody, after, recovered, recovery };
+  }, scenario);
+}
+
+test("1万行の本文を直しても、対象の1行と同期記録だけを保存する", async ({ page }) => {
+  const got = await rowScenario(page, "large");
+  expect(got.ok).toBe(true);
+  expect(got.rows).toBe(1);
+  expect(got.headers).toBe(1);
+  expect(got.wholeBody).toBe(false);
+  expect(got.after.nodes[24].children[18].children[19].text).toBe("1行だけ編集");
+  expect(got.after.sync.pending).toEqual([{ id: "n24-18-19", kind: "put", version: 2 }]);
+});
+
+test("差分の保存が中断したら、行・削除・未送信の記録も一緒に戻す", async ({ page }) => {
+  const got = await rowScenario(page, "abort");
+  expect(got.ok).toBe(false);
+  expect(got.after.nodes.map((n) => n.text)).toEqual(["a", "b"]);
+  expect(got.after.sync.pending).toEqual([]);
+  expect(got.recovered).toBe(true);
+  expect(got.recovery.nodes.map((n) => n.text)).toEqual(["新しい本文"]);
+  expect(got.recovery.sync.deleted).toEqual(["b"]);
+});
+
+test("旧スナップショットからの移行を中断しても、旧本文を残して再実行できる", async ({ page }) => {
+  const got = await rowScenario(page, "migration");
+  expect(got.ok).toBe(false);
+  expect(got.after.nodes.map((n) => n.text)).toEqual(["a", "b"]);
+  expect(got.recovered).toBe(true);
+  expect(got.recovery.nodes[0].text).toBe("新しい本文");
+  expect(got.recovery.sync.pending).toHaveLength(2);
+});
+
+test("本文を消すときは、差分の行と同期記録も同じ取引で消す", async ({ page }) => {
+  expect(await rowScenario(page, "clear")).toEqual({ removed: true, after: undefined });
+});
+
+test("古い保存基準では、先に進んだ行の記録を上書きしない", async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { bigPut, bigGet } = await import("/src/lib/localstore.js");
+    const key = "taskspace-outline-v1";
+    const record = { format: "taskspace-outline/1", revision: 1, at: "", nodes: [],
+      sync: { sequence: 0, pending: [], deleted: [], known: [] } };
+    if (!await bigPut(key, record)) throw new Error("準備に失敗");
+    const db = await new Promise((resolve) => {
+      const req = indexedDB.open("taskspace", 1); req.onsuccess = () => resolve(req.result);
+    });
+    await new Promise((resolve) => {
+      const tx = db.transaction("big", "readwrite"), store = tx.objectStore("big");
+      const req = store.get([key, "meta"]);
+      req.onsuccess = () => store.put({ ...req.result, revision: 5 }, [key, "meta"]);
+      tx.oncomplete = resolve;
+    });
+    db.close();
+    const ok = await bigPut(key, { ...record, revision: 2 });
+    return { ok, revision: (await bigGet(key)).revision };
+  });
+  expect(result).toEqual({ ok: false, revision: 5 });
+});
+
+for (const field of ["format", "count"]) {
+  test(`行の${field === "format" ? "形式" : "件数"}が壊れていたら、旧形式や空の本文として読み飛ばさない`, async ({ page }) => {
+    const got = await page.evaluate(async (field) => {
+      const { bigPut, bigGet } = await import("/src/lib/localstore.js");
+      const key = "taskspace-outline-v1";
+      const record = { format: "taskspace-outline/1", revision: 1, at: "", nodes: [],
+        sync: { sequence: 0, pending: [], deleted: [], known: [] } };
+      if (!await bigPut(key, record)) throw new Error("準備の保存に失敗");
+      const db = await new Promise((resolve) => {
+        const req = indexedDB.open("taskspace", 1); req.onsuccess = () => resolve(req.result);
+      });
+      await new Promise((resolve) => {
+        const tx = db.transaction("big", "readwrite"), store = tx.objectStore("big");
+        const req = store.get([key, "meta"]);
+        req.onsuccess = () => {
+          const corrupt = { ...req.result };
+          if (field === "format") delete corrupt.format;
+          else corrupt.count = 1;
+          store.put(corrupt, [key, "meta"]);
+        };
+        tx.oncomplete = resolve;
+      });
+      db.close();
+      let threw = false;
+      try { await bigGet(key, { throwOnError: true }); } catch { threw = true; }
+      const quiet = await bigGet(key);
+      const replaced = await bigPut(key, { ...record, revision: 2 });
+      return { threw, quiet, replaced };
+    }, field);
+    expect(got).toEqual({ threw: true, quiet: undefined, replaced: false });
+  });
+}

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
 import {
-  OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
+  outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
   changedOutlineRows, queueOutlineRows, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
 } from "./outline-checkpoint.js";
 
@@ -152,5 +152,32 @@ describe("移行途中の古い写しを見分ける", () => {
     const restored = [{ ...n("a"), text: "別の控えからの復元" }];
     expect(chooseOutlineSnapshot(restored, checkpoint(), { nodes: [n("a")] }))
       .toEqual({ nodes: restored, legacy: true });
+  });
+});
+
+describe("本文の保存差分", () => {
+  it("文字を直した子の行だけを、親と順序を付けて返す", () => {
+    const before = [n("a", [n("b"), n("c")]), n("d")];
+    const after = updateNode(before, "c", { text: "編集" });
+    const delta = outlineRowDelta(before, after);
+    expect(delta.rows).toHaveLength(1);
+    expect(delta.rows[0]).toMatchObject({ id: "c", parentId: "a", sortOrder: 1, text: "編集" });
+    expect(delta.gone).toEqual([]);
+    expect(delta.count).toBeNull();
+    expect(outlineRowDelta(after, after).rows).toEqual([]);
+  });
+  it("親の削除では子孫も除き、残る兄弟の順序も保存する", () => {
+    const before = [n("a", [n("b")]), n("c")];
+    const delta = outlineRowDelta(before, [before[1]]);
+    expect(delta.gone).toEqual(["a", "b"]);
+    expect(delta.rows.map((row) => row.id)).toEqual(["c"]);
+    expect(delta.rows[0].sortOrder).toBe(0);
+    expect(delta.count).toBe(1);
+  });
+  it("最初の保存は全行を含め、空への変更も保存できる", () => {
+    const before = [n("a", [n("b")])];
+    expect(outlineRowDelta(null, before).count).toBe(2);
+    expect(outlineRowDelta(before, []).gone).toEqual(["a", "b"]);
+    expect(outlineRowDelta(before, []).count).toBe(0);
   });
 });

@@ -1802,8 +1802,8 @@ test.describe("大きくて localStorage に入らないとき", () => {
     await expect.poll(async () => page.evaluate(() => new Promise((done) => {
       const req = indexedDB.open("taskspace", 1);
       req.onsuccess = () => {
-        const get = req.result.transaction("big", "readonly").objectStore("big").get("taskspace-outline-v1");
-        get.onsuccess = () => done(JSON.stringify(get.result?.nodes || []).includes("ああ"));
+        const get = req.result.transaction("big", "readonly").objectStore("big").getAll(IDBKeyRange.bound(["taskspace-outline-v1", "row"], ["taskspace-outline-v1", "row", []]));
+        get.onsuccess = () => done(JSON.stringify(get.result || []).includes("ああ"));
         get.onerror = () => done(false);
       };
       req.onerror = () => done(false);

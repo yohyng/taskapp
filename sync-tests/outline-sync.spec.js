@@ -172,18 +172,7 @@ test("起動時に全件削除を受け取ったあと、リロードしても�
 test("空の木がIndexedDBだけに残っていても、勝手に空行を同期しない", async ({ page }) => {
   await open(page, { local: [], remote: [], known: [] });
   await expect(empty(page)).toBeVisible();
-  await expect.poll(() => page.evaluate(() => new Promise((resolve, reject) => {
-    const req = indexedDB.open("taskspace", 1);
-    req.onerror = () => reject(req.error);
-    req.onsuccess = () => {
-      const db = req.result;
-      const tx = db.transaction("big", "readonly");
-      const get = tx.objectStore("big").get("taskspace-outline-v1");
-      get.onsuccess = () => resolve(get.result?.nodes);
-      get.onerror = () => reject(get.error);
-      tx.oncomplete = () => db.close();
-    };
-  }))).toEqual([]);
+  await expect.poll(() => storedBig(page)).toEqual([]);
   await page.evaluate((key) => localStorage.removeItem(key), KEY);
   await page.reload();
   await expect(empty(page)).toBeVisible();
@@ -953,4 +942,54 @@ test("両方への保存が失敗しても、前に確定した小さい控え�
   expect(await storedRecord(page)).toEqual(before);
   await page.reload();
   await expect(page.locator('[data-row="a"]')).toContainText(saved()[0].text);
+});
+
+test("大きい本文は全体の小さい写しを作らず、編集と送信待ちを開き直して復元する", async ({ page }) => {
+  const local = [{ ...node("a", "大きい本文の親"), collapsed: true,
+    children: Array.from({ length: 999 }, (_, i) => node("child-" + i, "子の行" + i)) }];
+  await open(page, { local, remote: null });
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await editRow(page, "a", "差分で残した親");
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("差分で残した親");
+  const record = await bigRecord(page);
+  expect(record.large).toBe(true);
+  expect(record.sync.pending.map((op) => op.id)).toEqual(["a"]);
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await page.reload();
+  await expect(page.locator('[data-row="a"]')).toContainText("差分で残した親");
+  expect((await bigRecord(page)).nodes[0].children).toHaveLength(999);
+});
+
+test("大きい本文の差分保存に失敗したときだけ、全体の写しへ退避して復旧する", async ({ page }) => {
+  const local = [{ ...node("a", "大きい本文の親"), collapsed: true,
+    children: Array.from({ length: 999 }, (_, i) => node("child-" + i, "子の行" + i)) }];
+  await open(page, { local, remote: null });
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await configureStorage(page, { fail: true });
+  await editRow(page, "a", "退避して守る内容");
+  await expect.poll(async () => (await storedRecord(page))?.nodes[0].text).toBe("退避して守る内容");
+  expect((await storedRecord(page)).sync.pending.map((op) => op.id)).toEqual(["a"]);
+  await expect(localError(page)).toHaveCount(0);
+  await configureStorage(page, { fail: false });
+  // 保存失敗からの退避後も、同じ手元の変更で差分保存をやり直せる。
+  await editRow(page, "a", "差分保存へ戻した内容");
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("差分保存へ戻した内容");
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await page.reload();
+  await expect(page.locator('[data-row="a"]')).toContainText("差分保存へ戻した内容");
+});
+
+test("大きい文書を小さくしたあと開き直しても、毎回の全体コピーへ戻さない", async ({ page }) => {
+  const local = [{ ...node("a", "消す親"), collapsed: true,
+    children: Array.from({ length: 998 }, (_, i) => node("child-" + i, "子")) }, node("b", "残す行")];
+  await open(page, { local, remote: null });
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await deleteRow(page, "a");
+  await expect.poll(async () => (await bigRecord(page))?.nodes.map((n) => n.id)).toEqual(["b"]);
+  expect((await bigRecord(page)).large).toBe(true);
+  await page.reload();
+  await expect(page.locator('[data-row="b"]')).toContainText("残す行");
+  await editRow(page, "b", "小さくしてからの編集");
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("小さくしてからの編集");
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
 });
