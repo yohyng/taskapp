@@ -142,3 +142,31 @@ test("複製できない値を渡しても取引を残さず、次の保存を�
     recovery: { text: "次の保存" },
   });
 });
+
+test("起動時の読み出しは、中身が無い場合と取引に失敗した場合を区別できる", async ({ page }) => {
+  const got = await page.evaluate(async () => {
+    const { bigGet, bigPut } = await import("/src/lib/localstore.js");
+    const key = "読み出し失敗を区別する試験";
+    await bigPut(key, { text: "保存済みの内容" });
+    const missing = await bigGet("まだ無いキー", { throwOnError: true });
+    const nativeGet = IDBObjectStore.prototype.get;
+    IDBObjectStore.prototype.get = function (...args) {
+      const req = nativeGet.apply(this, args);
+      req.addEventListener("success", () => this.transaction.abort());
+      return req;
+    };
+    let threw = false;
+    let quiet;
+    try {
+      try { await bigGet(key, { throwOnError: true }); }
+      catch { threw = true; }
+      quiet = await bigGet(key);
+    } finally {
+      IDBObjectStore.prototype.get = nativeGet;
+    }
+    return { missing, threw, quiet, intact: await bigGet(key) };
+  });
+  expect(got).toEqual({
+    missing: undefined, threw: true, quiet: undefined, intact: { text: "保存済みの内容" },
+  });
+});

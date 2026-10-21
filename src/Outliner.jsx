@@ -105,36 +105,67 @@ export function OutlineProvider({ children }) {
   const [link, setLink] = useState(() => (supabaseReady() ? "waking" : "off"));
   const [syncedAt, setSyncedAt] = useState("");
 
-  // 手元には必ず残す。向こうが無くても使えるように。
-  // localStorage は 5MB ほどで頭打ちになるので、入らないときは
-  // IndexedDB のほうに置く（iPad で溢れるのはここ）。
-  const tooBigRef = useRef(false);
+  // 手元の保存結果は、Supabaseの知らせとは分ける。片方の成功で失敗を隠さないため。
+  const [localSave, setLocalSave] = useState({ status: "loading", large: false, busy: false, hidden: false });
+  const [localRetry, setLocalRetry] = useState(0);
+  const markLocal = useCallback((status, large, busy) => {
+    setLocalSave((prev) => {
+      const next = status === "saving" && prev.status === "error" ? "error" : status;
+      if (prev.status === next && prev.large === large && prev.busy === busy) return prev;
+      return { status: next, large, busy, hidden: large ? prev.hidden : false };
+    });
+  }, []);
   const bigReadRef = useRef(false);   // IndexedDB を読み終えたか
-  useEffect(() => {
-    // 読み終える前に書かない。
-    // ここで書くと、起き抜けの空っぽの木が「いちばん新しい」ことになり、
-    // IndexedDB にある本物を押しのけてしまう（開き直すと空になる）。
-    if (!bigReadRef.current) return;
-    const text = JSON.stringify(nodes);
+  const localWriteRef = useRef({ pending: null, running: false, version: 0 });
+  const localRetryRef = useRef(null);
+  const saveLocal = useCallback(() => {
+    // 読む前に書くと、起き抜けの空の木が本物を押しのけてしまう。
+    if (!bigReadRef.current || stoppedRef.current) return;
+    clearTimeout(localRetryRef.current);
+    const snapshot = nodesRef.current;
     const at = new Date().toISOString();
-    let failed = false;
+    let localOk = false;
     try {
-      localStorage.setItem(OUTLINE_KEY, text);
+      localStorage.setItem(OUTLINE_KEY, JSON.stringify(snapshot));
       localStorage.setItem(OUTLINE_SAVED_KEY, at);
+      localOk = true;
     } catch {
-      failed = true;
-      // 入らなかったぶんは、こちらにだけ残す（中途半端な写しは消す）
+      // 古い写しが残ると、次の起動でIndexedDBの新しい中身より優先されてしまう。
       try { localStorage.removeItem(OUTLINE_KEY); } catch { /* noop */ }
     }
-    // 大きいほうにも必ず置く。読み終える前に書くと、まだ読んでいない
-    // 中身を上書きしてしまうので、読み終えるまでは触らない。
-    if (bigReadRef.current) bigPut(OUTLINE_KEY, { at, nodes });
-    // 知らせは、変わったときだけ出す（毎回 setState すると描き直しが続く）
-    if (failed !== tooBigRef.current) {
-      tooBigRef.current = failed;
-      setSyncNote((cur) => (failed ? "too-big" : (cur === "too-big" ? "" : cur)));
-    }
-  }, [nodes]);
+    const state = localWriteRef.current;
+    const version = ++state.version;
+    // 待っている木は最新の1つだけ。入力のたびに大きい木を溜め込まない。
+    state.pending = { nodes: snapshot, at, localOk, version };
+    markLocal(localOk ? "saved" : "saving", !localOk, !localOk);
+    if (state.running) return;
+    state.running = true;
+    const drain = async () => {
+      try {
+        while (state.pending && !stoppedRef.current) {
+          const attempt = state.pending;
+          state.pending = null;
+          let bigOk = false;
+          try { bigOk = await bigPut(OUTLINE_KEY, { at: attempt.at, nodes: attempt.nodes }); }
+          catch { /* 例外でも、書きかけを残して再試行する */ }
+          if (stoppedRef.current) return;
+          // 古い保存の返事で、あとから打った内容まで保存済みにしない。
+          if (attempt.version !== state.version || attempt.nodes !== nodesRef.current) continue;
+          const ok = attempt.localOk || bigOk;
+          markLocal(ok ? "saved" : "error", !attempt.localOk, false);
+          if (!ok) localRetryRef.current = setTimeout(() => setLocalRetry((n) => n + 1), 15000);
+        }
+      } finally {
+        state.running = false;
+      }
+    };
+    void drain();
+  }, [markLocal]);
+  useEffect(() => { saveLocal(); }, [nodes, localRetry, saveLocal]);
+  useEffect(() => () => {
+    clearTimeout(localRetryRef.current);
+    localWriteRef.current.pending = null;
+  }, []);
 
   // 書き換えはここを通す。前の姿を履歴に積む。
   // 字を打っているあいだは1手にまとめる（1文字ずつ戻るのは使いにくい）。
@@ -238,20 +269,29 @@ export function OutlineProvider({ children }) {
     let stop = null;
     let every = null;
     (async () => {
-      const got = await bigGet(OUTLINE_KEY);
+      let got;
+      let readFailed = false;
+      try { got = await bigGet(OUTLINE_KEY, { throwOnError: true }); }
+      catch { readFailed = true; }
       if (!alive) return;
       // 手元の写しが残っていれば、そちらが本物。
       // 入りきらなかったときは写しを消しているので、無いことが
       // 「大きいほうにしかない」という合図になる。
       let minePresent = false;
-      try { minePresent = !!localStorage.getItem(OUTLINE_KEY); } catch { /* 読めない＝無い */ }
+      try { minePresent = Array.isArray(JSON.parse(localStorage.getItem(OUTLINE_KEY) || "null")); }
+      catch { /* 読めない＝無い */ }
+      if (!minePresent && readFailed) {
+        // 読めないことと空であることは違う。再試行で本物を上書きしない。
+        markLocal("read-error", false, false);
+        return;
+      }
       if (!minePresent && Array.isArray(got?.nodes)) applyRaw(() => got.nodes.map(ensureNode));
       tombRef.current = await readIds(OUTLINE_TOMB_KEY);
       knownRef.current = await readIds(OUTLINE_KNOWN_KEY);
       if (!alive) return;
       // ここから先は、手元に書いてよい
       bigReadRef.current = true;
-      bigPut(OUTLINE_KEY, { at: new Date().toISOString(), nodes: nodesRef.current });
+      saveLocal();
       pullOnce();
       stop = listen();
 
@@ -425,8 +465,9 @@ export function OutlineProvider({ children }) {
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,
     link, syncedAt, refresh: () => wakeRef.current?.(),
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
-    syncNote, dismissSync: () => setSyncNote(""),
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, link, syncedAt]);
+    syncNote, dismissSync: () => setSyncNote(""), localSave, retryLocalSave: saveLocal,
+    dismissLocalInfo: () => setLocalSave((prev) => ({ ...prev, hidden: true })),
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, link, syncedAt, localSave, saveLocal]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -522,7 +563,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, view, setView, resetSync, pullRemote, link, syncedAt, refresh } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, view, setView, resetSync, pullRemote, link, syncedAt, refresh } = useOutline();
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
   // ぶら下げたままだと枠の外に出てしまい、指が届かない。
@@ -1551,21 +1592,53 @@ export default function Outliner() {
         />
       </div>
 
-      {syncNote === "too-big" && (
-        <div data-outline-toobig className="mb-2 flex items-start justify-between gap-2 rounded border border-white/10 bg-white/[0.03] p-2 text-[10px] leading-relaxed text-neutral-400">
-          <div>
-            中身が大きいので、この端末では別の置き場（IndexedDB）に残しています。
-            閉じても消えません{!isOutlineTableMissing() && "。Supabase にも送っています"}。
-          </div>
-          <button onClick={dismissSync} className="shrink-0 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]">
+      {localSave.status === "saving" && localSave.large && !localSave.hidden && (
+        <div data-outline-local-saving role="status" className="mb-2 rounded border border-white/10 bg-white/[0.03] p-2 text-[10px] leading-relaxed text-neutral-400">
+          この端末に保存しています…
+        </div>
+      )}
+
+      {localSave.status === "saved" && localSave.large && !localSave.hidden && (
+        <div data-outline-toobig role="status" className="mb-2 flex items-start justify-between gap-2 rounded border border-white/10 bg-white/[0.03] p-2 text-[10px] leading-relaxed text-neutral-400">
+          <div>中身が大きいので、この端末の大きな置き場に保存しました。</div>
+          <button onClick={dismissLocalInfo} className="shrink-0 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]">
             閉じる
           </button>
         </div>
       )}
 
+      {localSave.status === "read-error" && (
+        <div data-outline-local-read-error role="alert" className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
+          <div className="mb-1 font-semibold">保存済みの内容を読み出せませんでした</div>
+          <div className="mb-2 text-red-100/80">
+            元の内容を守るため、保存と同期を止めています。画面で書いた内容はJSONに書き出してから、この画面を開き直してください。
+          </div>
+          <button data-outline-local-export onClick={exportJson} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15">
+            JSONに書き出す
+          </button>
+        </div>
+      )}
+
+      {localSave.status === "error" && (
+        <div data-outline-local-error role="alert" className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
+          <div className="mb-1 font-semibold">この端末に保存できていません</div>
+          <div className="mb-2 text-red-100/80">
+            画面には残っています。もう一度保存するか、JSONに書き出してください。保存は自動でも再試行します。
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button data-outline-local-retry onClick={retryLocalSave} disabled={localSave.busy} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15 disabled:opacity-50">
+              {localSave.busy ? "保存中…" : "もう一度保存"}
+            </button>
+            <button data-outline-local-export onClick={exportJson} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15">
+              JSONに書き出す
+            </button>
+          </div>
+        </div>
+      )}
+
       {syncNote.startsWith("error:") && (
         <div data-outline-sync-error className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
-          <div className="mb-1 font-semibold">この端末にしか残っていません</div>
+          <div className="mb-1 font-semibold">ほかの端末へ送れていません</div>
           <div className="mb-1 text-red-100/80">Supabase に送れませんでした：{syncNote.slice(6)}</div>
           <div className="mb-1 text-red-100/70">
             新しい表に RLS（行レベルセキュリティ）がかかっていると、書き込みが断られます。

@@ -854,9 +854,18 @@ test.describe("見た目の設定", () => {
 
     // 真ん中あたりの行をいくつか。どれも同じ高さに来る
     // （いちばん上の数行は、それより上に送れないので対象にしない）
+    // 移動は次の描画で行うので、クリック直後ではなく配置が整ってから測る。
     await page.locator('[data-row="n15"] [data-row-text]').click();
+    await expect.poll(async () => {
+      const position = await whereIsEditing(page);
+      return position === null ? Infinity : Math.abs(position - 0.6);
+    }).toBeLessThan(0.12);
     const a = await whereIsEditing(page);
     await page.locator('[data-row="n30"] [data-row-text]').click();
+    await expect.poll(async () => {
+      const position = await whereIsEditing(page);
+      return position === null ? Infinity : Math.abs(position - a);
+    }).toBeLessThan(0.1);
     const b = await whereIsEditing(page);
 
     expect(a).not.toBeNull();
@@ -1806,7 +1815,7 @@ test.describe("大きくて localStorage に入らないとき", () => {
     await expect(page.getByText("あああ", { exact: false }).first()).toBeVisible();
   });
 
-  test("知らせは出るが、脅かさない", async ({ page }) => {
+  test("端末に保存できたあとで知らせる", async ({ page }) => {
     await refuseLocal(page);
     await page.reload();
     await page.waitForSelector("header");
@@ -1815,7 +1824,7 @@ test.describe("大きくて localStorage に入らないとき", () => {
     await page.keyboard.type("い".repeat(300));
     const note = page.locator("[data-outline-toobig]");
     await expect(note).toBeVisible();
-    await expect(note).toContainText("閉じても消えません");
+    await expect(note).toContainText("この端末の大きな置き場に保存しました");
   });
 });
 

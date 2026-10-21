@@ -40,9 +40,13 @@ async function withStore(mode, run) {
   } finally { db.close(); }
 }
 
-export async function bigGet(key) {
+// 起動時は「無い」と「読めない」を区別しないと、本物へ空の木を上書きしてしまう。
+export async function bigGet(key, { throwOnError = false } = {}) {
   try { return await withStore("readonly", (store) => store.get(key)); }
-  catch { return undefined; }
+  catch (error) {
+    if (throwOnError) throw error;
+    return undefined;
+  }
 }
 
 export async function bigPut(key, value) {
