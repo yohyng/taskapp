@@ -174,7 +174,8 @@ export function OutlineProvider({ children }) {
         const known = new Set(syncedRef.current.keys());
         knownRef.current = known;
         writeIds(OUTLINE_KNOWN_KEY, known);
-        return merged.length ? merged : mine;
+        // 全件削除も読み込み成功の結果。空を失敗扱いすると、古い行を送り返してしまう。
+        return merged;
       });
       setSyncedAt(new Date().toISOString());
     });
@@ -235,7 +236,7 @@ export function OutlineProvider({ children }) {
       // 「大きいほうにしかない」という合図になる。
       let minePresent = false;
       try { minePresent = !!localStorage.getItem(OUTLINE_KEY); } catch { /* 読めない＝無い */ }
-      if (!minePresent && got?.nodes?.length) applyRaw(() => got.nodes.map(ensureNode));
+      if (!minePresent && Array.isArray(got?.nodes)) applyRaw(() => got.nodes.map(ensureNode));
       tombRef.current = await readIds(OUTLINE_TOMB_KEY);
       knownRef.current = await readIds(OUTLINE_KNOWN_KEY);
       if (!alive) return;
@@ -477,7 +478,7 @@ function defaultOutline() {
 function load() {
   try {
     const raw = JSON.parse(localStorage.getItem(OUTLINE_KEY) || "null");
-    if (Array.isArray(raw) && raw.length) return raw.map(ensureNode);
+    if (Array.isArray(raw)) return raw.map(ensureNode);
   } catch { /* 壊れていたら作り直す */ }
   return defaultOutline();
 }
@@ -1737,6 +1738,24 @@ alter table outline_nodes disable row level security;
             className="pointer-events-none absolute right-0 z-20 h-[2px] rounded bg-sky-400"
             style={{ top: drag.top - 1, left: drag.depth * INDENT + 24 }}
           />
+        )}
+        {nodes.length === 0 && (
+          <button
+            type="button"
+            data-outline-empty
+            onClick={() => {
+              // 空の行を勝手に同期せず、書き始めたときにだけ作る。
+              const made = makeNode("");
+              setNodes((prev) => [...prev, made]);
+              setQuery("");
+              setDateView(false);
+              setZoomId(null);
+              edit(made.id, 0);
+            }}
+            className="w-full rounded px-6 py-2 text-left text-sm text-neutral-500 hover:bg-white/[0.03]"
+          >
+            書き始める
+          </button>
         )}
         {rows.map(({ node, depth }) => {
           const hasKids = !!node.children?.length;

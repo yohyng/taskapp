@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <title>アウトライン同期の回帰テスト</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module">
+      import React from "react";
+      import { createRoot } from "react-dom/client";
+      import "/src/index.css";
+      import Outliner, { OutlineProvider } from "/src/Outliner.jsx";
+
+      createRoot(document.getElementById("root")).render(
+        React.createElement(React.StrictMode, null,
+          React.createElement(OutlineProvider, null, React.createElement(Outliner))),
+      );
+    </script>
+  </body>
+</html>
