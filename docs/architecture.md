@@ -111,6 +111,29 @@ Supabase には木のまま置けないので、`flattenTree()` で
 - 一度に全部送る（1万行で URL と本文が溢れる。upsert 500 / delete 200 で小分け）
 - 列が無い置き場に、新しい列を含めて送る（upsert がまるごと断られ、同期が止まる）
 
+### v1.15.8の本文と未送信の一括保存
+
+`src/lib/outline-checkpoint.js` が保存形式と行ごとの未送信世代を扱う。
+`taskspace-outline-v1` の値は旧配列から、次の1件の記録へ移る。
+
+```js
+{
+  format: "taskspace-outline/1", revision, at, nodes: [],
+  sync: { sequence, pending: [{ id, kind: "put" | "delete", version }], deleted: [], known: [] },
+}
+```
+
+- 本文と記録を、localStorageの1回のsetItem／IndexedDBの1回の取引で一緒に残す。
+- 新形式同士はrevisionで新しい控えを選ぶ。旧形式のlocalStorageの配列は引き続き読む。移行元と同じ古い写しが残っている場合は、新形式へ確定した記録を優先する。
+- IndexedDBの読み出しに失敗した起動では、localStorageが読めても保存・同期を止める。より新しい世代の有無を確認せずに上書きしない。
+- 旧形式から切り替える前に `taskspace-outline-v1-legacy-copy` へ控えを残す。旧形式の印・knownも移行時だけ読み、その後は同じ記録のsyncを使う。
+- 送る行は端末への確定を待つ。古い送信完了で新しい未送信世代を除かず、再起動後も送信待ちを復元する。
+- 起動中の入力も読み出し後に重ねる。読めない形式や控えを残せない状態なら、保存・同期を止める。
+- ドライブの控えは画面の本文と未送信記録を一緒に取得する。
+
+保存はまだ本文全体のスナップショット。行ごとの差分保存、複数タブの排他、サーバーの版管理、
+競合した相手の文章の退避は後続の段階。旧版のタブを閉じてから新しい版へ切り替える。
+
 ### Supabase の SQL（1回だけ）
 
 ```sql

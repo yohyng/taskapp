@@ -899,7 +899,7 @@ test.describe("直したところ", () => {
     await page.locator('[data-row="a"] [data-row-text]').click();
     await page.keyboard.type("！");
     await page.keyboard.press("Escape");
-    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-v1"))[0]);
+    const saved = await page.evaluate(() => ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1")))[0]);
     expect(saved).toMatchObject({ headingLevel: 1, textColor: "#e03535" });
   });
 
@@ -931,7 +931,7 @@ test.describe("直したところ", () => {
     await page.keyboard.press("Backspace");
 
     // 画面に無い「よそもの」に混ざっていないこと
-    const all = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+    const all = await page.evaluate(() => ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).map((x) => x.text));
     expect(all).toEqual(["あたり1", "よそもの", "あたり2"]);
   });
 });
@@ -950,7 +950,7 @@ test.describe("ほかのアプリから取り込む", () => {
   // 取り込んだぶんは畳んで入るので、置いてある中身のほうを見る
   const tree = (page) => page.evaluate(() => {
     const walk = (ns, d = 0) => ns.flatMap((n) => ["  ".repeat(d) + n.text, ...walk(n.children || [], d + 1)]);
-    return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+    return walk(((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))));
   });
 
   test("WorkFlowy の .md（字下げの箇条書き）を読める", async ({ page }) => {
@@ -972,7 +972,7 @@ test.describe("ほかのアプリから取り込む", () => {
     // 題（Home）は入れ物にしない。チェック済みは完了として入る。
     const done = await page.evaluate(() => {
       const find = (ns) => ns.flatMap((n) => [n, ...find(n.children || [])]);
-      return find(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).filter((n) => n.completed).map((n) => n.text);
+      return find(((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1")))).filter((n) => n.completed).map((n) => n.text);
     });
     expect(done).toEqual(["おわったこと"]);
   });
@@ -1318,7 +1318,7 @@ test.describe("ぜんぶ消す", () => {
   const clear = (page) => page.locator("[data-outline-clear]");
   // 空の行は「空の行」という案内を出すので、置いてある中身のほうを見る
   const stored = (page) => page.evaluate(() =>
-    JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+    ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).map((x) => x.text));
 
   test("一度押しただけでは消えない", async ({ page }) => {
     await openPanel(page);
@@ -1357,7 +1357,7 @@ test.describe("ぜんぶ消す", () => {
     await fresh.locator("[data-pane-mode]").first().selectOption("outline");
     await fresh.waitForSelector("[data-outliner]");
     expect(await fresh.evaluate(() =>
-      JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text))).toEqual([""]);
+      ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).map((x) => x.text))).toEqual([""]);
     await fresh.close();
   });
 });
@@ -1383,7 +1383,7 @@ test.describe("取り込んだ中身は畳んで入る", () => {
     // 中身はちゃんと入っている
     const all = await page.evaluate(() => {
       const walk = (ns) => ns.flatMap((n) => [n.text, ...walk(n.children || [])]);
-      return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+      return walk(((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))));
     });
     expect(all).toEqual(["もとからある", "2025", "TRAY", "メモ", "2024"]);
   });
@@ -1469,7 +1469,7 @@ test.describe("日付ビュー", () => {
     expect(await shape(page)).toEqual(before);
     // 置いてある中身も、そのまま
     const stored = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("taskspace-outline-v1")).map((x) => x.text));
+      ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).map((x) => x.text));
     expect(stored).toEqual(["2026", "2025", "TRAY"]);
   });
 
@@ -1485,7 +1485,7 @@ test.describe("日付ビュー", () => {
 
     const stored = await page.evaluate(() => {
       const walk = (ns) => ns.flatMap((n) => [n.text, ...walk(n.children || [])]);
-      return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1")));
+      return walk(((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))));
     });
     expect(stored).toContain("正月のこと！");
   });
@@ -1533,7 +1533,7 @@ test.describe("行ごとの日付（メタデータ）", () => {
   });
   const stored = (page, id) => page.evaluate((x) => {
     const walk = (ns) => ns.flatMap((n) => [n, ...walk(n.children || [])]);
-    return walk(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).find((n) => n.id === x);
+    return walk(((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1")))).find((n) => n.id === x);
   }, id);
 
   test("持っている行には、日付が出る", async ({ page }) => {
@@ -1659,7 +1659,7 @@ test.describe("画像の行", () => {
     expect(after).toBeLessThan(before - 40);
     // 幅は行の持ち物として残る（読み直しても、ほかの端末でも同じ大きさ）
     const kept = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("taskspace-outline-v1")).find((n) => n.id === "b").imageWidth);
+      ((saved) => Array.isArray(saved) ? saved : saved.nodes)(JSON.parse(localStorage.getItem("taskspace-outline-v1"))).find((n) => n.id === "b").imageWidth);
     expect(kept).toBeCloseTo(after, 0);
   });
 

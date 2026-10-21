@@ -50,6 +50,9 @@ export const clearOutlineRows = async () => null;
 const storageModule = `
 import { bigGet as get, bigPut as put } from "/src/lib/localstore.js?test-local-real";
 export async function bigGet(key, options) {
+  if (key === "taskspace-outline-v1" && window.__outlineStorage.holdRead) {
+    await new Promise((resolve) => window.__outlineStorage.readPending.push(resolve));
+  }
   if (key === "taskspace-outline-v1" && window.__outlineStorage.readFail && options?.throwOnError) {
     throw new Error("試験用の読み出し失敗");
   }
@@ -92,7 +95,7 @@ const asRows = (nodes, parentId = null) => nodes.flatMap((node, sortOrder) => [{
   createdAt: node.createdAt, updatedAt: node.updatedAt,
 }, ...asRows(node.children || [], node.id)]);
 
-async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {} } = {}) {
+async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true } = {}) {
   await page.route("**/*", (route) =>
     route.request().url().startsWith("http://127.0.0.1:4174/")
       ? route.continue() : route.abort());
@@ -111,7 +114,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     window.__outlineSync = { reads: 0, writes: [], pending: [], hold: false, active: 0, maxActive: 0 };
     window.__outlineStorage = {
       writes: [], completed: [], pending: [], active: 0, maxActive: 0,
-      localFail: false, fail: false, hold: false,
+      localFail: false, fail: false, hold: false, holdRead: false, readPending: [],
       readFail: sessionStorage.getItem("test-outline-read-fail") === "1", ...storage,
     };
     const nativeSet = Storage.prototype.setItem;
@@ -121,14 +124,16 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       }
       return nativeSet.call(this, name, value);
     };
-  }, { key: KEY, remoteKey: REMOTE_KEY, local, remote, known, storage });
+  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage });
   await page.clock.install();
   await page.goto("/sync-tests/fixture.html");
-  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  if (waitForRemote) await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  else await expect(page.locator("[data-outliner]")).toBeVisible();
 }
 
 const empty = (page) => page.locator("[data-outline-empty]");
-const stored = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key)), KEY);
+const storedRecord = (page) => page.evaluate((key) => JSON.parse(localStorage.getItem(key)), KEY);
+const stored = async (page) => { const value = await storedRecord(page); return Array.isArray(value) ? value : value?.nodes ?? null; };
 const writes = (page) => page.evaluate(() => window.__outlineSync.writes);
 
 test.beforeEach(async ({ page }) => {
@@ -234,7 +239,7 @@ async function emitRemote(page, rows, { gone = [], persist = false } = {}) {
   }, { rows, gone, persist });
 }
 const pauseClock = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
-const tombs = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-deleted") || "[]"));
+const tombs = async (page) => (await storedRecord(page))?.sync?.deleted || [];
 async function deleteRow(page, id) {
   await page.locator(`[data-row-menu="${id}"]`).click();
   await page.locator("[data-row-delete]").click();
@@ -518,8 +523,10 @@ test("古い保存が失敗しても、あとから小さい置き場に残せ�
 test("端末保存とSupabaseの両方で失敗しても、互いの知らせを消さない", async ({ page }) => {
   await open(page);
   await expect.poll(async () => (await storageState(page)).active).toBe(0);
-  await configureStorage(page, { localFail: true, fail: true });
+  // 先に端末へ確定した送信を待たせ、その間の次の編集だけ保存に失敗させる。
   await startHeldWrite(page);
+  await configureStorage(page, { localFail: true, fail: true });
+  await editRow(page, "b", "送信を待つあいだの書きかけ");
   await expect(localError(page)).toBeVisible();
   await releaseWrite(page, { error: "同期の試験失敗" });
   const remoteError = page.locator("[data-outline-sync-error]");
@@ -557,13 +564,29 @@ test("起動時に本体を読めず手元の写しも無いときは、本物�
   await expect(page.locator('[data-row="a"]')).toContainText("読み出せなくても守る本物");
 });
 
-test("大きい置き場を読めなくても、有効な手元の写しがあればそこから保存を続ける", async ({ page }) => {
-  await openStorage(page, { readFail: true });
-  await expect(page.locator("[data-outline-local-read-error]")).toHaveCount(0);
-  await editRow(page, "a", "手元の写しから続けた内容");
-  await expectLocalResult(page, "手元の写しから続けた内容", true);
-  expect((await storedBig(page)).find((n) => n.id === "a").text).toBe("手元の写しから続けた内容");
-});
+for (const format of ["旧形式", "新形式"]) {
+  test(`${format}の小さい控えがあっても、大きい控えを読めなければ保存と同期を止める`, async ({ page }) => {
+    if (format === "新形式") {
+      await open(page);
+      await page.evaluate(() => sessionStorage.setItem("test-outline-read-fail", "1"));
+      await page.reload();
+    } else {
+      await open(page, { storage: { readFail: true }, waitForRemote: false });
+    }
+    await expect(page.locator("[data-outline-local-read-error]")).toBeVisible();
+    const before = await storedRecord(page);
+    await editRow(page, "a", "確認待ちの書きかけ");
+    expect(await storedRecord(page)).toEqual(before);
+    expect((await storageState(page)).writes).toEqual([]);
+    expect(await writes(page)).toEqual([]);
+    expect(await page.evaluate(() => window.__outlineSync.reads)).toBe(0);
+    if (format === "新形式") {
+      await page.evaluate(() => sessionStorage.removeItem("test-outline-read-fail"));
+      await page.reload();
+      await expect(page.locator('[data-row="a"]')).toContainText(saved()[0].text);
+    }
+  });
+}
 
 test("字下げした行と並びが変わった行を送り、古い受信で移動を巻き戻さない", async ({ page }) => {
   const local = [...saved(), node("c", "順番が変わる行")];
@@ -640,6 +663,8 @@ test("削除を取り消すと印をすぐ外し、やり直すと受信によ�
   await page.locator("[data-outline-undo]").click();
   await expect(page.locator('[data-row="b"]')).toBeVisible();
   expect(await tombs(page)).not.toContain("b");
+  await page.clock.runFor(1_000);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
   await emitRemote(page, [{ ...asRows(saved())[1], text: "取り消し後に届いた内容", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
   await page.clock.runFor(300);
   await expect(page.locator('[data-row="b"]')).toContainText("取り消し後に届いた内容");
@@ -694,4 +719,238 @@ test("送信基準にまだ無い行の削除も、受信で戻さず削除要�
   await expect.poll(async () => (await writes(page)).length).toBe(1);
   expect((await writes(page))[0].gone).toEqual(["draft"]);
   expect((await remoteRows(page)).some((row) => row.id === "draft")).toBe(false);
+});
+
+// 一括保存された本文と送信待ちの世代を、再起動・古い返事・保存失敗で確かめる。
+const bigRecord = (page, key = KEY) => page.evaluate(async (key) => {
+  const { bigGet } = await import("/src/lib/localstore.js?test-local-real");
+  return bigGet(key);
+}, key);
+const advanceToWrites = async (page, count) => expect.poll(async () => {
+  await page.clock.runFor(1_000);
+  return (await writes(page)).length;
+}).toBe(count);
+const checkpointSeed = (nodes, { pending = [], deleted = [], known = asRows(nodes).map((row) => row.id), revision = 1, sequence = Math.max(0, ...pending.map((op) => op.version)) } = {}) => ({
+  format: "taskspace-outline/1", revision, at: "2026-10-21T00:00:00.000Z", nodes,
+  sync: { pending, deleted, known, sequence },
+});
+
+test("旧形式の控えを残してから、本文と未送信記録の一括保存へ切り替える", async ({ page }) => {
+  await open(page, { remote: null });
+  await expect.poll(async () => (await storedRecord(page))?.format).toBe("taskspace-outline/1");
+  const old = await bigRecord(page, KEY + "-legacy-copy");
+  expect(old.nodes).toEqual(saved());
+  expect(old.known).toEqual(["a", "b"]);
+  expect(old.deleted).toEqual([]);
+  await editRow(page, "a", "本文と一緒に残す変更");
+  const record = await storedRecord(page);
+  expect(record.nodes.find((n) => n.id === "a").text).toBe("本文と一緒に残す変更");
+  expect(record.sync.pending).toEqual([expect.objectContaining({ id: "a", kind: "put" })]);
+  expect((await bigRecord(page, KEY + "-legacy-copy")).nodes).toEqual(saved());
+});
+
+test("圏外で確定した編集は、開き直したとき向こうに行が無くても残して送る", async ({ page }) => {
+  await open(page, { remote: null });
+  await editRow(page, "a", "圏外から続ける内容");
+  expect((await storedRecord(page)).sync.pending.map((op) => op.id)).toEqual(["a"]);
+  await page.evaluate((key) => sessionStorage.setItem(key, "[]"), REMOTE_KEY);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="a"]')).toContainText("圏外から続ける内容");
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  expect((await writes(page))[0].rows.map((row) => row.id)).toEqual(["a"]);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
+  expect((await remoteRows(page))[0].text).toBe("圏外から続ける内容");
+});
+
+test("未送信の編集は起動時の新しい受信で消さず、送信後は次の受信を採れる", async ({ page }) => {
+  await open(page, { remote: null });
+  await editRow(page, "a", "まず送りたい草稿");
+  await page.evaluate(({ key, rows }) => sessionStorage.setItem(key, JSON.stringify(rows)),
+    { key: REMOTE_KEY, rows: asRows(saved()).map((row) => row.id === "a" ? { ...row, text: "向こうの内容", updatedAt: "2040-01-01" } : row) });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="a"]')).toContainText("まず送りたい草稿");
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
+  await emitRemote(page, [{ ...asRows(saved())[0], text: "送信後の受信", updatedAt: "2050-01-01" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="a"]')).toContainText("送信後の受信");
+});
+
+test("送信中に閉じても、返事を待っていた編集を同じ行へ送り直す", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await holdWrites(page);
+  await editRow(page, "a", "返事を失っても残す内容");
+  await advanceToWrites(page, 1);
+  // サーバーには届いたが、返事を受け取る前に画面を閉じた場合。
+  const sent = (await writes(page))[0].rows;
+  await emitRemote(page, sent, { persist: true });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  expect((await storedRecord(page)).sync.pending.map((op) => op.id)).toEqual(["a"]);
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
+  const remote = await remoteRows(page);
+  expect(remote.filter((row) => row.id === "a")).toHaveLength(1);
+  expect(remote.find((row) => row.id === "a").text).toBe("返事を失っても残す内容");
+});
+
+test("古い送信の完了後に開き直しても、送信中に直した次の世代を失わない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await holdWrites(page);
+  await editRow(page, "a", "先に送る世代");
+  await advanceToWrites(page, 1);
+  const old = (await storedRecord(page)).sync.pending.find((op) => op.id === "a");
+  await editRow(page, "a", "次に送る新しい世代");
+  await releaseWrite(page);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending.find((op) => op.id === "a")?.version).toBeGreaterThan(old.version);
+  expect((await storedRecord(page)).nodes.find((n) => n.id === "a").text).toBe("次に送る新しい世代");
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  expect((await writes(page))[0].rows.find((row) => row.id === "a").text).toBe("次に送る新しい世代");
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("削除の送信中に取り消すと、前の削除の完了後も復元の世代を残す", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await holdWrites(page);
+  await deleteRow(page, "b");
+  await advanceToWrites(page, 1);
+  await page.locator("[data-outline-undo]").click();
+  await releaseWrite(page);
+  const restored = (await storedRecord(page)).sync.pending.find((op) => op.id === "b");
+  expect(restored.kind).toBe("put");
+  expect(await tombs(page)).not.toContain("b");
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="b"]')).toContainText(saved()[1].text);
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  expect((await writes(page))[0].rows.map((row) => row.id)).toContain("b");
+  expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(true);
+});
+
+test("IndexedDBだけに残した本文・編集・削除も、同じ控えから復元して送る", async ({ page }) => {
+  await open(page, { remote: null });
+  await configureStorage(page, { localFail: true });
+  await editRow(page, "a", "大きい置き場から送る内容");
+  await deleteRow(page, "b");
+  await expect.poll(async () => (await bigRecord(page))?.sync?.pending.map((op) => [op.id, op.kind]).sort())
+    .toEqual([["a", "put"], ["b", "delete"]]);
+  expect(await stored(page)).toBeNull();
+  await page.evaluate(({ key, rows }) => sessionStorage.setItem(key, JSON.stringify(rows)), { key: REMOTE_KEY, rows: asRows(saved()) });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="a"]')).toContainText("大きい置き場から送る内容");
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await pauseClock(page);
+  await advanceToWrites(page, 1);
+  expect((await writes(page))[0].gone).toEqual(["b"]);
+  expect((await writes(page))[0].rows.find((row) => row.id === "a").text).toBe("大きい置き場から送る内容");
+});
+
+test("本文と未送信記録が端末に確定するまでは、ネットワークへ送らない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await configureStorage(page, { localFail: true, hold: true });
+  await editRow(page, "a", "確定してから送る内容");
+  await expect.poll(async () => (await storageState(page)).pending).toBe(1);
+  await page.clock.runFor(1_000);
+  expect(await writes(page)).toEqual([]);
+  await releaseLocal(page, true);
+  await expect.poll(async () => (await storageState(page)).pending).toBe(1);
+  expect(await writes(page)).toEqual([]);
+  await releaseLocal(page, true);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].rows.find((row) => row.id === "a").text).toBe("確定してから送る内容");
+});
+
+test("両方の端末保存に失敗した未送信記録は送らず、再保存後に送信する", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await configureStorage(page, { localFail: true, fail: true });
+  await editRow(page, "a", "保存し直してから送る内容");
+  await expect(localError(page)).toBeVisible();
+  await page.clock.runFor(1_000);
+  expect(await writes(page)).toEqual([]);
+  await configureStorage(page, { fail: false });
+  await localRetryButton(page).click();
+  await advanceToWrites(page, 1);
+  expect((await writes(page))[0].rows.find((row) => row.id === "a").text).toBe("保存し直してから送る内容");
+});
+
+test("起動中の編集を、あとから読み出した新しい控えで消さない", async ({ page }) => {
+  const here = checkpointSeed(saved());
+  await open(page, { localRecord: here, storage: { holdRead: true }, waitForRemote: false });
+  await expect.poll(() => page.evaluate(() => window.__outlineStorage.readPending.length)).toBeGreaterThan(0);
+  const there = checkpointSeed([node("a", "保存済みのa"), node("b", "新しい控えのb")], { revision: 5, sequence: 10 });
+  await page.evaluate(async ({ key, record }) => {
+    const { bigPut } = await import("/src/lib/localstore.js?test-local-real");
+    if (!await bigPut(key, record)) throw new Error("試験の控えを保存できません");
+  }, { key: KEY, record: there });
+  await editRow(page, "a", "読み込み待ちに打った内容");
+  await page.evaluate(() => {
+    window.__outlineStorage.holdRead = false;
+    for (const resolve of window.__outlineStorage.readPending.splice(0)) resolve();
+  });
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="a"]')).toContainText("読み込み待ちに打った内容");
+  await expect(page.locator('[data-row="b"]')).toContainText("新しい控えのb");
+  expect((await storedRecord(page)).sync.pending.find((op) => op.id === "a").version).toBeGreaterThan(10);
+});
+
+test("読めない将来の形式は、空の木や新しい未送信記録で上書きしない", async ({ page }) => {
+  const future = { ...checkpointSeed(saved()), format: "taskspace-outline/99" };
+  await open(page, { localRecord: future, waitForRemote: false });
+  await expect(page.locator("[data-outline-local-read-error]")).toBeVisible();
+  await page.clock.fastForward(20_000);
+  expect(await storedRecord(page)).toEqual(future);
+  expect(await writes(page)).toEqual([]);
+  expect((await storageState(page)).writes).toEqual([]);
+});
+
+test("新形式の空になった削除記録より、古い別保存の印を優先しない", async ({ page }) => {
+  await open(page, { local: [saved()[0]], remote: [asRows(saved())[0]], localRecord: checkpointSeed([saved()[0]]) });
+  await page.evaluate(({ key, rows }) => {
+    localStorage.setItem("taskspace-outline-deleted", '["b"]');
+    sessionStorage.setItem(key, JSON.stringify(rows));
+  }, { key: REMOTE_KEY, rows: asRows(saved()) });
+  await page.reload();
+  await expect(page.locator('[data-row="b"]')).toContainText(saved()[1].text);
+  await pauseClock(page);
+  await page.clock.runFor(1_000);
+  expect(await writes(page)).toEqual([]);
+  expect((await storedRecord(page)).sync.deleted).toEqual([]);
+});
+
+test("移行元の古い写しが残っても、IndexedDBに確定した未送信の本文を巻き戻さない", async ({ page }) => {
+  await open(page, { remote: null });
+  await editRow(page, "a", "移行の確定後に残した内容");
+  await expect.poll(async () => (await bigRecord(page))?.nodes.find((n) => n.id === "a").text).toBe("移行の確定後に残した内容");
+  await page.evaluate(({ key, original }) => localStorage.setItem(key, JSON.stringify(original)), { key: KEY, original: saved() });
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="a"]')).toContainText("移行の確定後に残した内容");
+  expect((await storedRecord(page)).sync.pending.map((op) => op.id)).toEqual(["a"]);
+});
+
+test("両方への保存が失敗しても、前に確定した小さい控えは消さない", async ({ page }) => {
+  await openStorage(page);
+  const before = await storedRecord(page);
+  await configureStorage(page, { localFail: true, fail: true });
+  await editRow(page, "a", "保存できていない書きかけ");
+  await expect(localError(page)).toBeVisible();
+  expect(await storedRecord(page)).toEqual(before);
+  await page.reload();
+  await expect(page.locator('[data-row="a"]')).toContainText(saved()[0].text);
 });

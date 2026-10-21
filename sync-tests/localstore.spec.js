@@ -170,3 +170,30 @@ test("起動時の読み出しは、中身が無い場合と取引に失敗し�
     missing: undefined, threw: true, quiet: undefined, intact: { text: "保存済みの内容" },
   });
 });
+
+test("本文と未送信記録の保存が中断したら、両方とも前の控えを残す", async ({ page }) => {
+  const got = await page.evaluate(async () => {
+    const { bigPut, bigGet } = await import("/src/lib/localstore.js");
+    const key = "本文と未送信の一括保存";
+    const before = { nodes: [{ id: "a", text: "元の本文" }], sync: { pending: [] } };
+    const next = { nodes: [{ id: "a", text: "新しい本文" }], sync: { pending: [{ id: "a", version: 1, kind: "put" }] } };
+    await bigPut(key, before);
+    const native = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args) {
+      const req = native.apply(this, args);
+      if (args[1] === key) req.addEventListener("success", () => this.transaction.abort());
+      return req;
+    };
+    let result;
+    try { result = await bigPut(key, next); }
+    finally { IDBObjectStore.prototype.put = native; }
+    const after = await bigGet(key);
+    const recovered = await bigPut(key, next);
+    return { result, after, recovered, saved: await bigGet(key) };
+  });
+  expect(got.result).toBe(false);
+  expect(got.after).toEqual({ nodes: [{ id: "a", text: "元の本文" }], sync: { pending: [] } });
+  expect(got.recovered).toBe(true);
+  expect(got.saved.nodes[0].text).toBe("新しい本文");
+  expect(got.saved.sync.pending).toEqual([{ id: "a", version: 1, kind: "put" }]);
+});
