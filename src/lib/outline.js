@@ -88,15 +88,24 @@ function clone(nodes) {
 }
 
 export function updateNode(nodes, id, patch) {
-  const next = clone(nodes);
-  const spot = locate(next, id);
-  if (!spot) return nodes;
-  spot.siblings[spot.index] = {
-    ...spot.siblings[spot.index],
-    ...patch,
-    updatedAt: new Date().toISOString(),
-  };
-  return next;
+  // 全行を複製すると、1文字の入力でも木と履歴が膨らむ。
+  // 変わった行から根までだけ作り直し、それ以外の枝はそのまま使う。
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    let changed;
+    if (node.id === id) {
+      changed = { ...node, children: node.children || [], ...patch, updatedAt: new Date().toISOString() };
+    } else {
+      if (!node.children?.length) continue;
+      const children = updateNode(node.children, id, patch);
+      if (children === node.children) continue;
+      changed = { ...node, children };
+    }
+    const next = nodes.slice();
+    next[i] = changed;
+    return next;
+  }
+  return nodes;
 }
 
 // id の下に新しい節を入れる。子を持って開いているなら、その先頭に入れる
