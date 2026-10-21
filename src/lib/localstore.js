@@ -23,9 +23,19 @@ async function withStore(mode, run) {
   try {
     return await new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, mode);
-      const req = run(tx.objectStore(STORE));
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
+      let req;
+      let failure;
+      // 要求が成功しても、そのあとの容量不足や中断で全体が取り消される。
+      // complete まで待ち、要求の失敗も最後の abort で受け取る。
+      tx.oncomplete = () => resolve(req.result);
+      tx.onabort = () => reject(tx.error || failure || new Error("置き場への処理が中断されました"));
+      try {
+        req = run(tx.objectStore(STORE));
+      } catch (error) {
+        // データの複製などで要求を作れなかったときも、取引を残さない。
+        failure = error;
+        tx.abort();
+      }
     });
   } finally { db.close(); }
 }
