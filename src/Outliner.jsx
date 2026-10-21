@@ -6,7 +6,7 @@ import {
   insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
-  flattenTree, buildTree, mergeOutline,
+  flattenTree, buildTree, mergeOutline, prepareOutlineChange,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
@@ -167,12 +167,25 @@ export function OutlineProvider({ children }) {
     localWriteRef.current.pending = null;
   }, []);
 
+  // 削除の意図は送信待ちの間も有効。戻した行の印は、その場で外す。
+  const prepareLocal = useCallback((before, after) => {
+    const change = prepareOutlineChange(before, after);
+    let changed = false;
+    for (const id of change.removed) {
+      if (!tombRef.current.has(id)) { tombRef.current.add(id); changed = true; }
+    }
+    for (const id of change.added) if (tombRef.current.delete(id)) changed = true;
+    if (changed && bigReadRef.current) writeIds(OUTLINE_TOMB_KEY, tombRef.current);
+    return change.nodes;
+  }, []);
+
   // 書き換えはここを通す。前の姿を履歴に積む。
   // 字を打っているあいだは1手にまとめる（1文字ずつ戻るのは使いにくい）。
   const apply = useCallback((updater, opts = {}) => {
     const prev = nodesRef.current;
-    const next = typeof updater === "function" ? updater(prev) : updater;
-    if (next === prev) return;
+    const proposed = typeof updater === "function" ? updater(prev) : updater;
+    if (proposed === prev) return;
+    const next = prepareLocal(prev, proposed);
     nodesRef.current = next;
     setNodes(next);
     const now = Date.now();
@@ -182,7 +195,7 @@ export function OutlineProvider({ children }) {
     if (same) return;
     const h = histRef.current;
     syncHist({ past: [...h.past, prev].slice(-100), future: [] });
-  }, []);
+  }, [prepareLocal]);
 
   // 同期で入ってきたぶんは、履歴に積まない（自分の操作ではないので）
   const applyRaw = useCallback((updater) => {
@@ -230,7 +243,8 @@ export function OutlineProvider({ children }) {
   const inboxTimer = useRef(null);
   const takeInbox = useCallback(() => {
     const box = inboxRef.current;
-    const rows = [...box.rows.values()];
+    // 待機中に消した行も、反映する瞬間の印で止める。
+    const rows = [...box.rows.values()].filter((row) => !tombRef.current.has(row.id));
     const gone = [...box.gone];
     inboxRef.current = { rows: new Map(), gone: new Set() };
     if (!rows.length && !gone.length) return;
@@ -286,11 +300,15 @@ export function OutlineProvider({ children }) {
         return;
       }
       if (!minePresent && Array.isArray(got?.nodes)) applyRaw(() => got.nodes.map(ensureNode));
-      tombRef.current = await readIds(OUTLINE_TOMB_KEY);
+      const storedTombs = await readIds(OUTLINE_TOMB_KEY);
+      tombRef.current = new Set([...storedTombs, ...tombRef.current]);
       knownRef.current = await readIds(OUTLINE_KNOWN_KEY);
       if (!alive) return;
       // ここから先は、手元に書いてよい
       bigReadRef.current = true;
+      // 読み込み中の削除は残し、取り消して手元に戻った行の印は外す。
+      for (const row of flattenTree(nodesRef.current)) tombRef.current.delete(row.id);
+      writeIds(OUTLINE_TOMB_KEY, tombRef.current);
       saveLocal();
       pullOnce();
       stop = listen();
@@ -332,22 +350,24 @@ export function OutlineProvider({ children }) {
     if (!h.past.length) return;
     const prev = h.past[h.past.length - 1];
     const now = nodesRef.current;
-    nodesRef.current = prev;
-    setNodes(prev);
+    const restored = prepareLocal(now, prev);
+    nodesRef.current = restored;
+    setNodes(restored);
     coalesceRef.current = { key: null, at: 0 };
     syncHist({ past: h.past.slice(0, -1), future: [...h.future, now].slice(-100) });
-  }, []);
+  }, [prepareLocal]);
 
   const redo = useCallback(() => {
     const h = histRef.current;
     if (!h.future.length) return;
     const node = h.future[h.future.length - 1];
     const now = nodesRef.current;
-    nodesRef.current = node;
-    setNodes(node);
+    const restored = prepareLocal(now, node);
+    nodesRef.current = restored;
+    setNodes(restored);
     coalesceRef.current = { key: null, at: 0 };
     syncHist({ past: [...h.past, now].slice(-100), future: h.future.slice(0, -1) });
-  }, []);
+  }, [prepareLocal]);
 
 
   // 書き込み：同時に送るのは1件だけ。送信中の編集は、完了後に最新の木から拾う。
@@ -360,7 +380,7 @@ export function OutlineProvider({ children }) {
       const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
       const changed = rows.filter((r) => before.get(r.id) !== JSON.stringify(r));
-      const gone = [...before.keys()].filter((id) => !here.has(id));
+      const gone = [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
       // いま手元にある行は、もう「消したもの」ではない。
       // 印を残したままだと、次に読み込んだときにまた消される。
       let revived = false;

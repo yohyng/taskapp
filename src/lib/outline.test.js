@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
-  makeNode, ensureNode, pathTo, findNode, visibleRows,
+  makeNode, ensureNode, pathTo, findNode, visibleRows, prepareOutlineChange,
   insertAfter, removeNode, indent, outdent, toggleCollapse, mergeIntoPrevious, updateNode,
 } from './outline.js'
 
@@ -1103,7 +1103,7 @@ describe('書き換えの複製を必要な枝に絞る', () => {
         n(`枝${r}-${g}`, Array.from({ length: 20 }, (_, c) => n(`行${r}-${g}-${c}`))))));
     const before = visibleRows(tree).map((row) => row.node);
     const target = before.at(-1);
-    const got = updateNode(tree, target.id, { text: target.text + '字' });
+    const got = prepareOutlineChange(tree, updateNode(tree, target.id, { text: target.text + '字' })).nodes;
     const after = visibleRows(got).map((row) => row.node);
     expect(before).toHaveLength(10_000);
     expect(after).toHaveLength(10_000);
@@ -1111,5 +1111,91 @@ describe('書き換えの複製を必要な枝に絞る', () => {
     expect(after.at(-1).text).toBe(target.text + '字');
     expect(before.at(-1).text).toBe(target.text);
     expect(got[0]).toBe(tree[0]);
+  });
+});
+
+describe('手元の移動と削除を同期へ渡す', () => {
+  const oldTime = '2026-01-01T00:00:00.000Z';
+  const at = Date.parse('2035-01-02T03:04:05.000Z');
+  const row = (id, children = []) => ({ ...n(id, children), id, createdAt: oldTime, updatedAt: oldTime });
+  const freeze = (nodes) => {
+    for (const node of nodes) { freeze(node.children); Object.freeze(node); }
+    return Object.freeze(nodes);
+  };
+  const fixture = () => freeze([
+    { ...row('a', [row('x'), row('y'), row('z')]), collapsed: true },
+    row('b', [row('b-child')]), row('c'),
+  ]);
+
+  it.each([
+    ['字下げ', (tree) => indent(tree, 'b'), ['a', 'b', 'c']],
+    ['字下げ戻し', (tree) => outdent(tree, 'y'), ['y', 'z', 'b', 'c']],
+    ['上下の入れ替え', (tree) => moveSibling(tree, 'b', 1), ['b', 'c']],
+    ['ドラッグで先頭へ移動', (tree) => moveSubtreeTo(tree, 'c', null, 0), ['a', 'b', 'c']],
+    ['まとめて字下げ', (tree) => indentMany(tree, ['b', 'c']), ['a', 'b', 'c']],
+    ['まとめて字下げ戻し', (tree) => outdentMany(tree, ['y', 'z']), ['y', 'z', 'b', 'c']],
+  ])('%sでは親・順序・開き方が変わった行を新しくし、古い受信でも戻さない', (_label, move, changedIds) => {
+    const before = fixture();
+    const change = prepareOutlineChange(before, move(before), at);
+    const rows = flattenTree(change.nodes);
+    expect(rows.filter((row) => row.updatedAt !== oldTime).map((row) => row.id).sort())
+      .toEqual([...changedIds].sort());
+    expect(rows.filter((row) => changedIds.includes(row.id)).every((row) => row.updatedAt === new Date(at).toISOString())).toBe(true);
+    expect(flattenTree(before).every((row) => row.updatedAt === oldTime)).toBe(true);
+    expect(change.added).toEqual([]);
+    expect(change.removed).toEqual([]);
+    expect(flattenTree(applyRemoteRows(change.nodes, flattenTree(before)))).toEqual(rows);
+  });
+
+  it('同じ時刻に続けて動かしても、移動前より1ミリ秒新しくする', () => {
+    const before = fixture();
+    const change = prepareOutlineChange(before, moveSibling(before, 'b', 1), Date.parse(oldTime));
+    const row = flattenTree(change.nodes).find((row) => row.id === 'b');
+    expect(row.updatedAt).toBe('2026-01-01T00:00:00.001Z');
+  });
+
+  it('すでに新しい更新時刻が付いている行は、その時刻を巻き戻さない', () => {
+    const before = fixture();
+    const moved = indent(before, 'b');
+    findNode(moved, 'b').updatedAt = '2040-01-01T00:00:00.000Z';
+    const change = prepareOutlineChange(before, moved, at);
+    expect(findNode(change.nodes, 'b').updatedAt).toBe('2040-01-01T00:00:00.000Z');
+  });
+
+  it('文字だけの編集では、更新済みの木をそのまま返す', () => {
+    const before = fixture();
+    const edited = updateNode(before, 'y', { text: '文字を編集' });
+    const change = prepareOutlineChange(before, edited, at);
+    expect(change.nodes).toBe(edited);
+    expect(change.nodes[1]).toBe(before[1]);
+    expect(change.added).toEqual([]);
+    expect(change.removed).toEqual([]);
+  });
+
+  it('親ごとの削除と取り消しは、子孫のidも削除・復元として渡す', () => {
+    const before = fixture();
+    const removed = prepareOutlineChange(before, deleteNodeSafe(before, 'a').nodes, at);
+    expect(removed.removed).toEqual(['a', 'x', 'y', 'z']);
+    expect(removed.added).toEqual([]);
+    const restored = prepareOutlineChange(removed.nodes, before, at + 10);
+    expect(restored.added).toEqual(['a', 'x', 'y', 'z']);
+    expect(restored.removed).toEqual([]);
+    expect(findNode(restored.nodes, 'a').children).toBe(before[0].children);
+  });
+
+  it('先頭に足したときは、既存の並びが変わった行だけ時刻を進める', () => {
+    const before = fixture();
+    const inserted = [row('new'), ...before];
+    const change = prepareOutlineChange(before, inserted, at);
+    expect(change.added).toEqual(['new']);
+    expect(change.removed).toEqual([]);
+    expect(flattenTree(change.nodes).filter((row) => row.updatedAt !== oldTime).map((row) => row.id))
+      .toEqual(['a', 'b', 'c']);
+    expect(change.nodes[1].children).toBe(before[0].children);
+  });
+
+  it('同じ木は何も付け足さず、そのまま返す', () => {
+    const before = fixture();
+    expect(prepareOutlineChange(before, before, at)).toEqual({ nodes: before, added: [], removed: [] });
   });
 });

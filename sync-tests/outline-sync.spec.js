@@ -32,9 +32,11 @@ export async function saveOutlineRows(rows, gone) {
     state.active -= 1;
   }
 }
-export function subscribeOutline(_onRows, onStatus) {
+export function subscribeOutline(onRows, onStatus) {
+  const state = window.__outlineSync;
+  state.onRows = onRows;
   onStatus("live");
-  return () => {};
+  return () => { if (state.onRows === onRows) state.onRows = null; };
 }
 export const supabaseReady = () => true;
 export const absentOutlineColumns = () => [];
@@ -81,11 +83,16 @@ const node = (id, text) => ({
   updatedAt: "2026-10-21T00:00:00.000Z",
 });
 const saved = () => [node("a", "前に同期した行"), node("b", "もうひとつの行")];
-const asRows = (nodes) => nodes.map((node, sortOrder) => ({
-  ...node, parentId: null, sortOrder,
-}));
+// db.jsが受信時に返す行と、項目の並びも揃える（同じ行の通知判定に使う）。
+const asRows = (nodes, parentId = null) => nodes.flatMap((node, sortOrder) => [{
+  id: node.id, parentId, sortOrder, text: node.text,
+  collapsed: node.collapsed, completed: node.completed, favorite: node.favorite,
+  date: node.date, headingLevel: node.headingLevel,
+  textColor: node.textColor, bgColor: node.bgColor, imageWidth: node.imageWidth,
+  createdAt: node.createdAt, updatedAt: node.updatedAt,
+}, ...asRows(node.children || [], node.id)]);
 
-async function open(page, { local = saved(), remote = asRows(local), known = local.map((n) => n.id), storage = {} } = {}) {
+async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {} } = {}) {
   await page.route("**/*", (route) =>
     route.request().url().startsWith("http://127.0.0.1:4174/")
       ? route.continue() : route.abort());
@@ -211,6 +218,29 @@ test("全件削除のあとも書き始められ、新しい行だけを送る",
   expect(["a", "b"]).not.toContain(sent[0].id);
 });
 
+// 古い通知だけを届ける場合と、実際の他端末の更新を分ける。
+async function emitRemote(page, rows, { gone = [], persist = false } = {}) {
+  await page.evaluate(({ rows, gone, persist }) => {
+    const state = window.__outlineSync;
+    if (!state.onRows) throw new Error("受信の準備ができていません");
+    if (persist) {
+      const remote = JSON.parse(sessionStorage.getItem("test-outline-remote")) || [];
+      const byId = new Map(remote.map((row) => [row.id, row]));
+      for (const id of gone) byId.delete(id);
+      for (const row of rows) byId.set(row.id, row);
+      sessionStorage.setItem("test-outline-remote", JSON.stringify([...byId.values()]));
+    }
+    state.onRows({ rows, gone });
+  }, { rows, gone, persist });
+}
+const pauseClock = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+const tombs = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-outline-deleted") || "[]"));
+async function deleteRow(page, id) {
+  await page.locator(`[data-row-menu="${id}"]`).click();
+  await page.locator("[data-row-delete]").click();
+  await expect(page.locator(`[data-row="${id}"]`)).toHaveCount(0);
+}
+
 // 送信の返事を止め、入力の待機時間より長く通信がかかった場合を再現する。
 const holdWrites = (page) => page.evaluate(() => { window.__outlineSync.hold = true; });
 async function releaseWrite(page, { error = null, reject = false } = {}) {
@@ -290,6 +320,10 @@ test("新しい行の送信中にその行を削除しても、完了後に削�
   await expect.poll(async () => (await writes(page)).length).toBe(1);
   await input.fill("");
   await input.press("Backspace");
+  await expect(page.locator(`[data-row="${id}"]`)).toHaveCount(0);
+  const echo = (await writes(page))[0].rows.find((row) => row.id === id);
+  await emitRemote(page, [echo]);
+  await page.clock.runFor(300);
   await expect(page.locator(`[data-row="${id}"]`)).toHaveCount(0);
   await page.clock.fastForward(1_000);
   expect(await writes(page)).toHaveLength(1);
@@ -529,4 +563,135 @@ test("大きい置き場を読めなくても、有効な手元の写しがあ�
   await editRow(page, "a", "手元の写しから続けた内容");
   await expectLocalResult(page, "手元の写しから続けた内容", true);
   expect((await storedBig(page)).find((n) => n.id === "a").text).toBe("手元の写しから続けた内容");
+});
+
+test("字下げした行と並びが変わった行を送り、古い受信で移動を巻き戻さない", async ({ page }) => {
+  const local = [...saved(), node("c", "順番が変わる行")];
+  await open(page, { local });
+  await pauseClock(page);
+  await page.locator('[data-row="b"] [data-row-text]').click();
+  await inputFor(page, "b").press("Tab");
+  await expect.poll(async () => (await stored(page))[0].children.map((n) => n.id)).toEqual(["b"]);
+  // 同期済みの行と同じ通知として省かれない、移動前の内容を届ける。
+  await emitRemote(page, asRows(local).filter((row) => ["b", "c"].includes(row.id))
+    .map((row) => ({ ...row, text: row.text + "（古い通知）" })));
+  await page.clock.runFor(300);
+  await expect.poll(async () => (await stored(page))[0].children.map((n) => n.id)).toEqual(["b"]);
+  // 受信の反映後に始まる800msの送信待ちも進める。
+  await page.clock.runFor(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  const sent = (await writes(page))[0].rows;
+  expect(sent.find((row) => row.id === "b").text).toBe(local[1].text);
+  expect(sent.find((row) => row.id === "c").text).toBe(local[2].text);
+  expect(sent.map((row) => row.id).sort()).toEqual(["b", "c"]);
+  expect(sent.find((row) => row.id === "b").parentId).toBe("a");
+  expect(sent.every((row) => row.updatedAt > local[1].updatedAt)).toBe(true);
+
+  await emitRemote(page, [{ ...asRows(local)[0], text: "別の行の受信", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="a"]')).toContainText("別の行の受信");
+  expect((await stored(page))[0].children[0].id).toBe("b");
+});
+
+test("受信してから削除した行も、反映待ちの通知から復活させない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "反映待ちの古い内容" }]);
+  await deleteRow(page, "b");
+  expect(await tombs(page)).toContain("b");
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  expect(await writes(page)).toEqual([]);
+  await page.clock.runFor(600);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].gone).toEqual(["b"]);
+});
+
+test("削除の送信が失敗しても、再試行を待つ間の受信で行を戻さない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await holdWrites(page);
+  await deleteRow(page, "b");
+  await page.clock.runFor(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "送信中の古い通知" }]);
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await releaseWrite(page, { error: "削除の試験失敗" });
+  expect(await tombs(page)).toContain("b");
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "再試行中の古い通知" }]);
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await page.clock.fastForward(15_000);
+  // 再試行の描画のあとに登録される送信タイマーも、止めた時計で進める。
+  await expect.poll(async () => {
+    await page.clock.runFor(1_000);
+    return (await writes(page)).length;
+  }).toBe(2);
+  expect((await writes(page))[1].gone).toEqual(["b"]);
+  expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(false);
+});
+
+test("削除を取り消すと印をすぐ外し、やり直すと受信による復活を再び止める", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await deleteRow(page, "b");
+  expect(await tombs(page)).toContain("b");
+  await page.locator("[data-outline-undo]").click();
+  await expect(page.locator('[data-row="b"]')).toBeVisible();
+  expect(await tombs(page)).not.toContain("b");
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "取り消し後に届いた内容", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toContainText("取り消し後に届いた内容");
+  await page.locator("[data-outline-redo]").click();
+  expect(await tombs(page)).toContain("b");
+  await emitRemote(page, [asRows(saved())[1]]);
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+});
+
+test("送信の待機時間中に開き直しても、削除の印を読み戻して削除を送る", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await deleteRow(page, "b");
+  expect(await tombs(page)).toContain("b");
+  expect(await writes(page)).toEqual([]);
+  await page.reload();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await page.clock.runFor(1_000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].gone).toEqual(["b"]);
+  expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(false);
+});
+
+test("親ごと消した子孫も、個別の受信から復活させない", async ({ page }) => {
+  const parent = { ...node("b", "消す親"), children: [node("child", "消す子")] };
+  const local = [node("a", "残す行"), parent];
+  await open(page, { local });
+  await pauseClock(page);
+  await deleteRow(page, "b");
+  expect((await tombs(page)).sort()).toEqual(["b", "child"]);
+  await emitRemote(page, asRows([parent]));
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await expect(page.locator('[data-row="child"]')).toHaveCount(0);
+  await page.clock.runFor(600);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].gone.sort()).toEqual(["b", "child"]);
+});
+
+test("送信基準にまだ無い行の削除も、受信で戻さず削除要求を送る", async ({ page }) => {
+  const draft = node("draft", "まだ送っていない行");
+  await open(page, { local: [node("a", "残す行"), draft], remote: asRows([node("a", "残す行")]), known: ["a"] });
+  await pauseClock(page);
+  await deleteRow(page, "draft");
+  expect(await tombs(page)).toContain("draft");
+  await emitRemote(page, asRows([draft]), { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="draft"]')).toHaveCount(0);
+  await page.clock.runFor(600);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].gone).toEqual(["draft"]);
+  expect((await remoteRows(page)).some((row) => row.id === "draft")).toBe(false);
 });

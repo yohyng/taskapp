@@ -108,6 +108,58 @@ export function updateNode(nodes, id, patch) {
   return nodes;
 }
 
+// 手元で親や並びを変えた行は、古い受信で元へ戻らないよう時刻を進める。
+// 文字だけの編集は共有された枝をたどるだけにして、毎打鍵の全件走査を避ける。
+export function prepareOutlineChange(before, after, at = Date.now()) {
+  const changedLayout = (left, right) => {
+    if (left === right) return false;
+    if (left.length !== right.length) return true;
+    for (let i = 0; i < left.length; i++) {
+      if (left[i].id !== right[i].id) return true;
+      if (left[i] !== right[i] && changedLayout(left[i].children || [], right[i].children || [])) return true;
+    }
+    return false;
+  };
+  if (!changedLayout(before, after)) return { nodes: after, added: [], removed: [] };
+
+  const index = (nodes, parentId = null, out = new Map()) => {
+    nodes.forEach((node, sortOrder) => {
+      out.set(node.id, { node, parentId, sortOrder });
+      index(node.children || [], node.id, out);
+    });
+    return out;
+  };
+  const previous = index(before);
+  const current = index(after);
+  const added = [...current.keys()].filter((id) => !previous.has(id));
+  const removed = [...previous.keys()].filter((id) => !current.has(id));
+  const times = new Map();
+  for (const [id, entry] of current) {
+    const old = previous.get(id);
+    if (!old) continue;
+    if (old.parentId === entry.parentId && old.sortOrder === entry.sortOrder
+      && old.node.collapsed === entry.node.collapsed) continue;
+    const oldTime = Date.parse(old.node.updatedAt);
+    const currentTime = Date.parse(entry.node.updatedAt);
+    // 同じミリ秒で続けて動かした場合も、移動前の行より必ず新しくする。
+    const time = new Date(Math.max(at, Number.isFinite(oldTime) ? oldTime + 1 : at,
+      Number.isFinite(currentTime) ? currentTime : at)).toISOString();
+    if (entry.node.updatedAt !== time) times.set(id, time);
+  }
+  const stamp = (nodes) => {
+    let next = nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const children = node.children?.length ? stamp(node.children) : node.children;
+      if (!times.has(node.id) && children === node.children) continue;
+      if (next === nodes) next = nodes.slice();
+      next[i] = { ...node, children, ...(times.has(node.id) ? { updatedAt: times.get(node.id) } : {}) };
+    }
+    return next;
+  };
+  return { nodes: times.size ? stamp(after) : after, added, removed };
+}
+
 // id の下に新しい節を入れる。子を持って開いているなら、その先頭に入れる
 // （Workflowy と同じ。畳んでいるときは下の兄弟になる）。
 export function insertAfter(nodes, id, node) {
