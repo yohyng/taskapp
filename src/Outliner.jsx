@@ -91,6 +91,9 @@ export function OutlineProvider({ children }) {
   const rowSaveRef = useRef(false);
   const nodeCountRef = useRef(0);
   const timerRef = useRef(null);
+  // 入力のたびに待ち直しても、最初の変更からの期限は延ばさない。
+  const sendWaitRef = useRef(null);
+  const [syncStatus, setSyncStatus] = useState("checking");
   const retryRef = useRef(null);
   const sendingRef = useRef(false);
   const stoppedRef = useRef(false);
@@ -204,6 +207,7 @@ export function OutlineProvider({ children }) {
     nodeCountRef.current += change.added.length - change.removed.length;
     if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
     queueRef.current = queueOutlineRows(queueRef.current, changedOutlineRows(before, change.nodes));
+    setSyncStatus(sendingRef.current ? "sending" : "waiting");
     for (const id of change.removed) tombRef.current.add(id);
     for (const id of change.added) tombRef.current.delete(id);
     return change.nodes;
@@ -248,6 +252,7 @@ export function OutlineProvider({ children }) {
         return;
       }
       readyRef.current = true;
+      setSyncStatus(sendingRef.current ? "sending" : "waiting");
       // 置き場に列が足りないと、その持ち物（日付・画像の幅・色）だけが
       // ほかの端末に伝わらない。黙っていると「端末ごとに違う」になる。
       if (absentOutlineColumns().length) setSyncNote(`missing-col:${absentOutlineColumns().join(",")}`);
@@ -280,6 +285,7 @@ export function OutlineProvider({ children }) {
     const gone = [...box.gone];
     inboxRef.current = { rows: new Map(), gone: new Set() };
     if (!rows.length && !gone.length) return;
+    setSyncStatus(sendingRef.current ? "sending" : "waiting");
     const pending = pendingOutlineIds(queueRef.current);
     applyRaw((mine) => applyRemoteRows(mine, rows.filter((row) => !pending.has(row.id)), gone.filter((id) => !pending.has(id))));
     // 届いたぶんは「向こうにもある」ので、送り返さない
@@ -376,6 +382,7 @@ export function OutlineProvider({ children }) {
       }
       for (const row of flattenTree(restored)) deleted.delete(row.id);
       queueRef.current = queue;
+      setSyncStatus(queue.pending.size ? "waiting" : "checking");
       tombRef.current = deleted;
       knownRef.current = known;
       revisionRef.current = Math.max(chosen?.revision || 0, got?.revision || 0, initial?.revision || 0);
@@ -448,7 +455,10 @@ export function OutlineProvider({ children }) {
   useEffect(() => {
     if (!readyRef.current) return;
     clearTimeout(timerRef.current);
+    if (sendWaitRef.current === null) sendWaitRef.current = Date.now();
+    const wait = Math.min(800, Math.max(0, 2000 - (Date.now() - sendWaitRef.current)));
     timerRef.current = setTimeout(async () => {
+      sendWaitRef.current = null;
       if (sendingRef.current || stoppedRef.current) return;
       const rows = flattenTree(nodesRef.current);
       const before = new Map(syncedRef.current);
@@ -456,7 +466,7 @@ export function OutlineProvider({ children }) {
       const changed = rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== JSON.stringify(r));
       const gone = [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
       for (const id of here) tombRef.current.delete(id);
-      if (!changed.length && !gone.length) return;
+      if (!changed.length && !gone.length) { setSyncStatus("synced"); return; }
       // 旧形式から読んだ差分も、送る前に未送信の世代として残す。
       const missing = [
         ...changed.filter((row) => !queueRef.current.pending.has(row.id)).map((row) => ({ id: row.id, kind: "put" })),
@@ -466,6 +476,7 @@ export function OutlineProvider({ children }) {
       gone.forEach((id) => tombRef.current.add(id));
       const sent = [...changed.map((row) => row.id), ...gone].map((id) => queueRef.current.pending.get(id));
       sendingRef.current = true;
+      setSyncStatus("sending");
       try {
         // 保存前に送ると、返事を失って開き直したときに再送の根拠が無くなる。
         if (!await saveLocal()) {
@@ -501,9 +512,10 @@ export function OutlineProvider({ children }) {
         setRetry((n) => n + 1);
       } finally {
         sendingRef.current = false;
+        if (!stoppedRef.current) setSyncStatus(queueRef.current.pending.size ? "waiting" : "synced");
       }
 
-    }, 800);
+    }, wait);
     return () => clearTimeout(timerRef.current);
   }, [nodes, retry, saveLocal]);
 
@@ -536,6 +548,7 @@ export function OutlineProvider({ children }) {
     knownRef.current = new Set();
     syncedRef.current = new Map();
     queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
+    setSyncStatus(sendingRef.current ? "sending" : "waiting");
     saveLocal();
   }, [saveLocal]);
 
@@ -560,7 +573,7 @@ export function OutlineProvider({ children }) {
 
   const value = useMemo(() => ({
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,
-    link, syncedAt, refresh: () => wakeRef.current?.(),
+    link, syncedAt, syncStatus, refresh: () => wakeRef.current?.(),
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     syncNote, dismissSync: () => setSyncNote(""), localSave, retryLocalSave: () => {
       saveLocal();
@@ -569,7 +582,7 @@ export function OutlineProvider({ children }) {
     dismissLocalInfo: () => setLocalSave((prev) => ({ ...prev, hidden: true })),
     getLocalCheckpoint: () => bigReadRef.current
       ? outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString()) : null,
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, link, syncedAt, localSave, saveLocal]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, link, syncedAt, syncStatus, localSave, saveLocal]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -671,7 +684,19 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, link, syncedAt, refresh } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, link, syncedAt, syncStatus, refresh } = useOutline();
+  // 接続中でも、保存失敗や未送信の編集があれば同期済みとは表示しない。
+  const syncState = localSave.status === "read-error" ? "read-error"
+    : localSave.status === "error" ? "local-error"
+      : link === "off" ? "local-only"
+        : localSave.busy || localSave.status === "loading" ? "saving"
+          : syncNote === "missing-table" || syncNote.startsWith("error:") ? "error"
+            : syncNote.startsWith("missing-col:") || absentOutlineColumns().length > 0 ? "partial" : syncStatus;
+  const syncLabel = {
+    checking: "同期を確認中", waiting: "送信待ち", sending: "送信中", synced: "同期済み",
+    saving: "保存待ち", "local-error": "保存できません", "read-error": "読み出しエラー",
+    error: "同期エラー", partial: "一部未同期", "local-only": "この端末のみ",
+  }[syncState];
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
   // ぶら下げたままだと枠の外に出てしまい、指が届かない。
@@ -1420,6 +1445,17 @@ export default function Outliner() {
             </button>
           )}
         </div>
+        <span
+          data-outline-sync
+          data-sync={syncState}
+          role="status"
+          aria-live="polite"
+          title={syncState === "synced" ? "この端末の変更を送信し、手元にも保存しました" : "接続状態とは別に、この端末の保存・送信を表示します"}
+          className={classNames(
+            "shrink-0 text-[10px]",
+            syncState === "synced" ? "text-emerald-300/80" : "text-neutral-500",
+          )}
+        >{syncLabel}</span>
         <button
           data-outline-link
           data-link={link}

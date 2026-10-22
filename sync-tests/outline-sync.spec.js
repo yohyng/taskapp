@@ -39,7 +39,7 @@ export function subscribeOutline(onRows, onStatus) {
   return () => { if (state.onRows === onRows) state.onRows = null; };
 }
 export const supabaseReady = () => true;
-export const absentOutlineColumns = () => [];
+export const absentOutlineColumns = () => window.__outlineSync.columns || [];
 export const isOutlineTableMissing = () => false;
 export const outlineTableSql = () => "";
 export const outlineColumnsSql = () => "";
@@ -992,4 +992,169 @@ test("大きい文書を小さくしたあと開き直しても、毎回の全�
   await editRow(page, "b", "小さくしてからの編集");
   await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("小さくしてからの編集");
   expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+});
+
+
+const syncChip = (page) => page.locator("[data-outline-sync]");
+async function settleSync(page) {
+  await expect.poll(async () => {
+    await page.clock.runFor(1000);
+    return syncChip(page).getAttribute("data-sync");
+  }).toBe("synced");
+}
+
+test("接続中でも向こうを読めなければ同期済みと表示しない", async ({ page }) => {
+  await open(page, { remote: null });
+  await expect(page.locator("[data-outline-link]")).toHaveAttribute("data-link", "live");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "checking");
+  await editRow(page, "a", "読み込みを待つ編集");
+  await page.clock.runFor(3000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "waiting");
+  expect(await writes(page)).toEqual([]);
+});
+
+test("接続表示とは別に送信待ち・送信中・同期済みを表示する", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await holdWrites(page);
+  await editRow(page, "a", "送信状態を確認する");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "waiting");
+  await page.clock.runFor(300);
+  expect(await writes(page)).toEqual([]);
+  await page.clock.runFor(600);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "sending");
+  await expect(page.locator("[data-outline-link]")).toHaveAttribute("data-link", "live");
+  await releaseWrite(page);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+});
+
+test("古い送信が完了しても追加編集が残る間は同期済みにしない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await startHeldWrite(page);
+  await editRow(page, "a", "返事を待つ間の編集");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "sending");
+  await releaseWrite(page);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "waiting");
+  await holdWrites(page);
+  await advanceToWrites(page, 2);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "sending");
+  await releaseWrite(page);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("返事を待つ間の編集");
+});
+
+test("入力を止めなくても最初の変更から2秒以内に最新の本文を送り始める", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await holdWrites(page);
+  for (let i = 0; i < 7; i += 1) {
+    await editRow(page, "a", `連続入力${i}`);
+    await expect.poll(async () => (await stored(page))[0].text).toBe(`連続入力${i}`);
+    await page.clock.runFor(300);
+  }
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  expect((await writes(page))[0].rows.find((row) => row.id === "a").text).toBe("連続入力6");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "sending");
+  for (let i = 7; i < 15; i += 1) {
+    await editRow(page, "a", `連続入力${i}`);
+    await page.clock.runFor(300);
+  }
+  expect(await writes(page)).toHaveLength(1);
+  await releaseWrite(page);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("連続入力14");
+  expect(await page.evaluate(() => window.__outlineSync.maxActive)).toBe(1);
+});
+
+test("保存失敗中は接続していても同期済みと表示しない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await page.evaluate(() => {
+    window.__outlineStorage.localFail = true;
+    window.__outlineStorage.fail = true;
+  });
+  await editRow(page, "a", "まだ保存できない");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "local-error");
+  await page.clock.runFor(3000);
+  expect(await writes(page)).toHaveLength(0);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "local-error");
+  await page.evaluate(() => {
+    window.__outlineStorage.localFail = false;
+    window.__outlineStorage.fail = false;
+  });
+  await page.clock.runFor(16000);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("まだ保存できない");
+});
+
+test("他端末の受信でこの端末の未送信編集を同期済みにしない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await holdWrites(page);
+  await editRow(page, "a", "この端末の編集中");
+  const row = { ...asRows(saved())[1], text: "別端末の行", updatedAt: "2026-10-22T00:00:00.000Z" };
+  await emitRemote(page, [row], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toContainText("別端末の行");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "waiting");
+  await advanceToWrites(page, 1);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "sending");
+  await releaseWrite(page);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+});
+
+test("送信失敗を表示し再試行が成功するまで同期済みにしない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await startHeldWrite(page);
+  await releaseWrite(page, { error: "試験用の接続失敗" });
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "error");
+  await page.clock.runFor(16000);
+  await settleSync(page);
+  expect(await writes(page)).toHaveLength(2);
+});
+
+test("保存済み本文を読めない場合は同期表示でも読み出しエラーを知らせる", async ({ page }) => {
+  await open(page, { storage: { readFail: true }, waitForRemote: false });
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "read-error");
+  await page.clock.runFor(3000);
+  expect(await writes(page)).toEqual([]);
+});
+
+
+test("再起動で未送信の記録を戻した場合も、未接続の間は送信待ちを表示する", async ({ page }) => {
+  const local = saved();
+  local[0].text = "再起動しても残る未送信";
+  await open(page, {
+    remote: null,
+    localRecord: checkpointSeed(local, { pending: [{ id: "a", kind: "put", version: 1 }] }),
+  });
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "waiting");
+  await page.clock.runFor(3000);
+  expect(await writes(page)).toEqual([]);
+  await page.evaluate((key) => sessionStorage.setItem(key, JSON.stringify([])), REMOTE_KEY);
+  await page.locator("[data-outline-link]").click();
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("再起動しても残る未送信");
+});
+
+
+test("古いサーバーに列が足りない場合は全項目を同期済みと表示しない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await page.evaluate(() => { window.__outlineSync.columns = ["text_color"]; });
+  await page.locator("[data-outline-link]").click();
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "partial");
+  await page.clock.runFor(2000);
+  await expect(syncChip(page)).toHaveText("一部未同期");
+  await page.locator("[data-outline-missing-col]").getByRole("button", { name: "閉じる" }).click();
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "partial");
 });
