@@ -8,11 +8,20 @@ const REMOTE_KEY = "test-outline-remote";
 // 画面・Provider・木の操作・IndexedDBは本物を動かす。
 const dbModule = `
 export async function loadOutlineRows() {
-  window.__outlineSync.reads += 1;
+  const state = window.__outlineSync;
+  state.reads += 1;
+  if (state.holdReadsRemaining > 0) {
+    state.holdReadsRemaining -= 1;
+    await new Promise((resolve) => state.readPending.push(resolve));
+  }
   return JSON.parse(sessionStorage.getItem("test-outline-remote"));
 }
 export async function loadOutlineRevisions() {
   const state = window.__outlineSync;
+  if (state.holdReadsRemaining > 0) {
+    state.holdReadsRemaining -= 1;
+    await new Promise((resolve) => state.readPending.push(resolve));
+  }
   return state.cas ? new Map(Object.entries(state.revisions)) : undefined;
 }
 export async function saveOutlineRowsCas(rows, gone, operationId, expected) {
@@ -141,6 +150,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     }
     window.__outlineSync = {
       reads: 0, writes: [], casWrites: [], pending: [], hold: false, active: 0, maxActive: 0,
+      holdReadsRemaining: 0, readPending: [],
       cas, conflict, revisions: Object.fromEntries((remote || []).map((row) => [row.id, 1])),
     };
     window.__outlineStorage = {
@@ -1235,6 +1245,31 @@ test("競合後に向こうへ合わせると未送信記録を再送せず同�
   await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
   await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
   expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(1);
+});
+
+test("送信前の世代確認中に向こうへ合わせても古い確認結果で競合表示を戻さない", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  const reads = await page.evaluate(() => window.__outlineSync.reads);
+  await page.evaluate(() => { window.__outlineSync.revisions = {}; });
+  await page.locator("[data-outline-link]").click();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
+  await page.evaluate(() => {
+    window.__outlineSync.holdReadsRemaining = 2;
+    window.__outlineSync.revisions = { a: 2, b: 1 };
+  });
+  await editRow(page, "a", "取り込み前の未送信本文");
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(2);
+  await page.locator("[data-outline-view]").click();
+  await page.locator("[data-outline-pull]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText("前に同期した行");
+  await page.evaluate(() => window.__outlineSync.readPending.splice(0).forEach((resolve) => resolve()));
+  await page.clock.runFor(10000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
 });
 
 test("保存済み本文を読めない場合は同期表示でも読み出しエラーを知らせる", async ({ page }) => {
