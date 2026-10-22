@@ -21,7 +21,7 @@ select public.taskspace_outline_apply(
 );
 select outline_test.assert(
   (select text='新しい端末の本文' from public.outline_nodes where id='baseline-a')
-  and (select count(*)=2 from taskspace_outline_sync.events where node_id='baseline-a'),
+  and (select revision=2 from public.taskspace_outline_heads() where node_id='baseline-a'),
   '古い端末の保存は本文と履歴を増やさない');
 
 select public.taskspace_outline_apply(
@@ -29,7 +29,7 @@ select public.taskspace_outline_apply(
   '[{"id":"baseline-a","kind":"put","expected_revision":1,"row":{"id":"baseline-a","text":"新しい端末の本文","updated_at":"2030-01-01T00:00:00Z"}}]'::jsonb
 );
 select outline_test.assert(
-  (select count(*)=2 from taskspace_outline_sync.events where node_id='baseline-a'),
+  (select revision=2 from public.taskspace_outline_heads() where node_id='baseline-a'),
   '同じ操作の再送は二重に適用しない');
 
 select public.taskspace_outline_apply(
