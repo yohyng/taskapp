@@ -11,6 +11,26 @@ export async function loadOutlineRows() {
   window.__outlineSync.reads += 1;
   return JSON.parse(sessionStorage.getItem("test-outline-remote"));
 }
+export async function loadOutlineRevisions() {
+  const state = window.__outlineSync;
+  return state.cas ? new Map(Object.entries(state.revisions)) : undefined;
+}
+export async function saveOutlineRowsCas(rows, gone, operationId, expected) {
+  const state = window.__outlineSync;
+  if (!state.cas) return undefined;
+  state.casWrites.push(structuredClone({ rows, gone, operationId, expected: [...expected] }));
+  const conflicts = [...expected].filter(([id, revision]) => Number(state.revisions[id] || 0) !== revision)
+    .map(([id, revision]) => ({ id, expected_revision: revision, actual_revision: Number(state.revisions[id] || 0) }));
+  if (conflicts.length || state.conflict) return { conflicts: conflicts.length ? conflicts : [{ id: rows[0]?.id || gone[0], actual_revision: 99 }] };
+  const error = await saveOutlineRows(rows, gone);
+  if (error) return { error };
+  const accepted = new Map();
+  for (const id of [...rows.map((row) => row.id), ...gone]) {
+    state.revisions[id] = Number(state.revisions[id] || 0) + 1;
+    accepted.set(id, state.revisions[id]);
+  }
+  return { revisions: accepted };
+}
 export async function saveOutlineRows(rows, gone) {
   const state = window.__outlineSync;
   const sent = structuredClone({ rows, gone });
@@ -101,7 +121,7 @@ const asRows = (nodes, parentId = null) => nodes.flatMap((node, sortOrder) => [{
   createdAt: node.createdAt, updatedAt: node.updatedAt,
 }, ...asRows(node.children || [], node.id)]);
 
-async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true, seedLocal = true } = {}) {
+async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true, seedLocal = true, cas = false, conflict = false } = {}) {
   await page.route("**/*", (route) =>
     route.request().url().startsWith("http://127.0.0.1:4174/")
       ? route.continue() : route.abort());
@@ -109,7 +129,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     route.fulfill({ contentType: "application/javascript", body: dbModule }));
   await page.route(/\/src\/lib\/localstore\.js$/, (route) =>
     route.fulfill({ contentType: "application/javascript", body: storageModule }));
-  await page.addInitScript(({ key, remoteKey, local, remote, known, storage, seedLocal }) => {
+  await page.addInitScript(({ key, remoteKey, local, remote, known, storage, seedLocal, cas, conflict }) => {
     // リロードで初期値を入れ直すと、保存・読み直しの不具合を隠してしまう。
     if (!sessionStorage.getItem("test-outline-seeded")) {
       if (seedLocal) {
@@ -119,7 +139,10 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       sessionStorage.setItem(remoteKey, JSON.stringify(remote));
       sessionStorage.setItem("test-outline-seeded", "1");
     }
-    window.__outlineSync = { reads: 0, writes: [], pending: [], hold: false, active: 0, maxActive: 0 };
+    window.__outlineSync = {
+      reads: 0, writes: [], casWrites: [], pending: [], hold: false, active: 0, maxActive: 0,
+      cas, conflict, revisions: Object.fromEntries((remote || []).map((row) => [row.id, 1])),
+    };
     window.__outlineStorage = {
       writes: [], completed: [], pending: [], active: 0, maxActive: 0,
       localFail: false, fail: false, hold: false, holdRead: false, readPending: [],
@@ -132,7 +155,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       }
       return nativeSet.call(this, name, value);
     };
-  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage, seedLocal });
+  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage, seedLocal, cas, conflict });
   await page.clock.install();
   await page.goto("/sync-tests/fixture.html");
   if (waitForRemote) await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
@@ -1127,6 +1150,36 @@ test("送信失敗を表示し再試行が成功するまで同期済みにし�
   await page.clock.runFor(16000);
   await settleSync(page);
   expect(await writes(page)).toHaveLength(2);
+});
+
+test("サーバー世代を添えて保存し、次の編集は返された世代から続ける", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "CASで送る本文");
+  await settleSync(page);
+  await editRow(page, "a", "次の世代で送る本文");
+  await settleSync(page);
+  const writes = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(writes).toHaveLength(2);
+  expect(writes[0].expected).toEqual([["a", 1]]);
+  expect(writes[1].expected).toEqual([["a", 2]]);
+  expect(writes[0].operationId).toMatch(/^[0-9a-f-]{36}$/);
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("古い端末の保存を止め、本文と操作IDを未送信のまま端末へ残す", async ({ page }) => {
+  await open(page, { cas: true, conflict: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "古い端末に残す本文");
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("前に同期した行");
+  const record = await storedRecord(page);
+  expect(record.nodes[0].text).toBe("古い端末に残す本文");
+  expect(record.sync.pending[0]).toMatchObject({ id: "a", expectedRevision: 1 });
+  expect(record.sync.pending[0].operationId).toMatch(/^[0-9a-f-]{36}$/);
 });
 
 test("保存済み本文を読めない場合は同期表示でも読み出しエラーを知らせる", async ({ page }) => {

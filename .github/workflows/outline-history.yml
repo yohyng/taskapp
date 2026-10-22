@@ -1,0 +1,72 @@
+name: アウトラインのサーバー変更履歴
+
+on:
+  pull_request:
+    paths:
+      - "docs/sql/outline-history-v1.sql"
+      - "docs/sql/outline-cas-v1.sql"
+      - "docs/sql/outline-cas-enforce-v1.sql"
+      - "docs/sql/outline-cas-unenforce-v1.sql"
+      - "docs/outline-server-history.md"
+      - "docs/outline-cas.md"
+      - "tests/sql/**"
+      - ".github/workflows/outline-history.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  outline-history:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres: ["15", "17"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres }}
+        env:
+          POSTGRES_PASSWORD: ci-only-not-a-production-password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: 使い捨てDBに旧形式の本文と認証ロールを用意
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-history-setup.sql
+      - name: 履歴を初期化して再適用の安全性を確認
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-history-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-history-v1.sql
+      - name: 世代と変更前後の本文・削除・権限・1万行を確認
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-history.spec.sql
+      - name: 条件付き保存と再送の重複排除を確認
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-cas.spec.sql
+      - name: 二つの接続による同時更新と確定順を確認
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash tests/sql/outline-history-concurrency.sh
+      - name: 不整合を正常な再適用として扱わない
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: bash tests/sql/outline-history-reapply.sh
+      - name: 更新履歴がある状態でも再適用できる
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-history-v1.sql

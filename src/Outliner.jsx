@@ -11,13 +11,13 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
 } from "./lib/outline";
-import { loadOutlineRows, saveOutlineRows, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
+import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
 import {
   outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot, changedOutlineRows,
-  queueOutlineRows, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  queueOutlineRows, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
 } from "./lib/outline-checkpoint";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
@@ -88,6 +88,8 @@ export function OutlineProvider({ children }) {
   }, []);
   const readyRef = useRef(false);                 // 読み込み前は送らない
   const syncedRef = useRef(new Map());            // 向こうと同じだと分かっている行
+  const serverRevisionsRef = useRef(new Map());   // 端末時刻ではなく、保存条件にする向こうの世代
+  const casRef = useRef("unknown");               // unknown / available / legacy
   const tombRef = useRef(new Set());
   const knownRef = useRef(new Set());   // 向こうにもあると確かめた id
   const queueRef = useRef({ sequence: 0, pending: new Map() });
@@ -210,7 +212,7 @@ export function OutlineProvider({ children }) {
     const change = prepareOutlineChange(before, after);
     nodeCountRef.current += change.added.length - change.removed.length;
     if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
-    queueRef.current = queueOutlineRows(queueRef.current, changedOutlineRows(before, change.nodes));
+    queueRef.current = queueOutlineRows(queueRef.current, changedOutlineRows(before, change.nodes), serverRevisionsRef.current);
     setSyncStatus(sendingRef.current ? "sending" : "waiting");
     for (const id of change.removed) tombRef.current.add(id);
     for (const id of change.added) tombRef.current.delete(id);
@@ -251,12 +253,21 @@ export function OutlineProvider({ children }) {
   // 手元を読み終えてから、一度だけ呼ぶ。
   const pullOnce = useCallback(() => {
     if (!ownerRef.current || stoppedRef.current) return;
-    trackOutlineWork(workRef.current, loadOutlineRows().then((rows) => {
+    trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]).then(([rows, revisions]) => {
       if (!ownerRef.current || stoppedRef.current) return;
       if (!rows) {
         // 読めていないのに送り始めると、向こうの新しい行を手元の古い木で
         // 上書きしてしまう。置き場が無いときだけ、知らせて黙る。
         if (isOutlineTableMissing()) setSyncNote("missing-table");
+        return;
+      }
+      if (revisions instanceof Map) {
+        serverRevisionsRef.current = revisions;
+        casRef.current = "available";
+      } else if (revisions === undefined) {
+        casRef.current = "legacy";
+      } else if (casRef.current !== "legacy") {
+        setSyncNote("error:サーバーの世代を確認できませんでした");
         return;
       }
       readyRef.current = true;
@@ -294,21 +305,31 @@ export function OutlineProvider({ children }) {
     const gone = [...box.gone];
     inboxRef.current = { rows: new Map(), gone: new Set() };
     if (!rows.length && !gone.length) return;
-    setSyncStatus(sendingRef.current ? "sending" : "waiting");
-    const pending = pendingOutlineIds(queueRef.current);
-    applyRaw((mine) => applyRemoteRows(mine, rows.filter((row) => !pending.has(row.id)), gone.filter((id) => !pending.has(id))));
-    // 届いたぶんは「向こうにもある」ので、送り返さない
-    const next = new Map(syncedRef.current);
-    for (const row of rows) next.set(row.id, outlineRowSignature(row));
-    for (const id of gone) {
-      next.delete(id);
-      if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
-    }
-    syncedRef.current = next;
-    const known = new Set(next.keys());
-    knownRef.current = known;
-    saveLocal();
-    setSyncedAt(new Date().toISOString());
+    trackOutlineWork(workRef.current, (async () => {
+      if (casRef.current === "available") {
+        const revisions = await loadOutlineRevisions();
+        if (!ownerRef.current || stoppedRef.current) return;
+        if (!(revisions instanceof Map)) {
+          setSyncNote("error:受信した変更の世代を確認できませんでした");
+          return;
+        }
+        serverRevisionsRef.current = revisions;
+      }
+      setSyncStatus(sendingRef.current ? "sending" : "waiting");
+      const pending = pendingOutlineIds(queueRef.current);
+      applyRaw((mine) => applyRemoteRows(mine, rows.filter((row) => !pending.has(row.id)), gone.filter((id) => !pending.has(id))));
+      // 届いたぶんは「向こうにもある」ので、送り返さない
+      const next = new Map(syncedRef.current);
+      for (const row of rows) next.set(row.id, outlineRowSignature(row));
+      for (const id of gone) {
+        next.delete(id);
+        if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
+      }
+      syncedRef.current = next;
+      knownRef.current = new Set(next.keys());
+      saveLocal();
+      setSyncedAt(new Date().toISOString());
+    })());
   }, [applyRaw, saveLocal]);
 
   const listen = useCallback(() => subscribeOutline(({ rows = [], gone = [] }) => {
@@ -502,9 +523,26 @@ export function OutlineProvider({ children }) {
         ...changed.filter((row) => !queueRef.current.pending.has(row.id)).map((row) => ({ id: row.id, kind: "put" })),
         ...gone.filter((id) => !queueRef.current.pending.has(id)).map((id) => ({ id, kind: "delete" })),
       ];
-      queueRef.current = queueOutlineRows(queueRef.current, missing);
+      queueRef.current = queueOutlineRows(queueRef.current, missing, serverRevisionsRef.current);
       gone.forEach((id) => tombRef.current.add(id));
-      const sent = [...changed.map((row) => row.id), ...gone].map((id) => queueRef.current.pending.get(id));
+      let sendChanged = changed;
+      let sendGone = gone;
+      let sent = [...changed.map((row) => row.id), ...gone].map((id) => queueRef.current.pending.get(id));
+      let operationId = null;
+      if (casRef.current === "available") {
+        if (sent.some((op) => op?.expectedRevision === undefined)) {
+          setSyncNote("conflict:更新前から残っていた未送信の変更");
+          return;
+        }
+        const prepared = prepareOutlineOperation(
+          queueRef.current, sent.map((op) => op.id), crypto.randomUUID());
+        queueRef.current = prepared.queue;
+        sent = prepared.sent;
+        operationId = prepared.operationId;
+        const ids = new Set(sent.map((op) => op.id));
+        sendChanged = changed.filter((row) => ids.has(row.id));
+        sendGone = gone.filter((id) => ids.has(id));
+      }
       sendingRef.current = true;
       setSyncStatus("sending");
       try {
@@ -518,7 +556,27 @@ export function OutlineProvider({ children }) {
         }
         if (stoppedRef.current) return;
         let err;
-        try { err = await saveOutlineRows(changed, gone); }
+        let acceptedRevisions = new Map();
+        try {
+          if (casRef.current === "available") {
+            const expected = new Map(sent.map((op) => [op.id, op.expectedRevision]));
+            const result = await saveOutlineRowsCas(sendChanged, sendGone, operationId, expected);
+            if (result === undefined) {
+              // SQLをまだ入れていない環境は従来経路へ戻す。導入済みの通信失敗では戻さない。
+              casRef.current = "legacy";
+              err = await saveOutlineRows(sendChanged, sendGone);
+            } else if (result.error) err = result.error;
+            else if (result.conflicts?.length) {
+              setSyncNote(`conflict:${result.conflicts.map((item) => item.id).join(",")}`);
+              return;
+            } else {
+              acceptedRevisions = result.revisions;
+              for (const [id, revision] of acceptedRevisions) serverRevisionsRef.current.set(id, revision);
+            }
+          } else {
+            err = await saveOutlineRows(sendChanged, sendGone);
+          }
+        }
         catch (error) { err = error?.message || String(error); }
         if (stoppedRef.current) return;
         if (isOutlineTableMissing()) { setSyncNote("missing-table"); return; }
@@ -530,11 +588,11 @@ export function OutlineProvider({ children }) {
         }
         clearTimeout(retryRef.current);
         setSyncNote((cur) => (cur.startsWith("error:") ? "" : cur));
-        queueRef.current = acknowledgeOutlineRows(queueRef.current, sent);
-        for (const id of gone) if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
+        queueRef.current = acknowledgeOutlineRows(queueRef.current, sent, acceptedRevisions);
+        for (const id of sendGone) if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
         const next = new Map(syncedRef.current);
-        gone.forEach((id) => next.delete(id));
-        changed.forEach((row) => next.set(row.id, outlineRowSignature(row)));
+        sendGone.forEach((id) => next.delete(id));
+        sendChanged.forEach((row) => next.set(row.id, outlineRowSignature(row)));
         syncedRef.current = next;
         knownRef.current = new Set(next.keys());
         // 送信完了と、送信中の追加編集も同じ本文の控えへ確定する。
@@ -588,8 +646,10 @@ export function OutlineProvider({ children }) {
   // 突き合わせではなく置き換えなので、この端末だけの書きかけは消える。
   const pullRemote = useCallback(async () => {
     if (!ownerRef.current || stoppedRef.current) return { ok: false, why: "別のタブで編集中です" };
-    const rows = await trackOutlineWork(workRef.current, loadOutlineRows());
+    const [rows, revisions] = await trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]));
     if (!ownerRef.current || stoppedRef.current || !rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
+    if (casRef.current === "available" && !(revisions instanceof Map)) return { ok: false, why: "向こうの世代を確認できませんでした" };
+    if (revisions instanceof Map) serverRevisionsRef.current = revisions;
     const remote = buildTree(rows);
     tombRef.current = new Set();
     syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
@@ -599,6 +659,7 @@ export function OutlineProvider({ children }) {
     apply(() => (remote.length ? remote : [ensureNode({ id: "start", text: "" })]));
     queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
     tombRef.current = new Set();
+    setSyncNote((cur) => cur.startsWith("conflict:") ? "" : cur);
     saveLocal();
     return { ok: true, count: flattenTree(remote).length };
   }, [apply, saveLocal]);
@@ -736,11 +797,12 @@ export default function Outliner() {
       : link === "off" ? "local-only"
         : localSave.busy || localSave.status === "loading" ? "saving"
           : syncNote === "missing-table" || syncNote.startsWith("error:") ? "error"
+            : syncNote.startsWith("conflict:") ? "conflict"
             : syncNote.startsWith("missing-col:") || absentOutlineColumns().length > 0 ? "partial" : syncStatus;
   const syncLabel = {
     "tab-unavailable": "編集を保留", "tab-waiting": "別タブで編集中", checking: "同期を確認中", waiting: "送信待ち", sending: "送信中", synced: "同期済み",
     saving: "保存待ち", "local-error": "保存できません", "read-error": "読み出しエラー",
-    error: "同期エラー", partial: "一部未同期", "local-only": "この端末のみ",
+    error: "同期エラー", conflict: "確認が必要", partial: "一部未同期", "local-only": "この端末のみ",
   }[syncState];
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
@@ -1842,6 +1904,23 @@ alter table outline_nodes disable row level security;
           <button onClick={dismissSync} className="rounded border border-red-300/30 px-2 py-1 text-[10px] text-red-100 transition hover:bg-red-400/15">
             閉じる
           </button>
+        </div>
+      )}
+
+      {syncNote.startsWith("conflict:") && (
+        <div data-outline-sync-conflict role="alert" className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
+          <div className="mb-1 font-semibold">別の端末に新しい変更があります</div>
+          <div className="mb-2 text-amber-100/80">
+            この端末の未送信内容は端末内に残し、上書きを止めました。JSONへ控えてから「向こうに合わせる」で最新版を取り込めます。
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button data-outline-conflict-export onClick={exportJson} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
+              JSONに書き出す
+            </button>
+            <button onClick={dismissSync} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
+              閉じる
+            </button>
+          </div>
         </div>
       )}
 
