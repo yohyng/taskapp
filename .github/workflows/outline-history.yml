@@ -5,6 +5,8 @@ on:
     paths:
       - "docs/sql/outline-history-v1.sql"
       - "docs/sql/outline-cas-v1.sql"
+      - "docs/sql/outline-cas-enforce-v1.sql"
+      - "docs/sql/outline-cas-unenforce-v1.sql"
       - "docs/outline-server-history.md"
       - "docs/outline-cas.md"
       - "tests/sql/**"
@@ -53,6 +55,8 @@ jobs:
         run: |
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-v1.sql
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-cas.spec.sql
       - name: 二つの接続による同時更新と確定順を確認
         env:

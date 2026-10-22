@@ -99,6 +99,10 @@ begin
     return answer;
   end if;
 
+  -- 次段階の直接保存停止トリガーへ、検証済みのRPC内の書き込みだと伝える。
+  -- 操作の外へ許可を残さないよう、正常終了前に同じ取引内で空へ戻す。
+  perform pg_catalog.set_config('taskspace_outline_sync.cas_operation', operation_id::text, true);
+
   for item in select value from pg_catalog.jsonb_array_elements(changes) loop
     node := item->>'id';
     kind := item->>'kind';
@@ -125,6 +129,7 @@ begin
   end loop;
 
   answer := pg_catalog.jsonb_build_object('ok', true, 'revisions', revisions);
+  perform pg_catalog.set_config('taskspace_outline_sync.cas_operation', '', true);
   insert into taskspace_outline_sync.operations values (operation_id, actor, request_hash, answer, clock_timestamp());
   return answer;
 end;
