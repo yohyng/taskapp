@@ -29,6 +29,8 @@ export function readOutlineSnapshot(value) {
   for (const op of sync.pending) {
     if (!op || typeof op.id !== "string" || seen.has(op.id)
       || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
+      || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
+      || (op.operationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
       throw new Error("未送信の記録を読めません");
@@ -79,18 +81,48 @@ export function changedOutlineRows(before, after) {
   ];
 }
 
-export function queueOutlineRows(queue, changes) {
+export function queueOutlineRows(queue, changes, revisions = new Map()) {
   if (!changes.length) return queue;
   const version = queue.sequence + 1;
   const pending = new Map(queue.pending);
-  for (const change of changes) pending.set(change.id, { id: change.id, kind: change.kind, version });
+  for (const change of changes) {
+    const previous = pending.get(change.id);
+    pending.set(change.id, {
+      id: change.id, kind: change.kind, version,
+      expectedRevision: previous?.expectedRevision ?? change.expectedRevision ?? revisions.get(change.id) ?? 0,
+    });
+  }
   return { sequence: version, pending };
 }
 
-// 返ってきたのは送った世代の返事。待っている間に同じ行を直したぶんは残す。
-export function acknowledgeOutlineRows(queue, sent) {
+// 返事を失って再起動しても同じ操作IDで再送できるよう、通信前にキューへ付ける。
+// すでにIDのある操作があれば、その一団だけを先に送り、別の再送と混ぜない。
+export function prepareOutlineOperation(queue, ids, operationId) {
+  const candidates = ids.map((id) => queue.pending.get(id)).filter(Boolean);
+  const existing = candidates.find((op) => op.operationId)?.operationId;
+  const chosen = existing || operationId;
   const pending = new Map(queue.pending);
-  for (const op of sent) if (pending.get(op.id)?.version === op.version) pending.delete(op.id);
+  const sent = [];
+  for (const op of candidates) {
+    if (op.operationId && op.operationId !== chosen) continue;
+    if (existing && !op.operationId) continue;
+    const prepared = op.operationId ? op : { ...op, operationId: chosen };
+    pending.set(op.id, prepared);
+    sent.push(prepared);
+  }
+  return { queue: { ...queue, pending }, sent, operationId: chosen };
+}
+
+// 返ってきたのは送った世代の返事。待っている間に同じ行を直したぶんは残す。
+export function acknowledgeOutlineRows(queue, sent, revisions = new Map()) {
+  const pending = new Map(queue.pending);
+  for (const op of sent) {
+    const current = pending.get(op.id);
+    if (current?.version === op.version) pending.delete(op.id);
+    else if (current && revisions.has(op.id)) {
+      pending.set(op.id, { ...current, expectedRevision: revisions.get(op.id), operationId: undefined });
+    }
+  }
   return { ...queue, pending };
 }
 

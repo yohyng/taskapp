@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
 import {
   outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
-  changedOutlineRows, queueOutlineRows, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  changedOutlineRows, queueOutlineRows, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
 } from "./outline-checkpoint.js";
 
 const n = (id, children = []) => ensureNode({ id, text: id, children });
@@ -23,7 +23,8 @@ describe("本文と未送信記録を一緒に復元する", () => {
     const saved = JSON.parse(JSON.stringify(checkpoint([n("a")], q)));
     expect(readOutlineSnapshot(saved)).toEqual(saved);
     expect(saved.sync.pending).toEqual([
-      { id: "a", kind: "put", version: 1 }, { id: "b", kind: "delete", version: 1 },
+      { id: "a", kind: "put", version: 1, expectedRevision: 0 },
+      { id: "b", kind: "delete", version: 1, expectedRevision: 0 },
     ]);
   });
   it("新しい空のキューを、件数の多い古いキューで置き換えない", () => {
@@ -60,6 +61,23 @@ describe("本文と未送信記録を一緒に復元する", () => {
 });
 
 describe("送信する世代と、あとから直した世代を分ける", () => {
+  it("読んだサーバー世代と操作IDを再起動できる形でキューへ残す", () => {
+    const first = queueOutlineRows(queue(), [change("a"), change("b")], new Map([["a", 7], ["b", 3]]));
+    const prepared = prepareOutlineOperation(first, ["a", "b"], "11111111-1111-4111-8111-111111111111");
+    expect(prepared.sent).toEqual([
+      { id: "a", kind: "put", version: 1, expectedRevision: 7, operationId: prepared.operationId },
+      { id: "b", kind: "put", version: 1, expectedRevision: 3, operationId: prepared.operationId },
+    ]);
+    expect(readOutlineSnapshot(JSON.parse(JSON.stringify(checkpoint([n("a"), n("b")], prepared.queue))))).toBeTruthy();
+  });
+  it("送信中の再編集は操作IDを外し、完了したサーバー世代から次を送る", () => {
+    const first = queueOutlineRows(queue(), [change("a")], new Map([["a", 4]]));
+    const prepared = prepareOutlineOperation(first, ["a"], "11111111-1111-4111-8111-111111111111");
+    const edited = queueOutlineRows(prepared.queue, [change("a")]);
+    expect(edited.pending.get("a")).toMatchObject({ expectedRevision: 4, operationId: undefined });
+    const acknowledged = acknowledgeOutlineRows(edited, prepared.sent, new Map([["a", 5]]));
+    expect(acknowledged.pending.get("a")).toMatchObject({ expectedRevision: 5, operationId: undefined });
+  });
   it("連続編集は同じ行の最新世代だけを残す", () => {
     const first = queueOutlineRows(queue(), [change("a")]);
     const second = queueOutlineRows(first, [change("a"), change("b")]);

@@ -611,6 +611,25 @@ export async function loadOutlineRows() {
   return out.map(outlineRowToNode)
 }
 
+function looksLikeMissingOutlineRpc(error) {
+  if (!error) return false
+  const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''} ${error.code ?? ''}`
+  return /PGRST202|42883/.test(text) || /taskspace_outline_(heads|apply)/i.test(text) && /not find|does not exist/i.test(text)
+}
+
+// CASをまだ入れていない本番ではundefined、通信などで読めない場合はnullを返す。
+// 片方を「未対応」と誤認すると通常保存へ抜けて保護を飛ばすため、区別する。
+export async function loadOutlineRevisions() {
+  if (!isSupabaseEnabled || outlineTableMissing) return undefined
+  const { data, error } = await supabase.rpc('taskspace_outline_heads')
+  if (error) {
+    if (looksLikeMissingOutlineRpc(error)) return undefined
+    console.error('[db] outline revision load error', error)
+    return null
+  }
+  return new Map((data || []).map((row) => [row.node_id, Number(row.revision)]))
+}
+
 // ぜんぶ消す。手元が知っている id に頼らず、表そのものを空にする。
 // （知っている ぶんだけ消すと、読めていなかった行が残って戻ってくる）
 export async function clearOutlineRows() {
@@ -662,4 +681,27 @@ export async function saveOutlineRows(rows, deletedIds = []) {
     }
   }
   return null
+}
+
+// 世代が一致する行だけを、ひとつの操作として確定する。
+// undefinedはRPC未導入、errorは導入済みだが送れない、conflictsは古い端末からの保存。
+export async function saveOutlineRowsCas(rows, deletedIds, operationId, expectedRevisions) {
+  if (!isSupabaseEnabled || outlineTableMissing) return undefined
+  const changes = [
+    ...rows.map((row) => ({
+      id: row.id, kind: 'put', expected_revision: expectedRevisions.get(row.id) ?? 0,
+      row: outlineNodeToRow(row),
+    })),
+    ...deletedIds.map((id) => ({ id, kind: 'delete', expected_revision: expectedRevisions.get(id) ?? 0 })),
+  ]
+  const { data, error } = await supabase.rpc('taskspace_outline_apply', {
+    operation_id: operationId, changes,
+  })
+  if (error) {
+    if (looksLikeMissingOutlineRpc(error)) return undefined
+    console.error('[db] outline CAS save error', error)
+    return { error: error.message || String(error) }
+  }
+  if (!data?.ok) return { conflicts: data?.conflicts || [] }
+  return { revisions: new Map(Object.entries(data.revisions || {}).map(([id, revision]) => [id, Number(revision)])) }
 }
