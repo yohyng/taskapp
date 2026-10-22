@@ -74,6 +74,12 @@ describe("送信する世代と、あとから直した世代を分ける", () =
     expect(got.conflicts).toEqual([]);
     expect(got.queue.pending.get("start")).toMatchObject({ kind: "delete", expectedRevision: 1 });
   });
+  it("旧版が世代0で保存した既存startも本文が同じなら現在世代へ修復する", () => {
+    const first = queueOutlineRows(queue(), [{ ...change("start", "delete"), expectedRevision: 0, baseSignature: "empty-start" }]);
+    const got = resolveOutlineRevisions(first, ["start"], new Map([["start", 1]]), new Map([["start", "empty-start"]]));
+    expect(got.conflicts).toEqual([]);
+    expect(got.queue.pending.get("start")).toMatchObject({ kind: "delete", expectedRevision: 1 });
+  });
   it("送信直前に本文が変わっていれば世代を付け替えず競合にする", () => {
     const first = queueOutlineRows(queue(), [{ ...change("a"), baseSignature: "before-a" }]);
     const got = resolveOutlineRevisions(first, ["a"], new Map([["a", 8]]), new Map([["a", "other-device"]]));

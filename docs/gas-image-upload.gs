@@ -48,7 +48,7 @@ function doPost(e) {
       }
       const file = box.createFile(name, text, "application/json");
       prune(box, KEEP_BACKUPS);
-      return reply({ ok: true, id: file.getId(), name: name });
+      return reply({ ok: true, id: file.getId(), name: name, bytes: text.length });
     }
     const bytes = Utilities.base64Decode(body.dataBase64);
     const name = body.name || ("image-" + new Date().toISOString().replace(/[:.]/g, "-"));

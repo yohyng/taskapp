@@ -88,10 +88,11 @@ async function ungzip(b64) {
 describe('控え', () => {
   it('控えると、いつ控えたか覚える', async () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
-    globalThis.fetch = reply({ ok: true, name: 'taskspace-2026-10-17-10-00.json' })
+    const payload = { hello: 1 }
+    globalThis.fetch = reply({ ok: true, name: 'taskspace-2026-10-17-10-00.json', bytes: JSON.stringify(payload).length })
     expect(hoursSinceBackup()).toBe(Infinity)
 
-    const got = await backupToDrive({ hello: 1 })
+    const got = await backupToDrive(payload)
     expect(got.name).toContain('taskspace-')
     expect(hoursSinceBackup()).toBeLessThan(1)
 
@@ -106,6 +107,12 @@ describe('控え', () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
     globalThis.fetch = reply({ error: 'だめ' })
     await expect(backupToDrive({})).rejects.toThrow('だめ')
+    expect(hoursSinceBackup()).toBe(Infinity)
+  })
+  it('旧GASが空ファイルを成功扱いしても、控えたことにしない', async () => {
+    writeDriveSetting({ url: 'https://x/exec', token: 't' })
+    globalThis.fetch = reply({ ok: true, name: 'taskspace-empty.json' })
+    await expect(backupToDrive({ hello: 1 })).rejects.toThrow(/GASを最新版/)
     expect(hoursSinceBackup()).toBe(Infinity)
   })
 })

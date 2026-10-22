@@ -537,7 +537,8 @@ export function OutlineProvider({ children }) {
       let sent = [...changed.map((row) => row.id), ...gone].map((id) => queueRef.current.pending.get(id));
       let operationId = null;
       if (casRef.current === "available") {
-        if (sent.some((op) => op?.expectedRevision === undefined)) {
+        if (sent.some((op) => op?.expectedRevision === undefined
+          || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
           const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
           if (syncGeneration !== syncGenerationRef.current || !readyRef.current) return;
           if (!latestRows || !(latestRevisions instanceof Map)) {
@@ -1043,7 +1044,17 @@ export default function Outliner() {
   }
 
   function exportJson() {
-    const text = JSON.stringify(buildExport(nodes), null, 2);
+    const checkpoint = getLocalCheckpoint();
+    // 本文の持ち出し形式は保ちつつ、競合時に未送信IDと世代を確認できるようにする。
+    // itemsを読む既存の取り込みとは互換性がある。
+    const text = JSON.stringify({
+      ...buildExport(nodes),
+      syncDiagnostic: checkpoint ? {
+        revision: checkpoint.revision,
+        at: checkpoint.at,
+        sync: checkpoint.sync,
+      } : null,
+    }, null, 2);
     const blob = new Blob([text], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");

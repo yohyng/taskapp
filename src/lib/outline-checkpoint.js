@@ -107,7 +107,10 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
   const conflicts = [];
   for (const id of ids) {
     const op = pending.get(id);
-    if (!op || op.expectedRevision !== undefined) continue;
+    // v1.15.14〜16が既存行を新規行と誤認して残した世代0も、比較基準が
+    // ある場合は確定値として扱わず、送信直前の本文と照合して修復する。
+    const repairLegacyZero = op?.expectedRevision === 0 && op.baseSignature !== undefined;
+    if (!op || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
     const currentSignature = signatures.get(id);
     if (op.baseSignature !== undefined) {
       if (currentSignature !== op.baseSignature || !revisions.has(id)) {
