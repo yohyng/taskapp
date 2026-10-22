@@ -127,8 +127,8 @@ export async function backupToDrive(payload, setting = readDriveSetting()) {
   const text = JSON.stringify(payload);
   const packed = await gzipBase64(text);
   const body = JSON.stringify(packed
-    ? { kind: "backup", token: setting.token || "", gzipBase64: packed }
-    : { kind: "backup", token: setting.token || "", json: text });
+    ? { kind: "backup", token: setting.token || "", gzipBase64: packed, expectedBytes: text.length }
+    : { kind: "backup", token: setting.token || "", json: text, expectedBytes: text.length });
   let res;
   try {
     res = await fetch(setting.url, { method: "POST", body });
@@ -139,6 +139,7 @@ export async function backupToDrive(payload, setting = readDriveSetting()) {
   if (!res.ok) throw new Error(`置き場が答えません（${res.status}）`);
   const got = await res.json().catch(() => { throw new Error("置き場の返事を読めませんでした"); });
   if (got.error) throw new Error(got.error);
+  if (got.bytes !== text.length) throw new Error("控えの中身を確認できませんでした。Googleドライブ側のGASを最新版へ更新してください");
   try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch { /* noop */ }
   return got;
 }
