@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
 import {
   outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
-  changedOutlineRows, queueOutlineRows, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
 } from "./outline-checkpoint.js";
 
 const n = (id, children = []) => ensureNode({ id, text: id, children });
@@ -61,6 +61,19 @@ describe("本文と未送信記録を一緒に復元する", () => {
 });
 
 describe("送信する世代と、あとから直した世代を分ける", () => {
+  it("編集時に世代が空でも本文が同じなら送信直前の世代を使う", () => {
+    const first = queueOutlineRows(queue(), [{ ...change("a"), baseSignature: "before-a" }]);
+    expect(first.pending.get("a").expectedRevision).toBeUndefined();
+    const got = resolveOutlineRevisions(first, ["a"], new Map([["a", 7]]), new Map([["a", "before-a"]]));
+    expect(got.conflicts).toEqual([]);
+    expect(got.queue.pending.get("a")).toMatchObject({ expectedRevision: 7, baseSignature: "before-a" });
+  });
+  it("送信直前に本文が変わっていれば世代を付け替えず競合にする", () => {
+    const first = queueOutlineRows(queue(), [{ ...change("a"), baseSignature: "before-a" }]);
+    const got = resolveOutlineRevisions(first, ["a"], new Map([["a", 8]]), new Map([["a", "other-device"]]));
+    expect(got.conflicts).toEqual(["a"]);
+    expect(got.queue.pending.get("a").expectedRevision).toBeUndefined();
+  });
   it("読んだサーバー世代と操作IDを再起動できる形でキューへ残す", () => {
     const first = queueOutlineRows(queue(), [change("a"), change("b")], new Map([["a", 7], ["b", 3]]));
     const prepared = prepareOutlineOperation(first, ["a", "b"], "11111111-1111-4111-8111-111111111111");

@@ -30,6 +30,7 @@ export function readOutlineSnapshot(value) {
     if (!op || typeof op.id !== "string" || seen.has(op.id)
       || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
       || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
+      || (op.baseSignature !== undefined && typeof op.baseSignature !== "string")
       || (op.operationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
@@ -87,12 +88,40 @@ export function queueOutlineRows(queue, changes, revisions = new Map()) {
   const pending = new Map(queue.pending);
   for (const change of changes) {
     const previous = pending.get(change.id);
-    pending.set(change.id, {
+    const baseSignature = previous?.baseSignature ?? change.baseSignature;
+    const operation = {
       id: change.id, kind: change.kind, version,
-      expectedRevision: previous?.expectedRevision ?? change.expectedRevision ?? revisions.get(change.id) ?? 0,
-    });
+      expectedRevision: previous?.expectedRevision ?? change.expectedRevision
+        ?? revisions.get(change.id) ?? (baseSignature === undefined ? 0 : undefined),
+    };
+    if (baseSignature !== undefined) operation.baseSignature = baseSignature;
+    pending.set(change.id, operation);
   }
   return { sequence: version, pending };
+}
+
+// 編集時に世代一覧を取得できていなかった行は、送信直前にもう一度読む。
+// 編集前に見ていた本文と現在のサーバー本文が同じ場合だけ、現在世代を採用する。
+export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
+  const pending = new Map(queue.pending);
+  const conflicts = [];
+  for (const id of ids) {
+    const op = pending.get(id);
+    if (!op || op.expectedRevision !== undefined) continue;
+    const currentSignature = signatures.get(id);
+    if (op.baseSignature !== undefined) {
+      if (currentSignature !== op.baseSignature || !revisions.has(id)) {
+        conflicts.push(id);
+        continue;
+      }
+      pending.set(id, { ...op, expectedRevision: revisions.get(id) });
+    } else if (currentSignature !== undefined || revisions.has(id)) {
+      conflicts.push(id);
+    } else {
+      pending.set(id, { ...op, expectedRevision: 0 });
+    }
+  }
+  return { queue: { ...queue, pending }, conflicts };
 }
 
 // 返事を失って再起動しても同じ操作IDで再送できるよう、通信前にキューへ付ける。
