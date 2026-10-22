@@ -212,8 +212,10 @@ export function OutlineProvider({ children }) {
     const change = prepareOutlineChange(before, after);
     nodeCountRef.current += change.added.length - change.removed.length;
     if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
+    const beforeSignatures = new Map(flattenTree(before).map((row) => [row.id, outlineRowSignature(row)]));
     const changes = changedOutlineRows(before, change.nodes).map((item) => ({
-      ...item, baseSignature: syncedRef.current.get(item.id),
+      // startのような空表示用の行が同期済み一覧から漏れても、編集直前の姿を比較基準にする。
+      ...item, baseSignature: syncedRef.current.get(item.id) ?? beforeSignatures.get(item.id),
     }));
     queueRef.current = queueOutlineRows(queueRef.current, changes, serverRevisionsRef.current);
     setSyncStatus(sendingRef.current ? "sending" : "waiting");

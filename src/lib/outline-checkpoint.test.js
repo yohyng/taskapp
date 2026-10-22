@@ -68,6 +68,12 @@ describe("送信する世代と、あとから直した世代を分ける", () =
     expect(got.conflicts).toEqual([]);
     expect(got.queue.pending.get("a")).toMatchObject({ expectedRevision: 7, baseSignature: "before-a" });
   });
+  it("空表示用のstartも編集直前の署名があれば世代1として扱える", () => {
+    const first = queueOutlineRows(queue(), [{ ...change("start", "delete"), baseSignature: "empty-start" }]);
+    const got = resolveOutlineRevisions(first, ["start"], new Map([["start", 1]]), new Map([["start", "empty-start"]]));
+    expect(got.conflicts).toEqual([]);
+    expect(got.queue.pending.get("start")).toMatchObject({ kind: "delete", expectedRevision: 1 });
+  });
   it("送信直前に本文が変わっていれば世代を付け替えず競合にする", () => {
     const first = queueOutlineRows(queue(), [{ ...change("a"), baseSignature: "before-a" }]);
     const got = resolveOutlineRevisions(first, ["a"], new Map([["a", 8]]), new Map([["a", "other-device"]]));
