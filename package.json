@@ -1,7 +1,7 @@
 {
   "name": "taskapp-scaffold",
   "private": true,
-  "version": "1.15.1",
+  "version": "1.15.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "test": "playwright test",
     "preview": "vite preview",
     "test:unit": "vitest run src",
-    "test:ui": "playwright test --ui"
+    "test:ui": "playwright test --ui",
+    "test:sync": "playwright test --config playwright.sync.config.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

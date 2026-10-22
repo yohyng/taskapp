@@ -88,15 +88,76 @@ function clone(nodes) {
 }
 
 export function updateNode(nodes, id, patch) {
-  const next = clone(nodes);
-  const spot = locate(next, id);
-  if (!spot) return nodes;
-  spot.siblings[spot.index] = {
-    ...spot.siblings[spot.index],
-    ...patch,
-    updatedAt: new Date().toISOString(),
+  // 全行を複製すると、1文字の入力でも木と履歴が膨らむ。
+  // 変わった行から根までだけ作り直し、それ以外の枝はそのまま使う。
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    let changed;
+    if (node.id === id) {
+      changed = { ...node, children: node.children || [], ...patch, updatedAt: new Date().toISOString() };
+    } else {
+      if (!node.children?.length) continue;
+      const children = updateNode(node.children, id, patch);
+      if (children === node.children) continue;
+      changed = { ...node, children };
+    }
+    const next = nodes.slice();
+    next[i] = changed;
+    return next;
+  }
+  return nodes;
+}
+
+// 手元で親や並びを変えた行は、古い受信で元へ戻らないよう時刻を進める。
+// 文字だけの編集は共有された枝をたどるだけにして、毎打鍵の全件走査を避ける。
+export function prepareOutlineChange(before, after, at = Date.now()) {
+  const changedLayout = (left, right) => {
+    if (left === right) return false;
+    if (left.length !== right.length) return true;
+    for (let i = 0; i < left.length; i++) {
+      if (left[i].id !== right[i].id) return true;
+      if (left[i] !== right[i] && changedLayout(left[i].children || [], right[i].children || [])) return true;
+    }
+    return false;
   };
-  return next;
+  if (!changedLayout(before, after)) return { nodes: after, added: [], removed: [] };
+
+  const index = (nodes, parentId = null, out = new Map()) => {
+    nodes.forEach((node, sortOrder) => {
+      out.set(node.id, { node, parentId, sortOrder });
+      index(node.children || [], node.id, out);
+    });
+    return out;
+  };
+  const previous = index(before);
+  const current = index(after);
+  const added = [...current.keys()].filter((id) => !previous.has(id));
+  const removed = [...previous.keys()].filter((id) => !current.has(id));
+  const times = new Map();
+  for (const [id, entry] of current) {
+    const old = previous.get(id);
+    if (!old) continue;
+    if (old.parentId === entry.parentId && old.sortOrder === entry.sortOrder
+      && old.node.collapsed === entry.node.collapsed) continue;
+    const oldTime = Date.parse(old.node.updatedAt);
+    const currentTime = Date.parse(entry.node.updatedAt);
+    // 同じミリ秒で続けて動かした場合も、移動前の行より必ず新しくする。
+    const time = new Date(Math.max(at, Number.isFinite(oldTime) ? oldTime + 1 : at,
+      Number.isFinite(currentTime) ? currentTime : at)).toISOString();
+    if (entry.node.updatedAt !== time) times.set(id, time);
+  }
+  const stamp = (nodes) => {
+    let next = nodes;
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const children = node.children?.length ? stamp(node.children) : node.children;
+      if (!times.has(node.id) && children === node.children) continue;
+      if (next === nodes) next = nodes.slice();
+      next[i] = { ...node, children, ...(times.has(node.id) ? { updatedAt: times.get(node.id) } : {}) };
+    }
+    return next;
+  };
+  return { nodes: times.size ? stamp(after) : after, added, removed };
 }
 
 // id の下に新しい節を入れる。子を持って開いているなら、その先頭に入れる
@@ -539,12 +600,12 @@ export function moveSubtreeTo(nodes, dragId, prevVisibleId, targetDepth) {
 // --- 木 ⇄ 行（Supabase に置くときの形） ---
 
 // 木を平らにする。親と並び順を持たせれば、行の集まりから元に戻せる。
-export function flattenTree(nodes, parentId = null, out = []) {
-  nodes.forEach((node, i) => {
-    out.push({
+// 行の保存と送信で、属性を落とさず同じ形にする。
+export function outlineRow(node, parentId = null, sortOrder = 0) {
+  return {
       id: node.id,
       parentId,
-      sortOrder: i,
+      sortOrder,
       text: node.text || "",
       collapsed: !!node.collapsed,
       completed: !!node.completed,
@@ -556,7 +617,12 @@ export function flattenTree(nodes, parentId = null, out = []) {
       imageWidth: node.imageWidth ?? null,
       createdAt: node.createdAt || null,
       updatedAt: node.updatedAt || null,
-    });
+  };
+}
+
+export function flattenTree(nodes, parentId = null, out = []) {
+  nodes.forEach((node, i) => {
+    out.push(outlineRow(node, parentId, i));
     flattenTree(node.children || [], node.id, out);
   });
   return out;
@@ -611,7 +677,7 @@ export function buildTree(rows) {
 // knownIds … 前に「向こうにもある」と確かめた行の id。
 // 向こうから消えていて、しかも前に確かめていた行は、ほかの端末で
 // 消されたということ。手元にも残さない（残すと送り返して復活する）。
-export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), knownIds = null) {
+export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), knownIds = null, pendingIds = new Set()) {
   const localRows = flattenTree(localNodes);
   const remoteRows = flattenTree(remoteNodes);
   const remoteIds = new Set(remoteRows.map((r) => r.id));
@@ -627,13 +693,13 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), kn
     const there = byId.get(row.id);
     if (!there) {
       // 向こうに無い行。前に確かめたことがあるなら、向こうで消された。
-      if (knownIds && knownIds.has(row.id) && !remoteIds.has(row.id)) continue;
+      if (knownIds && knownIds.has(row.id) && !remoteIds.has(row.id) && !pendingIds.has(row.id)) continue;
       byId.set(row.id, row);
       continue;
     }
     const mine = row.updatedAt || "";
     const theirs = there.updatedAt || "";
-    byId.set(row.id, mine >= theirs ? row : there);
+    byId.set(row.id, pendingIds.has(row.id) || mine >= theirs ? row : there);
   }
   return buildTree([...byId.values()]);
 }

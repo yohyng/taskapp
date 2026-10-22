@@ -3153,7 +3153,7 @@ function App() {
     if (!title) return;
     rememberKind(kind);
     if (kind === "memo") {
-      addMemo(title);
+      if (!addMemo(title)) return;
     } else {
       addTask({
         title, category: "", project: "", plain: true,
@@ -3167,8 +3167,12 @@ function App() {
   // きょうの日付の行に、メモを足す
   function addMemo(text) {
     const label = toDateKey(new Date());
-    outline.addMemo(label, text);
+    if (!outline.addMemo(label, text)) {
+      setToast("アウトラインは別のタブで編集中です。入力はそのまま残しています");
+      return false;
+    }
     setToast(`${label} のメモに書きとめました`);
+    return true;
   }
 
   // 画面を保つ設定。パネルを閉じても効いたままにしたいので、ここで持つ。

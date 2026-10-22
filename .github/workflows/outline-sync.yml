@@ -1,0 +1,41 @@
+name: アウトラインの同期回帰テスト
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "sync-tests/**"
+      - "tests/**"
+      - "package*.json"
+      - "playwright*.config.js"
+      - "vite.config.js"
+      - ".github/workflows/outline-sync.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  outline-sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      VITE_SUPABASE_URL: ""
+      VITE_SUPABASE_ANON_KEY: ""
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+      - name: 依存関係を取得
+        run: npm ci
+      - name: ブラウザを準備
+        run: npx playwright install --with-deps chromium webkit
+      - name: 単体テスト
+        run: npm run test:unit
+      - name: ChromiumとWebKitで同期を確認
+        run: npm run test:sync
+      - name: 既存のアウトライン操作と本番ビルドを確認
+        run: |
+          export PLAYWRIGHT_CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
+          npm test -- tests/outliner.spec.js
