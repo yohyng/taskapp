@@ -646,23 +646,39 @@ export function OutlineProvider({ children }) {
   // 突き合わせではなく置き換えなので、この端末だけの書きかけは消える。
   const pullRemote = useCallback(async () => {
     if (!ownerRef.current || stoppedRef.current) return { ok: false, why: "別のタブで編集中です" };
-    const [rows, revisions] = await trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]));
-    if (!ownerRef.current || stoppedRef.current || !rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
-    if (casRef.current === "available" && !(revisions instanceof Map)) return { ok: false, why: "向こうの世代を確認できませんでした" };
-    if (revisions instanceof Map) serverRevisionsRef.current = revisions;
-    const remote = buildTree(rows);
-    tombRef.current = new Set();
-    syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
-    const known = new Set(syncedRef.current.keys());
-    knownRef.current = known;
-    readyRef.current = true;
-    apply(() => (remote.length ? remote : [ensureNode({ id: "start", text: "" })]));
-    queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
-    tombRef.current = new Set();
-    setSyncNote((cur) => cur.startsWith("conflict:") ? "" : cur);
-    saveLocal();
-    return { ok: true, count: flattenTree(remote).length };
-  }, [apply, saveLocal]);
+    if (sendingRef.current) return { ok: false, why: "送信が終わってから、もう一度押してください" };
+    // 置き換えの途中で、直前の送信タイマーが古い未送信記録を再送しないよう止める。
+    readyRef.current = false;
+    clearTimeout(timerRef.current);
+    sendWaitRef.current = null;
+    try {
+      const [rows, revisions] = await trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]));
+      if (!ownerRef.current || stoppedRef.current || !rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
+      if (casRef.current === "available" && !(revisions instanceof Map)) return { ok: false, why: "向こうの世代を確認できませんでした" };
+      if (revisions instanceof Map) serverRevisionsRef.current = revisions;
+      const remote = buildTree(rows);
+      const replacement = remote.length ? remote : [ensureNode({ id: "start", text: "" })];
+      // 通常編集の経路を通すと、置換そのものが一瞬だけ未送信変更になる。
+      // 先にキューを捨て、履歴だけを手動で残して受信扱いで置き換える。
+      queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
+      tombRef.current = new Set();
+      syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
+      knownRef.current = new Set(syncedRef.current.keys());
+      const previous = nodesRef.current;
+      applyRaw(() => replacement);
+      const history = histRef.current;
+      syncHist({ past: [...history.past, previous].slice(-100), future: [] });
+      setSyncNote((cur) => cur.startsWith("conflict:") ? "" : cur);
+      const saved = await saveLocal();
+      if (!saved) return { ok: false, why: "この端末への保存が完了していません" };
+      setSyncStatus("synced");
+      return { ok: true, count: flattenTree(remote).length };
+    } finally {
+      readyRef.current = true;
+      // 置換中に止めた送信判定を、空になったキューからやり直す。
+      if (ownerRef.current && !stoppedRef.current) setRetry((n) => n + 1);
+    }
+  }, [applyRaw, saveLocal]);
 
   const value = useMemo(() => ({
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,

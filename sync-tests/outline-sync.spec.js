@@ -1182,6 +1182,24 @@ test("古い端末の保存を止め、本文と操作IDを未送信のまま端
   expect(record.sync.pending[0].operationId).toMatch(/^[0-9a-f-]{36}$/);
 });
 
+test("競合後に向こうへ合わせると未送信記録を再送せず同期済みを保つ", async ({ page }) => {
+  await open(page, { cas: true, conflict: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "競合して端末に残る本文");
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  await page.evaluate(() => { window.__outlineSync.conflict = false; });
+  await page.locator("[data-outline-view]").click();
+  await page.locator("[data-outline-pull]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText("前に同期した行");
+  await expect.poll(async () => (await storedRecord(page)).sync.pending).toEqual([]);
+  await page.clock.runFor(10000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(1);
+});
+
 test("保存済み本文を読めない場合は同期表示でも読み出しエラーを知らせる", async ({ page }) => {
   await open(page, { storage: { readFail: true }, waitForRemote: false });
   await expect(syncChip(page)).toHaveAttribute("data-sync", "read-error");
