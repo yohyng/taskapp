@@ -1,3 +1,23 @@
+// 時刻の表記だけで差分にすると、自分の受信通知を何度も送り返してしまう。
+// 本文と保存済み時刻は変えず、比較するときだけUTC・同じ精度へ揃える。
+// PostgreSQLのマイクロ秒も残し、ミリ秒への丸めで別の更新を同一視しない。
+function outlineTimeKey(value) {
+  if (typeof value !== "string") return value;
+  const match = value.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.(\d{1,9}))?(?:Z|[+-]\d{2}:\d{2})$/);
+  if (!match) return value;
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  return new Date(time).toISOString().slice(0, 19) + "." + (match[1] || "").padEnd(9, "0") + "Z";
+}
+
+export function outlineRowSignature(row) {
+  return JSON.stringify({
+    ...row,
+    createdAt: outlineTimeKey(row.createdAt),
+    updatedAt: outlineTimeKey(row.updatedAt),
+  });
+}
+
 // アウトライン（Quietliner 側のデータ）を扱う。
 // 形は Quietliner の node に合わせてある。あとで持ち込み・持ち出しが
 // できるよう、余計な付け足しはしない。
@@ -697,8 +717,8 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), kn
       byId.set(row.id, row);
       continue;
     }
-    const mine = row.updatedAt || "";
-    const theirs = there.updatedAt || "";
+    const mine = outlineTimeKey(row.updatedAt) || "";
+    const theirs = outlineTimeKey(there.updatedAt) || "";
     byId.set(row.id, pendingIds.has(row.id) || mine >= theirs ? row : there);
   }
   return buildTree([...byId.values()]);
@@ -993,7 +1013,7 @@ export function applyRemoteRows(nodes, rows = [], goneIds = []) {
   for (const row of rows) {
     const here = byId.get(row.id);
     // 手元のほうが新しければ、そのままにする（打っている途中を消さない）
-    if (here && (here.updatedAt || "") > (row.updatedAt || "")) continue;
+    if (here && (outlineTimeKey(here.updatedAt) || "") > (outlineTimeKey(row.updatedAt) || "")) continue;
     byId.set(row.id, row);
   }
   for (const id of goneIds) byId.delete(id);
