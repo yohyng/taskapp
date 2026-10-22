@@ -31,6 +31,7 @@ export function readOutlineSnapshot(value) {
       || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
       || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
       || (op.baseSignature !== undefined && typeof op.baseSignature !== "string")
+      || (op.positionChanged !== undefined && typeof op.positionChanged !== "boolean")
       || (op.operationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
@@ -95,6 +96,9 @@ export function queueOutlineRows(queue, changes, revisions = new Map()) {
         ?? revisions.get(change.id) ?? (baseSignature === undefined ? 0 : undefined),
     };
     if (baseSignature !== undefined) operation.baseSignature = baseSignature;
+    if (change.positionChanged !== undefined || previous?.positionChanged !== undefined) {
+      operation.positionChanged = previous?.positionChanged === true || change.positionChanged === true;
+    }
     pending.set(change.id, operation);
   }
   return { sequence: version, pending };
@@ -160,6 +164,24 @@ export function acknowledgeOutlineRows(queue, sent, revisions = new Map()) {
 
 export function pendingOutlineIds(queue) {
   return new Set([...queue.pending.values()].filter((op) => op.kind === "put").map((op) => op.id));
+}
+
+// 受信で木の並び番号や既定値が整っても、それは編集ではない。
+// 新しい同期経路は、ユーザー操作で確定したキューだけを送信の根拠にする。
+export function queuedOutlineChanges(rows, queue, serverRows = new Map()) {
+  const present = new Set(rows.map((row) => row.id));
+  return {
+    rows: rows.filter((row) => queue.pending.get(row.id)?.kind === "put").map((row) => {
+      const op = queue.pending.get(row.id);
+      const base = serverRows.get(row.id);
+      // 画面で0始まりに詰めた番号を、本文編集のついでに書くと行が移動する。
+      // 移動していない行にはサーバーの位置を使う。旧操作は位置変更が不明なので触らない。
+      return base && op.positionChanged === false
+        ? { ...row, parentId: base.parentId, sortOrder: base.sortOrder } : row;
+    }),
+    gone: [...queue.pending.values()]
+      .filter((op) => op.kind === "delete" && !present.has(op.id)).map((op) => op.id),
+  };
 }
 
 // IndexedDBを待つあいだの操作も、読み込んだ控えへ重ねる。古い時刻の行でも

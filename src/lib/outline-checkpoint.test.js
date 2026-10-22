@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
 import {
   outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
-  changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows, queuedOutlineChanges,
 } from "./outline-checkpoint.js";
 
 const n = (id, children = []) => ensureNode({ id, text: id, children });
@@ -11,6 +11,37 @@ const change = (id, kind = "put") => ({ id, kind });
 const checkpoint = (nodes = [n("a")], q = queue(), revision = 1) =>
   outlineCheckpoint(nodes, q, new Set([...q.pending.values()].filter((op) => op.kind === "delete").map((op) => op.id)),
     new Set(["a"]), revision, "2035-01-01T00:00:00.000Z");
+
+describe("送るのはユーザーが編集した行だけ", () => {
+  it("受信した行の並び番号が詰まっても、未送信操作が無ければ書き込まない", () => {
+    const rows = flattenTree([n("a"), n("b")]);
+    expect(queuedOutlineChanges(rows, queue())).toEqual({ rows: [], gone: [] });
+  });
+  it("本文編集だけなら兄弟を送らず、削除は明示されたIDだけを送る", () => {
+    const rows = flattenTree([n("a"), n("b")]);
+    const pending = queueOutlineRows(queue(), [change("b"), change("gone", "delete")]);
+    expect(queuedOutlineChanges(rows, pending)).toEqual({ rows: [rows[1]], gone: ["gone"] });
+  });
+  it("古い削除記録があっても、現在の本文へ戻っている行を削除しない", () => {
+    const rows = flattenTree([n("a")]);
+    const pending = queueOutlineRows(queue(), [change("a", "delete")]);
+    expect(queuedOutlineChanges(rows, pending)).toEqual({ rows: [], gone: [] });
+  });
+  it("本文だけの編集は疎なサーバーの並び番号を保ち、移動は新しい位置を送る", () => {
+    const rows = flattenTree([n("a"), n("b")]);
+    const server = new Map([["b", { parentId: null, sortOrder: 20 }]]);
+    const edited = queueOutlineRows(queue(), [{ ...change("b"), positionChanged: false }]);
+    expect(queuedOutlineChanges(rows, edited, server).rows[0].sortOrder).toBe(20);
+    const moved = queueOutlineRows(edited, [{ ...change("b"), positionChanged: true }]);
+    expect(queuedOutlineChanges(rows, moved, server).rows[0].sortOrder).toBe(1);
+  });
+  it("端末時計が未来でも未編集行はサーバーを採り、未送信本文は残す", () => {
+    const local = [ensureNode({ id: "a", text: "古い端末", updatedAt: "2099-01-01" })];
+    const remote = [ensureNode({ id: "a", text: "いまの本文", updatedAt: "2026-01-01" })];
+    expect(mergeOutline(local, remote, new Set(), new Set(["a"]), new Set(), { preferRemote: true })[0].text).toBe("いまの本文");
+    expect(mergeOutline(local, remote, new Set(), new Set(["a"]), new Set(["a"]), { preferRemote: true })[0].text).toBe("古い端末");
+  });
+});
 
 describe("本文と未送信記録を一緒に復元する", () => {
   it("旧配列とIndexedDBの旧形式も空の木を含めて読める", () => {

@@ -1178,6 +1178,129 @@ test("サーバー世代を添えて保存し、次の編集は返された世�
   expect((await storedRecord(page)).sync.pending).toEqual([]);
 });
 
+test("古い端末を開くだけで書き戻さず、時計が未来でも最新の続きを表示する", async ({ page }) => {
+  const local = saved();
+  local[0].text = "古い端末に見えていた本文";
+  local[0].updatedAt = "2099-01-01T00:00:00.000Z";
+  await open(page, { local, remote: asRows(saved()), cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await expect(page.locator('[data-row="a"]')).toContainText("前に同期した行");
+  await page.clock.runFor(10000);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+});
+
+test("旧版にしか無い本文は消さず勝手に送らず、同期済みとも表示しない", async ({ page }) => {
+  const local = [...saved(), node("draft", "旧端末にしか無い本文")];
+  await open(page, { local, remote: asRows(saved()), known: ["a", "b"], cas: true });
+  await pauseClock(page);
+  await page.clock.runFor(3000);
+  await expect(page.locator('[data-row="draft"]')).toContainText("旧端末にしか無い本文");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "local-only");
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+  await editRow(page, "draft", "旧端末の本文を引き継いで編集");
+  await settleSync(page);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  expect((await remoteRows(page)).find((row) => row.id === "draft").text).toBe("旧端末の本文を引き継いで編集");
+});
+
+test("11432行と疎な並び番号を受信しても、起動と手動取り込みで送信しない", async ({ page }) => {
+  const local = [{ ...node("a", "大きい文書"), collapsed: true,
+    children: Array.from({ length: 11431 }, (_, i) => node(`child-${i}`, `行${i}`)) }];
+  // 試験用のサーバー写しをsessionStorageへ置くため、空の任意列は省く。
+  // 本文の本物の置き場はIndexedDBで、WebKitの小さいStorage枠に依存させない。
+  const remote = asRows(local).map(({ id, parentId, sortOrder, text, collapsed, createdAt, updatedAt }) => ({
+    id, parentId, sortOrder: sortOrder * 10 + 5, text, collapsed, createdAt, updatedAt,
+  }));
+  await open(page, { local: [], remote, cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await page.locator("[data-outline-view]").click();
+  await page.locator("[data-outline-pull]").click();
+  await page.clock.runFor(10000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+  expect((await bigRecord(page)).nodes[0].children).toHaveLength(11431);
+});
+
+test("本文だけの編集は対象行だけを送り、疎な並び番号の兄弟を移動させない", async ({ page }) => {
+  const remote = asRows(saved()).map((row, i) => ({ ...row, sortOrder: (i + 1) * 10 }));
+  await open(page, { remote, cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "b", "書いたのはこの一行だけ");
+  await settleSync(page);
+  const sent = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].rows.map((row) => row.id)).toEqual(["b"]);
+  expect(sent[0].rows[0].sortOrder).toBe(20);
+  expect((await remoteRows(page)).find((row) => row.id === "a").sortOrder).toBe(10);
+});
+
+test("圏外の編集を残して再接続し、ほかの行の新しい本文と両立する", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await page.evaluate((key) => sessionStorage.setItem(key, "null"), REMOTE_KEY);
+  await holdWrites(page);
+  await editRow(page, "a", "圏外で書いた続き");
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.pending.length)).toBe(1);
+  await releaseWrite(page, { error: "圏外" });
+  const remote = asRows(saved());
+  remote[1].text = "持ち替え先で更新した別の行";
+  await page.evaluate(({ key, rows }) => {
+    sessionStorage.setItem(key, JSON.stringify(rows));
+    window.__outlineSync.revisions.b = 2;
+  }, { key: REMOTE_KEY, rows: remote });
+  await page.locator("[data-outline-link]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText("圏外で書いた続き");
+  await expect(page.locator('[data-row="b"]')).toContainText("持ち替え先で更新した別の行");
+  await page.clock.runFor(16000);
+  await settleSync(page);
+  const server = await remoteRows(page);
+  expect(server.find((row) => row.id === "a").text).toBe("圏外で書いた続き");
+  expect(server.find((row) => row.id === "b").text).toBe("持ち替え先で更新した別の行");
+});
+
+test("持ち替え先で更新を取り込むだけでは送らず、その続きの編集だけを送る", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  const remote = asRows(saved());
+  remote[0].text = "別端末で書いた続き";
+  await page.evaluate(({ key, rows }) => {
+    sessionStorage.setItem(key, JSON.stringify(rows));
+    window.__outlineSync.revisions.a = 2;
+  }, { key: REMOTE_KEY, rows: remote });
+  await page.locator("[data-outline-link]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText("別端末で書いた続き");
+  await settleSync(page);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+  await editRow(page, "a", "持ち替えて続きを書いた");
+  await settleSync(page);
+  const sent = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(sent).toHaveLength(1);
+  expect(sent[0].expected).toEqual([["a", 2]]);
+});
+
+test("同じ行の本文が両立できない場合だけ止め、両端末の本文を保全する", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "この端末で書いた本文");
+  await page.evaluate((key) => {
+    const remote = JSON.parse(sessionStorage.getItem(key));
+    remote.find((row) => row.id === "a").text = "別端末で書いた本文";
+    sessionStorage.setItem(key, JSON.stringify(remote));
+    window.__outlineSync.revisions.a = 2;
+  }, REMOTE_KEY);
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("別端末で書いた本文");
+  expect((await storedRecord(page)).nodes[0].text).toBe("この端末で書いた本文");
+});
+
 test("世代一覧が一時的に空でも編集前の本文が同じなら現在世代で保存する", async ({ page }) => {
   await open(page, { cas: true });
   await pauseClock(page);

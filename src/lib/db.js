@@ -621,13 +621,21 @@ function looksLikeMissingOutlineRpc(error) {
 // 片方を「未対応」と誤認すると通常保存へ抜けて保護を飛ばすため、区別する。
 export async function loadOutlineRevisions() {
   if (!isSupabaseEnabled || outlineTableMissing) return undefined
-  const { data, error } = await supabase.rpc('taskspace_outline_heads')
-  if (error) {
-    if (looksLikeMissingOutlineRpc(error)) return undefined
-    console.error('[db] outline revision load error', error)
-    return null
+  // 本文だけを全件読めても、世代が先頭1000件で途切れると既存行を新規と誤認する。
+  // RPC側のnode_id順を明示し、削除済みの世代も含めて最後まで読む。
+  const pageSize = 1000
+  const revisions = new Map()
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await supabase.rpc('taskspace_outline_heads')
+      .order('node_id').range(from, from + pageSize - 1)
+    if (error) {
+      if (looksLikeMissingOutlineRpc(error)) return undefined
+      console.error('[db] outline revision load error', error)
+      return null
+    }
+    for (const row of data || []) revisions.set(row.node_id, Number(row.revision))
+    if (!data || data.length < pageSize) return revisions
   }
-  return new Map((data || []).map((row) => [row.node_id, Number(row.revision)]))
 }
 
 // ぜんぶ消す。手元が知っている id に頼らず、表そのものを空にする。
