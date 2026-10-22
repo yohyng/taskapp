@@ -17,7 +17,7 @@ import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
 import {
   outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot, changedOutlineRows,
-  queueOutlineRows, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
 } from "./lib/outline-checkpoint";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
@@ -212,7 +212,10 @@ export function OutlineProvider({ children }) {
     const change = prepareOutlineChange(before, after);
     nodeCountRef.current += change.added.length - change.removed.length;
     if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
-    queueRef.current = queueOutlineRows(queueRef.current, changedOutlineRows(before, change.nodes), serverRevisionsRef.current);
+    const changes = changedOutlineRows(before, change.nodes).map((item) => ({
+      ...item, baseSignature: syncedRef.current.get(item.id),
+    }));
+    queueRef.current = queueOutlineRows(queueRef.current, changes, serverRevisionsRef.current);
     setSyncStatus(sendingRef.current ? "sending" : "waiting");
     for (const id of change.removed) tombRef.current.add(id);
     for (const id of change.added) tombRef.current.delete(id);
@@ -531,8 +534,22 @@ export function OutlineProvider({ children }) {
       let operationId = null;
       if (casRef.current === "available") {
         if (sent.some((op) => op?.expectedRevision === undefined)) {
-          setSyncNote("conflict:更新前から残っていた未送信の変更");
-          return;
+          const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
+          if (!latestRows || !(latestRevisions instanceof Map)) {
+            setSyncNote("error:送信前の世代を確認できませんでした");
+            return;
+          }
+          const signatures = new Map(latestRows.map((row) => [row.id, outlineRowSignature(row)]));
+          const resolved = resolveOutlineRevisions(
+            queueRef.current, sent.map((op) => op.id), latestRevisions, signatures);
+          queueRef.current = resolved.queue;
+          serverRevisionsRef.current = latestRevisions;
+          if (resolved.conflicts.length) {
+            setSyncNote(`conflict:${resolved.conflicts.join(",")}`);
+            saveLocal();
+            return;
+          }
+          sent = sent.map((op) => queueRef.current.pending.get(op.id));
         }
         const prepared = prepareOutlineOperation(
           queueRef.current, sent.map((op) => op.id), crypto.randomUUID());

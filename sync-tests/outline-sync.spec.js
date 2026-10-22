@@ -1168,6 +1168,43 @@ test("サーバー世代を添えて保存し、次の編集は返された世�
   expect((await storedRecord(page)).sync.pending).toEqual([]);
 });
 
+test("世代一覧が一時的に空でも編集前の本文が同じなら現在世代で保存する", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  const reads = await page.evaluate(() => window.__outlineSync.reads);
+  await page.evaluate(() => { window.__outlineSync.revisions = {}; });
+  await page.locator("[data-outline-link]").click();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
+  await page.evaluate(() => { window.__outlineSync.revisions = { a: 1, b: 1 }; });
+  await editRow(page, "a", "世代を読み直して送る本文");
+  await settleSync(page);
+  const writes = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(writes).toHaveLength(1);
+  expect(writes[0].expected).toEqual([["a", 1]]);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+});
+
+test("世代を読み直す間に別端末の本文が変われば保存を止める", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  const reads = await page.evaluate(() => window.__outlineSync.reads);
+  await page.evaluate(() => { window.__outlineSync.revisions = {}; });
+  await page.locator("[data-outline-link]").click();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
+  await editRow(page, "a", "この端末の本文");
+  await page.evaluate((key) => {
+    const rows = JSON.parse(sessionStorage.getItem(key));
+    rows.find((row) => row.id === "a").text = "別端末の本文";
+    sessionStorage.setItem(key, JSON.stringify(rows));
+    window.__outlineSync.revisions = { a: 2, b: 1 };
+  }, REMOTE_KEY);
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+});
+
 test("古い端末の保存を止め、本文と操作IDを未送信のまま端末へ残す", async ({ page }) => {
   await open(page, { cas: true, conflict: true });
   await pauseClock(page);
