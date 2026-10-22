@@ -6,7 +6,7 @@ import {
   insertAfter, insertChild, indent, outdent, toggleCollapse, mergeIntoPrevious, mergeNext,
   moveSibling, deleteNodeSafe, deleteNodeKeepChildren, updateNode,
   countChars, hasStoredBody, truncateTitle,
-  flattenTree, buildTree, mergeOutline, prepareOutlineChange,
+  flattenTree, buildTree, mergeOutline, prepareOutlineChange, outlineRowSignature,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
@@ -268,7 +268,7 @@ export function OutlineProvider({ children }) {
       applyRaw((mine) => {
         const merged = mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current));
         // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
-        syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+        syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
         const known = new Set(syncedRef.current.keys());
         knownRef.current = known;
         // 全件削除も読み込み成功の結果。空を失敗扱いすると、古い行を送り返してしまう。
@@ -299,7 +299,7 @@ export function OutlineProvider({ children }) {
     applyRaw((mine) => applyRemoteRows(mine, rows.filter((row) => !pending.has(row.id)), gone.filter((id) => !pending.has(id))));
     // 届いたぶんは「向こうにもある」ので、送り返さない
     const next = new Map(syncedRef.current);
-    for (const row of rows) next.set(row.id, JSON.stringify(row));
+    for (const row of rows) next.set(row.id, outlineRowSignature(row));
     for (const id of gone) {
       next.delete(id);
       if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
@@ -315,7 +315,7 @@ export function OutlineProvider({ children }) {
     const box = inboxRef.current;
     for (const row of rows) {
       // 自分が送ったぶんは、入れ直さない
-      if (syncedRef.current.get(row.id) === JSON.stringify(row)) continue;
+      if (syncedRef.current.get(row.id) === outlineRowSignature(row)) continue;
       box.rows.set(row.id, row);
       box.gone.delete(row.id);
     }
@@ -493,7 +493,7 @@ export function OutlineProvider({ children }) {
       const rows = flattenTree(nodesRef.current);
       const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
-      const changed = rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== JSON.stringify(r));
+      const changed = rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== outlineRowSignature(r));
       const gone = [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
       for (const id of here) tombRef.current.delete(id);
       if (!changed.length && !gone.length) { setSyncStatus("synced"); return; }
@@ -534,7 +534,7 @@ export function OutlineProvider({ children }) {
         for (const id of gone) if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
         const next = new Map(syncedRef.current);
         gone.forEach((id) => next.delete(id));
-        changed.forEach((row) => next.set(row.id, JSON.stringify(row)));
+        changed.forEach((row) => next.set(row.id, outlineRowSignature(row)));
         syncedRef.current = next;
         knownRef.current = new Set(next.keys());
         // 送信完了と、送信中の追加編集も同じ本文の控えへ確定する。
@@ -592,7 +592,7 @@ export function OutlineProvider({ children }) {
     if (!ownerRef.current || stoppedRef.current || !rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
     const remote = buildTree(rows);
     tombRef.current = new Set();
-    syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, JSON.stringify(r)]));
+    syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
     const known = new Set(syncedRef.current.keys());
     knownRef.current = known;
     readyRef.current = true;

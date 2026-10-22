@@ -25,7 +25,13 @@ export async function saveOutlineRows(rows, gone) {
     const remote = JSON.parse(sessionStorage.getItem("test-outline-remote")) || [];
     const byId = new Map(remote.map((row) => [row.id, row]));
     for (const id of sent.gone) byId.delete(id);
-    for (const row of sent.rows) byId.set(row.id, row);
+    const echo = state.echoTimes ? sent.rows.map((row) => ({
+      ...row,
+      createdAt: row.createdAt?.replace("Z", "+00:00"),
+      updatedAt: row.updatedAt?.replace("Z", "+00:00"),
+    })) : sent.rows;
+    for (const row of echo) byId.set(row.id, row);
+    if (state.echoTimes) setTimeout(() => state.onRows?.({ rows: echo, gone: sent.gone }), 10);
     sessionStorage.setItem("test-outline-remote", JSON.stringify([...byId.values()]));
     return null;
   } finally {
@@ -1253,4 +1259,53 @@ test("画面を破棄しても進行中の保存が確定するまでは次の�
   await expect.poll(() => next.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
   await expect(next.locator('[data-row="a"]')).toContainText("保存の返事を待つ本文");
   await next.close();
+});
+
+test("起動時のサーバー時刻の表記が違っても未変更の行を送らない", async ({ page }) => {
+  const local = saved();
+  const remote = asRows(local).map((row) => ({
+    ...row, createdAt: row.createdAt.replace("Z", "+00:00"), updatedAt: row.updatedAt.replace("Z", "+00:00"),
+  }));
+  await open(page, { local, remote });
+  await pauseClock(page);
+  await settleSync(page);
+  await page.clock.runFor(10000);
+  expect(await writes(page)).toEqual([]);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+});
+
+test("自分の送信通知で時刻表記が変わっても待機中に送信を繰り返さない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await page.evaluate(() => { window.__outlineSync.echoTimes = true; });
+  await editRow(page, "a", "一度だけ送る本文");
+  await page.clock.runFor(1000);
+  await expect.poll(async () => (await writes(page)).length).toBe(1);
+  await page.clock.runFor(10000);
+  expect(await writes(page)).toHaveLength(1);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  await expect(page.locator('[data-row="a"]')).toContainText("一度だけ送る本文");
+  await page.locator("[data-outline-link]").click();
+  await page.clock.runFor(3000);
+  expect(await writes(page)).toHaveLength(1);
+});
+
+test("時刻表記の違う通知を受けても送信中の追加編集は落とさない", async ({ page }) => {
+  await open(page);
+  await pauseClock(page);
+  await settleSync(page);
+  await startHeldWrite(page);
+  const sent = (await writes(page))[0].rows;
+  await editRow(page, "a", "送信中にさらに書いた本文");
+  await emitRemote(page, sent.map((row) => ({
+    ...row, createdAt: row.createdAt.replace("Z", "+00:00"), updatedAt: row.updatedAt.replace("Z", "+00:00"),
+  })));
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="a"]')).toContainText("送信中にさらに書いた本文");
+  await releaseWrite(page);
+  await settleSync(page);
+  expect((await writes(page)).at(-1).rows.find((row) => row.id === "a").text).toBe("送信中にさらに書いた本文");
+  await page.clock.runFor(3000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
 });
