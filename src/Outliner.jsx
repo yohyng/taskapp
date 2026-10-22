@@ -103,6 +103,7 @@ export function OutlineProvider({ children }) {
   const retryRef = useRef(null);
   const sendingRef = useRef(false);
   const stoppedRef = useRef(false);
+  const syncGenerationRef = useRef(0);            // 手動取り込み前に始まった確認結果を捨てる
   const [retry, setRetry] = useState(0);        // 送信後・失敗後に差分を確かめ直す
   useEffect(() => {
     stoppedRef.current = false;
@@ -516,6 +517,7 @@ export function OutlineProvider({ children }) {
     timerRef.current = setTimeout(() => trackOutlineWork(workRef.current, (async () => {
       sendWaitRef.current = null;
       if (!ownerRef.current || sendingRef.current || stoppedRef.current) return;
+      const syncGeneration = syncGenerationRef.current;
       const rows = flattenTree(nodesRef.current);
       const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
@@ -537,6 +539,7 @@ export function OutlineProvider({ children }) {
       if (casRef.current === "available") {
         if (sent.some((op) => op?.expectedRevision === undefined)) {
           const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
+          if (syncGeneration !== syncGenerationRef.current || !readyRef.current) return;
           if (!latestRows || !(latestRevisions instanceof Map)) {
             setSyncNote("error:送信前の世代を確認できませんでした");
             return;
@@ -667,6 +670,7 @@ export function OutlineProvider({ children }) {
     if (!ownerRef.current || stoppedRef.current) return { ok: false, why: "別のタブで編集中です" };
     if (sendingRef.current) return { ok: false, why: "送信が終わってから、もう一度押してください" };
     // 置き換えの途中で、直前の送信タイマーが古い未送信記録を再送しないよう止める。
+    syncGenerationRef.current += 1;
     readyRef.current = false;
     clearTimeout(timerRef.current);
     sendWaitRef.current = null;
