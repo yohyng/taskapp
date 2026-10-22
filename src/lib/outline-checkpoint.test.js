@@ -74,9 +74,11 @@ describe("送信する世代と、あとから直した世代を分ける", () =
     const first = queueOutlineRows(queue(), [change("a")], new Map([["a", 4]]));
     const prepared = prepareOutlineOperation(first, ["a"], "11111111-1111-4111-8111-111111111111");
     const edited = queueOutlineRows(prepared.queue, [change("a")]);
-    expect(edited.pending.get("a")).toMatchObject({ expectedRevision: 4, operationId: undefined });
+    expect(edited.pending.get("a")).toMatchObject({ expectedRevision: 4 });
+    expect(edited.pending.get("a").operationId).toBeUndefined();
     const acknowledged = acknowledgeOutlineRows(edited, prepared.sent, new Map([["a", 5]]));
-    expect(acknowledged.pending.get("a")).toMatchObject({ expectedRevision: 5, operationId: undefined });
+    expect(acknowledged.pending.get("a")).toMatchObject({ expectedRevision: 5 });
+    expect(acknowledged.pending.get("a").operationId).toBeUndefined();
   });
   it("連続編集は同じ行の最新世代だけを残す", () => {
     const first = queueOutlineRows(queue(), [change("a")]);
