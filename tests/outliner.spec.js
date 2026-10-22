@@ -1848,3 +1848,22 @@ test.describe("つながりの様子", () => {
     await expect(page.locator("[data-outliner]")).toBeVisible();
   });
 });
+
+
+test("別タブで編集中にメモを追加しても入力を消さず、引き継いでから追加できる", async ({ page }) => {
+  await expect(page.locator("[data-outline-owner]")).toHaveCount(0);
+  const next = await page.context().newPage();
+  await next.goto("/");
+  await expect(next.locator('[data-outline-owner="waiting"]')).toBeVisible();
+  await next.locator("[data-quick-add]").click();
+  const input = next.locator("[data-quick-add-dialog] textarea");
+  await input.fill("引き継いでから追加するメモ");
+  await next.locator("[data-add-memo]").click();
+  await expect(input).toHaveValue("引き継いでから追加するメモ");
+  await page.close();
+  await expect(next.locator("[data-outline-owner]")).toHaveCount(0);
+  await next.locator("[data-add-memo]").click();
+  await expect(input).toHaveValue("");
+  await expect.poll(() => next.evaluate(() => localStorage.getItem("taskspace-outline-v1"))).toContain("引き継いでから追加するメモ");
+  await next.close();
+});

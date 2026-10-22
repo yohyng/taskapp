@@ -10,11 +10,18 @@
       import React from "react";
       import { createRoot } from "react-dom/client";
       import "/src/index.css";
-      import Outliner, { OutlineProvider } from "/src/Outliner.jsx";
+      import Outliner, { OutlineProvider, useOutlineApi } from "/src/Outliner.jsx";
 
-      createRoot(document.getElementById("root")).render(
+      function Probe() {
+        const api = useOutlineApi();
+        React.useEffect(() => { window.__outlineApi = api; }, [api]);
+        return null;
+      }
+      const root = createRoot(document.getElementById("root"));
+      window.__outlineUnmount = () => root.unmount();
+      root.render(
         React.createElement(React.StrictMode, null,
-          React.createElement(OutlineProvider, null, React.createElement(Outliner))),
+          React.createElement(OutlineProvider, null, React.createElement(Probe), React.createElement(Outliner))),
       );
     </script>
   </body>

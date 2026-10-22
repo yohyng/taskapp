@@ -95,7 +95,7 @@ const asRows = (nodes, parentId = null) => nodes.flatMap((node, sortOrder) => [{
   createdAt: node.createdAt, updatedAt: node.updatedAt,
 }, ...asRows(node.children || [], node.id)]);
 
-async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true } = {}) {
+async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true, seedLocal = true } = {}) {
   await page.route("**/*", (route) =>
     route.request().url().startsWith("http://127.0.0.1:4174/")
       ? route.continue() : route.abort());
@@ -103,11 +103,13 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     route.fulfill({ contentType: "application/javascript", body: dbModule }));
   await page.route(/\/src\/lib\/localstore\.js$/, (route) =>
     route.fulfill({ contentType: "application/javascript", body: storageModule }));
-  await page.addInitScript(({ key, remoteKey, local, remote, known, storage }) => {
+  await page.addInitScript(({ key, remoteKey, local, remote, known, storage, seedLocal }) => {
     // リロードで初期値を入れ直すと、保存・読み直しの不具合を隠してしまう。
     if (!sessionStorage.getItem("test-outline-seeded")) {
-      localStorage.setItem(key, JSON.stringify(local));
-      localStorage.setItem("taskspace-outline-known", JSON.stringify(known));
+      if (seedLocal) {
+        localStorage.setItem(key, JSON.stringify(local));
+        localStorage.setItem("taskspace-outline-known", JSON.stringify(known));
+      }
       sessionStorage.setItem(remoteKey, JSON.stringify(remote));
       sessionStorage.setItem("test-outline-seeded", "1");
     }
@@ -124,7 +126,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       }
       return nativeSet.call(this, name, value);
     };
-  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage });
+  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage, seedLocal });
   await page.clock.install();
   await page.goto("/sync-tests/fixture.html");
   if (waitForRemote) await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
@@ -1157,4 +1159,98 @@ test("古いサーバーに列が足りない場合は全項目を同期済み�
   await expect(syncChip(page)).toHaveText("一部未同期");
   await page.locator("[data-outline-missing-col]").getByRole("button", { name: "閉じる" }).click();
   await expect(syncChip(page)).toHaveAttribute("data-sync", "partial");
+});
+
+
+async function waitingTab(page) {
+  const next = await page.context().newPage();
+  await open(next, { remote: null, waitForRemote: false, seedLocal: false });
+  await expect(next.locator('[data-outline-owner="waiting"]')).toBeVisible();
+  await expect.poll(() => next.evaluate(async () => (await navigator.locks.query()).pending.length)).toBeGreaterThan(0);
+  return next;
+}
+
+test("別のタブが編集中なら、待機タブは保存も通信もメモ追加も始めない", async ({ page }) => {
+  await open(page, { remote: null });
+  const next = await waitingTab(page);
+  try {
+    await next.clock.runFor(3000);
+    expect(await next.evaluate(() => window.__outlineSync.reads)).toBe(0);
+    expect(await next.evaluate(() => window.__outlineStorage.writes.length)).toBe(0);
+    expect(await writes(next)).toEqual([]);
+    await expect(next.locator("[data-outliner]")).toHaveAttribute("inert", "");
+    expect(await next.evaluate(() => window.__outlineApi.addMemo("2026-10-22", "待機中のメモ"))).toBeNull();
+    expect(JSON.stringify(await stored(next))).not.toContain("待機中のメモ");
+  } finally { await next.close(); }
+});
+
+test("編集タブを閉じたら、待機後の新しい本文と未送信記録を読み直す", async ({ page }) => {
+  await open(page, { remote: null });
+  const next = await waitingTab(page);
+  await editRow(page, "a", "待機を始めたあとに保存した本文");
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("待機を始めたあとに保存した本文");
+  await page.close();
+  await expect.poll(() => next.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(next.locator("[data-outline-owner]")).toHaveCount(0);
+  await expect(next.locator('[data-row="a"]')).toContainText("待機を始めたあとに保存した本文");
+  await expect.poll(async () => (await bigRecord(next))?.sync.pending.map((op) => op.id)).toContain("a");
+  await editRow(next, "a", "引き継いだタブで続ける");
+  await expect.poll(async () => (await bigRecord(next))?.nodes[0].text).toBe("引き継いだタブで続ける");
+  await next.close();
+});
+
+test("差分保存だけの大きい文書も、引き継ぎ時にIndexedDBから読み直す", async ({ page }) => {
+  const local = [{ ...node("root", "大きい親"), collapsed: true,
+    children: Array.from({ length: 1000 }, (_, i) => node(`child-${i}`, `子${i}`)) }];
+  await open(page, { local, remote: null });
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].children.length).toBe(1000);
+  const next = await waitingTab(page);
+  await editRow(page, "root", "大きい文書の最新本文");
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0].text).toBe("大きい文書の最新本文");
+  expect(await page.evaluate((key) => localStorage.getItem(key), KEY)).toBeNull();
+  await page.close();
+  await expect.poll(() => next.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(next.locator('[data-row="root"]')).toContainText("大きい文書の最新本文");
+  expect((await bigRecord(next)).nodes[0].children).toHaveLength(1000);
+  await next.close();
+});
+
+test("待機タブを先に閉じても、その次のタブが引き継げる", async ({ page }) => {
+  await open(page, { remote: null });
+  const second = await waitingTab(page);
+  const third = await waitingTab(page);
+  await second.close();
+  await page.close();
+  await expect.poll(() => third.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(third.locator("[data-outline-owner]")).toHaveCount(0);
+  await editRow(third, "a", "三つめのタブから編集");
+  await expect.poll(async () => (await stored(third))[0].text).toBe("三つめのタブから編集");
+  await third.close();
+});
+
+test("ロックの無いブラウザーでは保護なしで保存を始めない", async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, "locks", { value: undefined }));
+  await open(page, { waitForRemote: false });
+  await expect(page.locator('[data-outline-owner="unavailable"]')).toBeVisible();
+  await expect(syncChip(page)).toHaveText("編集を保留");
+  await page.clock.runFor(3000);
+  expect(await page.evaluate(() => window.__outlineStorage.writes)).toEqual([]);
+  expect(await page.evaluate(() => window.__outlineSync.reads)).toBe(0);
+});
+
+test("画面を破棄しても進行中の保存が確定するまでは次のタブに渡さない", async ({ page }) => {
+  await open(page, { remote: null });
+  await expect.poll(async () => (await bigRecord(page))?.nodes.length).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__outlineStorage.active)).toBe(0);
+  const next = await waitingTab(page);
+  await page.evaluate(() => { window.__outlineStorage.localFail = true; window.__outlineStorage.hold = true; });
+  await editRow(page, "a", "保存の返事を待つ本文");
+  await expect.poll(() => page.evaluate(() => window.__outlineStorage.pending.length)).toBe(1);
+  await page.evaluate(() => window.__outlineUnmount());
+  await next.clock.runFor(3000);
+  expect(await next.evaluate(() => window.__outlineSync.reads)).toBe(0);
+  await page.evaluate(() => { window.__outlineStorage.hold = false; window.__outlineStorage.pending.shift()(true); });
+  await expect.poll(() => next.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
+  await expect(next.locator('[data-row="a"]')).toContainText("保存の返事を待つ本文");
+  await next.close();
 });
