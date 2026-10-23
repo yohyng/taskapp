@@ -13,6 +13,7 @@ import {
 } from "./lib/outline";
 import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, recoverOutlineOperationResults, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
 import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
+import { collectTaskspaceBackup } from "./lib/backup";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
@@ -1410,21 +1411,7 @@ export default function Outliner() {
   // 控え：この端末に置いてあるもの一式を、ドライブへ。
   // Supabase が飛んでも、ここから戻せるようにしておく。
   function collectAll() {
-    const store = {};
-    try {
-      for (let i = 0; i < localStorage.length; i += 1) {
-        const key = localStorage.key(i);
-        if (!key) continue;
-        // 合言葉は控えに入れない
-        if (key === "taskspace-drive-token") continue;
-        if (/^(taskspace-|notion-like-taskdb|ts-)/.test(key)) store[key] = localStorage.getItem(key);
-      }
-    } catch { /* 読めないものは諦める */ }
-    // 大きい本文と未送信記録も、画面の最新の姿を同じ控えへ入れる。
-    const outline = getLocalCheckpoint();
-    if (!outline) throw new Error("保存済みの内容を確認できていません");
-    store["taskspace-outline-v1"] = JSON.stringify(outline);
-    return { app: "taskspace", at: new Date().toISOString(), store };
+    return collectTaskspaceBackup(localStorage, getLocalCheckpoint());
   }
 
   async function runBackup(manual = false) {

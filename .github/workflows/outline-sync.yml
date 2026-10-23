@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "src/**"
+      - "docs/gas-image-upload.gs"
       - "sync-tests/**"
       - "tests/**"
       - "package*.json"

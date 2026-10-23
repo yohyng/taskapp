@@ -1,6 +1,7 @@
 // 画像を Google ドライブに置く（GAS の Web アプリ経由）。
 // 鍵はアプリに持たせない。置き場の URL と合言葉は、使う人が設定に入れる。
 // 中身は docs/gas-image-upload.gs。
+import { readTaskspaceBackup } from "./backup.js";
 
 const URL_KEY = "taskspace-drive-url";
 const TOKEN_KEY = "taskspace-drive-token";
@@ -124,11 +125,17 @@ export const mb = (n) => `${(n / 1048576).toFixed(1)}MB`;
 // ドライブに控えを置く。中身は呼ぶ側が作る（タスクもアウトラインも設定も）。
 export async function backupToDrive(payload, setting = readDriveSetting()) {
   if (!setting.url) throw new Error("置き場が決まっていません");
+  readTaskspaceBackup(payload);
   const text = JSON.stringify(payload);
+  // 古いGASへ圧縮本文を送ると空ファイルを作り、正常な以前の控えまで整理され得る。
+  const capability = await pingDrive(setting);
+  if (capability.backupProtocol !== 2) throw new Error("Googleドライブ側のGASを最新版へ更新してください（控えの検証に未対応です）");
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+  const sha256 = [...hash].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   const packed = await gzipBase64(text);
   const body = JSON.stringify(packed
-    ? { kind: "backup", token: setting.token || "", gzipBase64: packed, expectedBytes: text.length }
-    : { kind: "backup", token: setting.token || "", json: text, expectedBytes: text.length });
+    ? { kind: "backup", token: setting.token || "", gzipBase64: packed, expectedBytes: text.length, expectedSha256: sha256 }
+    : { kind: "backup", token: setting.token || "", json: text, expectedBytes: text.length, expectedSha256: sha256 });
   let res;
   try {
     res = await fetch(setting.url, { method: "POST", body });
@@ -139,7 +146,9 @@ export async function backupToDrive(payload, setting = readDriveSetting()) {
   if (!res.ok) throw new Error(`置き場が答えません（${res.status}）`);
   const got = await res.json().catch(() => { throw new Error("置き場の返事を読めませんでした"); });
   if (got.error) throw new Error(got.error);
-  if (got.bytes !== text.length) throw new Error("控えの中身を確認できませんでした。Googleドライブ側のGASを最新版へ更新してください");
+  if (got.ok !== true || typeof got.id !== "string" || !got.id || got.bytes !== text.length || got.sha256 !== sha256) {
+    throw new Error("保存した控えの内容を確認できませんでした");
+  }
   try { localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString()); } catch { /* noop */ }
   return got;
 }
