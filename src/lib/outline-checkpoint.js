@@ -1,13 +1,15 @@
 import { flattenTree, buildTree, outlineRow } from "./outline.js";
 
 export const OUTLINE_FORMAT = "taskspace-outline/1";
+const operationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // 本文だけを復元すると、送信待ちだったことを忘れて受信で消してしまう。
 // 本文・削除・未送信の世代は、1回の保存で同じ姿を残す。
 export function outlineCheckpoint(nodes, queue, deleted, known, revision, at) {
   return {
     format: OUTLINE_FORMAT, revision, at, nodes,
-    sync: { sequence: queue.sequence, pending: [...queue.pending.values()], deleted: [...deleted], known: [...known] },
+    sync: { sequence: queue.sequence, pending: [...queue.pending.values()], deleted: [...deleted], known: [...known],
+      ...(queue.flight ? { flight: queue.flight } : {}) },
   };
 }
 
@@ -31,12 +33,37 @@ export function readOutlineSnapshot(value) {
       || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
       || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
       || (op.baseSignature !== undefined && typeof op.baseSignature !== "string")
-      || (op.operationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(op.operationId))
+      || (op.positionChanged !== undefined && typeof op.positionChanged !== "boolean")
+      || (op.operationId !== undefined && !operationIdPattern.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
       throw new Error("未送信の記録を読めません");
     }
     seen.add(op.id);
+  }
+  // 返事待ちの本文は現在の木と違ってよい。削除・再編集後も元の要求を再現する。
+  if (sync.flight !== undefined) {
+    const flight = sync.flight;
+    if (!flight || !operationIdPattern.test(flight.operationId) || !Array.isArray(flight.sent)
+      || !flight.sent.length || flight.sent.length > 500 || !Array.isArray(flight.rows)
+      || !ids(flight.gone) || !Array.isArray(flight.changes)
+      || flight.changes.length !== flight.sent.length) throw new Error("送信中の記録を読めません");
+    const sentIds = new Set();
+    for (const op of flight.sent) {
+      if (!op || typeof op.id !== "string") throw new Error("送信中の記録を読めません");
+      const change = flight.changes.find((item) => item.id === op.id);
+      if (sentIds.has(op.id) || !seen.has(op.id) || op.operationId !== flight.operationId
+        || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
+        || !Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0
+        || !change || change.kind !== op.kind || change.expected_revision !== op.expectedRevision
+        || (op.kind === "put" ? !flight.rows.some((row) => row?.id === op.id) || change.row?.id !== op.id
+          : op.kind !== "delete" || !flight.gone.includes(op.id))) throw new Error("送信中の記録を読めません");
+      sentIds.add(op.id);
+    }
+    if (flight.rows.length + flight.gone.length !== sentIds.size
+      || flight.rows.some((row) => !sentIds.has(row?.id)) || flight.gone.some((id) => !sentIds.has(id))) {
+      throw new Error("送信中の記録を読めません");
+    }
   }
   return value;
 }
@@ -94,10 +121,16 @@ export function queueOutlineRows(queue, changes, revisions = new Map()) {
       expectedRevision: previous?.expectedRevision ?? change.expectedRevision
         ?? revisions.get(change.id) ?? (baseSignature === undefined ? 0 : undefined),
     };
+    // 元の要求が無い旧操作は、追加入力しても引き継ぎ対象だと分かるようにする。
+    // 新経路の送信中はflight側に元のIDが残るので、次の編集へは引き継がない。
+    if (!queue.flight && previous?.operationId) operation.operationId = previous.operationId;
     if (baseSignature !== undefined) operation.baseSignature = baseSignature;
+    if (change.positionChanged !== undefined || previous?.positionChanged !== undefined) {
+      operation.positionChanged = previous?.positionChanged === true || change.positionChanged === true;
+    }
     pending.set(change.id, operation);
   }
-  return { sequence: version, pending };
+  return { ...queue, sequence: version, pending };
 }
 
 // 編集時に世代一覧を取得できていなかった行は、送信直前にもう一度読む。
@@ -110,9 +143,15 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
     // v1.15.14〜16が既存行を新規行と誤認して残した世代0も、比較基準が
     // ある場合は確定値として扱わず、送信直前の本文と照合して修復する。
     const repairLegacyZero = op?.expectedRevision === 0 && op.baseSignature !== undefined;
-    if (!op || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
+    if (!op || op.operationId || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
     const currentSignature = signatures.get(id);
     if (op.baseSignature !== undefined) {
+      // 旧端末にしか無かった下書きを実際に編集した場合は新規作成になる。
+      // 削除履歴のあるIDはrevisionsに残るので、消された行の復活とは区別できる。
+      if (op.kind === "put" && currentSignature === undefined && !revisions.has(id)) {
+        pending.set(id, { ...op, expectedRevision: 0 });
+        continue;
+      }
       if (currentSignature !== op.baseSignature || !revisions.has(id)) {
         conflicts.push(id);
         continue;
@@ -138,11 +177,18 @@ export function prepareOutlineOperation(queue, ids, operationId) {
   for (const op of candidates) {
     if (op.operationId && op.operationId !== chosen) continue;
     if (existing && !op.operationId) continue;
+    if (!existing && sent.length === 500) break;
     const prepared = op.operationId ? op : { ...op, operationId: chosen };
     pending.set(op.id, prepared);
     sent.push(prepared);
   }
   return { queue: { ...queue, pending }, sent, operationId: chosen };
+}
+
+// 操作IDだけでは再送できない。行・順序・世代・省略列まで通信時のまま確定する。
+export function freezeOutlineOperation(queue, prepared, rows, gone, changes) {
+  const flight = structuredClone({ operationId: prepared.operationId, sent: prepared.sent, rows, gone, changes });
+  return { ...queue, flight };
 }
 
 // 返ってきたのは送った世代の返事。待っている間に同じ行を直したぶんは残す。
@@ -155,11 +201,29 @@ export function acknowledgeOutlineRows(queue, sent, revisions = new Map()) {
       pending.set(op.id, { ...current, expectedRevision: revisions.get(op.id), operationId: undefined });
     }
   }
-  return { ...queue, pending };
+  return { ...queue, pending, flight: undefined };
 }
 
 export function pendingOutlineIds(queue) {
   return new Set([...queue.pending.values()].filter((op) => op.kind === "put").map((op) => op.id));
+}
+
+// 受信で木の並び番号や既定値が整っても、それは編集ではない。
+// 新しい同期経路は、ユーザー操作で確定したキューだけを送信の根拠にする。
+export function queuedOutlineChanges(rows, queue, serverRows = new Map()) {
+  const present = new Set(rows.map((row) => row.id));
+  return {
+    rows: rows.filter((row) => queue.pending.get(row.id)?.kind === "put").map((row) => {
+      const op = queue.pending.get(row.id);
+      const base = serverRows.get(row.id);
+      // 画面で0始まりに詰めた番号を、本文編集のついでに書くと行が移動する。
+      // 移動していない行にはサーバーの位置を使う。旧操作は位置変更が不明なので触らない。
+      return base && op.positionChanged === false
+        ? { ...row, parentId: base.parentId, sortOrder: base.sortOrder } : row;
+    }),
+    gone: [...queue.pending.values()]
+      .filter((op) => op.kind === "delete" && !present.has(op.id)).map((op) => op.id),
+  };
 }
 
 // IndexedDBを待つあいだの操作も、読み込んだ控えへ重ねる。古い時刻の行でも

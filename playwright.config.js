@@ -1,4 +1,5 @@
 import { defineConfig, devices } from "@playwright/test";
+import process from "node:process";
 
 // 回帰テスト用の設定。
 // VITE_SUPABASE_* を明示的に空にして起動するので、ローカルに .env があっても
@@ -31,7 +32,7 @@ export default defineConfig({
   ],
 
   webServer: {
-    command: "npm run build && npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
+    command: `"${process.execPath}" node_modules/vite/bin/vite.js build && "${process.execPath}" node_modules/vite/bin/vite.js preview --host 127.0.0.1 --port 4173 --strictPort`,
     url: "http://127.0.0.1:4173",
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

@@ -5,6 +5,7 @@ on:
     paths:
       - "docs/sql/outline-history-v1.sql"
       - "docs/sql/outline-cas-v1.sql"
+      - "docs/sql/outline-recovery-v1.sql"
       - "docs/sql/outline-cas-enforce-v1.sql"
       - "docs/sql/outline-cas-unenforce-v1.sql"
       - "docs/outline-server-history.md"
@@ -58,6 +59,14 @@ jobs:
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-cas-enforce-v1.sql
           docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-cas.spec.sql
+      - name: 旧操作の引き継ぎと遅れて届く要求の拒否を確認
+        env:
+          POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-recovery-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < docs/sql/outline-recovery-v1.sql
+          docker exec -i "$POSTGRES_CONTAINER" psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 < tests/sql/outline-recovery.spec.sql
+          bash tests/sql/outline-recovery-concurrency.sh
       - name: 二つの接続による同時更新と確定順を確認
         env:
           POSTGRES_CONTAINER: ${{ job.services.postgres.id }}

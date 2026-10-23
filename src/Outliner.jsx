@@ -11,13 +11,14 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
 } from "./lib/outline";
-import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
+import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, recoverOutlineOperationResults, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
+import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
 import {
   outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot, changedOutlineRows,
-  queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows,
+  queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, freezeOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows, queuedOutlineChanges,
 } from "./lib/outline-checkpoint";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
@@ -89,6 +90,7 @@ export function OutlineProvider({ children }) {
   const readyRef = useRef(false);                 // 読み込み前は送らない
   const syncedRef = useRef(new Map());            // 向こうと同じだと分かっている行
   const serverRevisionsRef = useRef(new Map());   // 端末時刻ではなく、保存条件にする向こうの世代
+  const serverRowsRef = useRef(new Map());        // 本文編集でサーバーの疎な並び番号を詰めない
   const casRef = useRef("unknown");               // unknown / available / legacy
   const tombRef = useRef(new Set());
   const knownRef = useRef(new Set());   // 向こうにもあると確かめた id
@@ -213,10 +215,16 @@ export function OutlineProvider({ children }) {
     const change = prepareOutlineChange(before, after);
     nodeCountRef.current += change.added.length - change.removed.length;
     if (nodeCountRef.current >= 1000) rowSaveRef.current = true;
-    const beforeSignatures = new Map(flattenTree(before).map((row) => [row.id, outlineRowSignature(row)]));
+    const beforeRows = new Map(flattenTree(before).map((row) => [row.id, row]));
+    const afterRows = new Map(flattenTree(change.nodes).map((row) => [row.id, row]));
     const changes = changedOutlineRows(before, change.nodes).map((item) => ({
       // startのような空表示用の行が同期済み一覧から漏れても、編集直前の姿を比較基準にする。
-      ...item, baseSignature: syncedRef.current.get(item.id) ?? beforeSignatures.get(item.id),
+      ...item,
+      baseSignature: syncedRef.current.get(item.id)
+        ?? (beforeRows.has(item.id) ? outlineRowSignature(beforeRows.get(item.id)) : undefined),
+      positionChanged: !beforeRows.has(item.id) || !afterRows.has(item.id)
+        || beforeRows.get(item.id).parentId !== afterRows.get(item.id).parentId
+        || beforeRows.get(item.id).sortOrder !== afterRows.get(item.id).sortOrder,
     }));
     queueRef.current = queueOutlineRows(queueRef.current, changes, serverRevisionsRef.current);
     setSyncStatus(sendingRef.current ? "sending" : "waiting");
@@ -282,8 +290,11 @@ export function OutlineProvider({ children }) {
       // ほかの端末に伝わらない。黙っていると「端末ごとに違う」になる。
       if (absentOutlineColumns().length) setSyncNote(`missing-col:${absentOutlineColumns().join(",")}`);
       const remote = buildTree(rows);
+      serverRowsRef.current = new Map(rows.map((row) => [row.id, row]));
       applyRaw((mine) => {
-        const merged = mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current));
+        const merged = mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), {
+          preferRemote: casRef.current === "available",
+        });
         // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
         syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
         const known = new Set(syncedRef.current.keys());
@@ -327,7 +338,9 @@ export function OutlineProvider({ children }) {
       // 届いたぶんは「向こうにもある」ので、送り返さない
       const next = new Map(syncedRef.current);
       for (const row of rows) next.set(row.id, outlineRowSignature(row));
+      for (const row of rows) serverRowsRef.current.set(row.id, row);
       for (const id of gone) {
+        serverRowsRef.current.delete(id);
         next.delete(id);
         if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
       }
@@ -414,7 +427,7 @@ export function OutlineProvider({ children }) {
         const early = queueRef.current.pending;
         const restored = replayOutlineRows(base, nodesRef.current, early);
         let queue = chosen && !chosen.legacy
-          ? { sequence: chosen.sync.sequence, pending: new Map(chosen.sync.pending.map((op) => [op.id, op])) }
+          ? { sequence: chosen.sync.sequence, pending: new Map(chosen.sync.pending.map((op) => [op.id, op])), flight: chosen.sync.flight }
           : { sequence: 0, pending: new Map() };
         queue = queueOutlineRows(queue, [...early.values()]);
         for (const op of early.values()) {
@@ -518,14 +531,65 @@ export function OutlineProvider({ children }) {
       sendWaitRef.current = null;
       if (!ownerRef.current || sendingRef.current || stoppedRef.current) return;
       const syncGeneration = syncGenerationRef.current;
+      if (casRef.current === "available" && !queueRef.current.flight) {
+        const checkedQueue = queueRef.current;
+        const oldIds = [...new Set([...checkedQueue.pending.values()].map((op) => op.operationId).filter(Boolean))].slice(0, 500);
+        if (oldIds.length) {
+          const active = () => syncGeneration === syncGenerationRef.current && readyRef.current
+            && ownerRef.current && !stoppedRef.current && !sendingRef.current && queueRef.current === checkedQueue;
+          try {
+            setSyncStatus("checking");
+            const result = await recoverOutlineOperationResults(oldIds);
+            if (!active()) { if (!stoppedRef.current) setRetry((n) => n + 1); return; }
+            if (!result || result.error) throw new Error(result?.error || "旧版の送信を引き継ぐ準備ができていません");
+            const baseline = await readOutlineBaseline(loadOutlineRows, loadOutlineRevisions);
+            if (!active()) { if (!stoppedRef.current) setRetry((n) => n + 1); return; }
+            if (!baseline) throw new Error("送信結果の確認中に更新がありました。自動で確認し直します");
+            const selected = { ...checkedQueue, pending: new Map([...checkedQueue.pending].filter(([, op]) => oldIds.includes(op.operationId))) };
+            const recovered = recoverOutlineOperations(selected, result.results, flattenTree(nodesRef.current), baseline.rows, baseline.revisions);
+            const pending = new Map(checkedQueue.pending);
+            for (const id of selected.pending.keys()) {
+              if (recovered.queue.pending.has(id)) pending.set(id, recovered.queue.pending.get(id));
+              else pending.delete(id);
+            }
+            queueRef.current = { ...checkedQueue, pending };
+            for (const id of recovered.settled) tombRef.current.delete(id);
+            const remote = buildTree(baseline.rows);
+            serverRevisionsRef.current = baseline.revisions;
+            serverRowsRef.current = new Map(baseline.rows.map((row) => [row.id, row]));
+            syncedRef.current = new Map(flattenTree(remote).map((row) => [row.id, outlineRowSignature(row)]));
+            // 真の競合では木を更新して送信effectを再起動し続けない。
+            if (!recovered.conflicts.length) applyRaw((mine) => mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), { preferRemote: true }));
+            knownRef.current = new Set(syncedRef.current.keys());
+            setSyncNote(recovered.conflicts.length ? `conflict:${recovered.conflicts.join(",")}` : "");
+            await saveLocal();
+            if (!recovered.conflicts.length && !stoppedRef.current) setRetry((n) => n + 1);
+          } catch (error) {
+            if (!active()) return;
+            setSyncNote(`error:${error?.message || String(error)}`);
+            clearTimeout(retryRef.current);
+            retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
+          }
+          return;
+        }
+      }
       const rows = flattenTree(nodesRef.current);
       const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
-      const changed = rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== outlineRowSignature(r));
-      const gone = [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
+      const queued = queuedOutlineChanges(rows, queueRef.current, serverRowsRef.current);
+      const changed = casRef.current === "available" ? queued.rows
+        : rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== outlineRowSignature(r));
+      const gone = casRef.current === "available" ? queued.gone
+        : [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
       for (const id of here) tombRef.current.delete(id);
-      if (!changed.length && !gone.length) { setSyncStatus("synced"); return; }
-      // 旧形式から読んだ差分も、送る前に未送信の世代として残す。
+      if (!changed.length && !gone.length && !queueRef.current.flight) {
+        // 旧版の控えにしかない本文は勝手に送らず残すが、同期済みとも表示しない。
+        const untracked = casRef.current === "available" && rows.some((row) =>
+          !before.has(row.id) && String(row.text || "").trim());
+        setSyncStatus(untracked ? "local-only" : "synced");
+        return;
+      }
+      // CAS未導入の旧環境だけ、従来の差分から未送信記録へ移す。
       const missing = [
         ...changed.filter((row) => !queueRef.current.pending.has(row.id)).map((row) => ({ id: row.id, kind: "put" })),
         ...gone.filter((id) => !queueRef.current.pending.has(id)).map((id) => ({ id, kind: "delete" })),
@@ -537,34 +601,55 @@ export function OutlineProvider({ children }) {
       let sent = [...changed.map((row) => row.id), ...gone].map((id) => queueRef.current.pending.get(id));
       let operationId = null;
       if (casRef.current === "available") {
-        if (sent.some((op) => op?.expectedRevision === undefined
-          || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
-          const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
-          if (syncGeneration !== syncGenerationRef.current || !readyRef.current) return;
-          if (!latestRows || !(latestRevisions instanceof Map)) {
-            setSyncNote("error:送信前の世代を確認できませんでした");
-            return;
+        const flight = queueRef.current.flight;
+        if (flight) {
+          // 再送では現在の木を使わない。通信中の編集は先の結果を確かめたあと送る。
+          sent = flight.sent;
+          operationId = flight.operationId;
+          sendChanged = flight.rows;
+          sendGone = flight.gone;
+        } else {
+          if (sent.some((op) => op?.expectedRevision === undefined
+            || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
+            const checkedSequence = queueRef.current.sequence;
+            const baseline = await readOutlineBaseline(loadOutlineRows, loadOutlineRevisions);
+            if (syncGeneration !== syncGenerationRef.current || !readyRef.current || stoppedRef.current || !ownerRef.current || sendingRef.current) return;
+            if (checkedSequence !== queueRef.current.sequence) {
+              // 世代を読んでいる間にも書ける。古い本文を新しい操作として確定させない。
+              setRetry((n) => n + 1);
+              return;
+            }
+            if (!baseline) {
+              setSyncNote("error:送信前の世代を確認できませんでした");
+              clearTimeout(retryRef.current);
+              retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
+              return;
+            }
+            const { rows: latestRows, revisions: latestRevisions } = baseline;
+            const signatures = new Map(flattenTree(buildTree(latestRows)).map((row) => [row.id, outlineRowSignature(row)]));
+            const resolved = resolveOutlineRevisions(
+              queueRef.current, sent.map((op) => op.id), latestRevisions, signatures);
+            queueRef.current = resolved.queue;
+            serverRevisionsRef.current = latestRevisions;
+            if (resolved.conflicts.length) {
+              setSyncNote(`conflict:${resolved.conflicts.join(",")}`);
+              saveLocal();
+              return;
+            }
+            sent = sent.map((op) => queueRef.current.pending.get(op.id));
           }
-          const signatures = new Map(latestRows.map((row) => [row.id, outlineRowSignature(row)]));
-          const resolved = resolveOutlineRevisions(
-            queueRef.current, sent.map((op) => op.id), latestRevisions, signatures);
-          queueRef.current = resolved.queue;
-          serverRevisionsRef.current = latestRevisions;
-          if (resolved.conflicts.length) {
-            setSyncNote(`conflict:${resolved.conflicts.join(",")}`);
-            saveLocal();
-            return;
-          }
-          sent = sent.map((op) => queueRef.current.pending.get(op.id));
+          const prepared = prepareOutlineOperation(
+            queueRef.current, sent.map((op) => op.id), crypto.randomUUID());
+          queueRef.current = prepared.queue;
+          sent = prepared.sent;
+          operationId = prepared.operationId;
+          const ids = new Set(sent.map((op) => op.id));
+          sendChanged = changed.filter((row) => ids.has(row.id));
+          sendGone = gone.filter((id) => ids.has(id));
+          const expected = new Map(sent.map((op) => [op.id, op.expectedRevision]));
+          queueRef.current = freezeOutlineOperation(queueRef.current, prepared, sendChanged, sendGone,
+            outlineCasChanges(sendChanged, sendGone, expected));
         }
-        const prepared = prepareOutlineOperation(
-          queueRef.current, sent.map((op) => op.id), crypto.randomUUID());
-        queueRef.current = prepared.queue;
-        sent = prepared.sent;
-        operationId = prepared.operationId;
-        const ids = new Set(sent.map((op) => op.id));
-        sendChanged = changed.filter((row) => ids.has(row.id));
-        sendGone = gone.filter((id) => ids.has(id));
       }
       sendingRef.current = true;
       setSyncStatus("sending");
@@ -583,7 +668,7 @@ export function OutlineProvider({ children }) {
         try {
           if (casRef.current === "available") {
             const expected = new Map(sent.map((op) => [op.id, op.expectedRevision]));
-            const result = await saveOutlineRowsCas(sendChanged, sendGone, operationId, expected);
+            const result = await saveOutlineRowsCas(sendChanged, sendGone, operationId, expected, queueRef.current.flight?.changes);
             if (result === undefined) {
               // SQLをまだ入れていない環境は従来経路へ戻す。導入済みの通信失敗では戻さない。
               casRef.current = "legacy";
@@ -614,6 +699,8 @@ export function OutlineProvider({ children }) {
         queueRef.current = acknowledgeOutlineRows(queueRef.current, sent, acceptedRevisions);
         for (const id of sendGone) if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
         const next = new Map(syncedRef.current);
+        sendGone.forEach((id) => serverRowsRef.current.delete(id));
+        sendChanged.forEach((row) => serverRowsRef.current.set(row.id, row));
         sendGone.forEach((id) => next.delete(id));
         sendChanged.forEach((row) => next.set(row.id, outlineRowSignature(row)));
         syncedRef.current = next;
@@ -628,7 +715,7 @@ export function OutlineProvider({ children }) {
 
     })()), wait);
     return () => clearTimeout(timerRef.current);
-  }, [nodes, retry, saveLocal]);
+  }, [nodes, retry, saveLocal, applyRaw]);
 
   // アウトラインを触っていたときの Ctrl+Z は、こちらで受ける。
   // タスク側の取り消しと取り合いにならないよう、先に捕まえて止める。
@@ -681,6 +768,7 @@ export function OutlineProvider({ children }) {
       if (casRef.current === "available" && !(revisions instanceof Map)) return { ok: false, why: "向こうの世代を確認できませんでした" };
       if (revisions instanceof Map) serverRevisionsRef.current = revisions;
       const remote = buildTree(rows);
+      serverRowsRef.current = new Map(rows.map((row) => [row.id, row]));
       const replacement = remote.length ? remote : [ensureNode({ id: "start", text: "" })];
       // 通常編集の経路を通すと、置換そのものが一瞬だけ未送信変更になる。
       // 先にキューを捨て、履歴だけを手動で残して受信扱いで置き換える。
@@ -1959,7 +2047,7 @@ alter table outline_nodes disable row level security;
 
       {syncNote.startsWith("conflict:") && (
         <div data-outline-sync-conflict role="alert" className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
-          <div className="mb-1 font-semibold">別の端末に新しい変更があります</div>
+          <div className="mb-1 font-semibold">自動でまとめられない変更があります</div>
           <div className="mb-2 text-amber-100/80">
             この端末の未送信内容は端末内に残し、上書きを止めました。JSONへ控えてから「向こうに合わせる」で最新版を取り込めます。
           </div>
