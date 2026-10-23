@@ -268,7 +268,15 @@ async function emitRemote(page, rows, { gone = [], persist = false } = {}) {
     state.onRows({ rows, gone });
   }, { rows, gone, persist });
 }
-const pauseClock = async (page) => page.clock.pauseAt(await page.evaluate(() => Date.now() + 100));
+const pauseClock = async (page) => {
+  try { await page.clock.pauseAt(await page.evaluate(() => Date.now() + 100)); }
+  catch (error) {
+    if (!String(error?.message).includes("Cannot fast-forward to the past")) throw error;
+    // 混雑時は時刻を取得してから停止するまでに100msを超える。
+    // pauseAtは停止してから過去判定するため、停止後の現在時刻なら競走しない。
+    await page.clock.pauseAt(await page.evaluate(() => Date.now()));
+  }
+};
 const tombs = async (page) => (await storedRecord(page))?.sync?.deleted || [];
 async function deleteRow(page, id) {
   await page.locator(`[data-row-menu="${id}"]`).click();
@@ -1205,6 +1213,7 @@ test("旧版にしか無い本文は消さず勝手に送らず、同期済み�
 });
 
 test("11432行と疎な並び番号を受信しても、起動と手動取り込みで送信しない", async ({ page }) => {
+  test.setTimeout(90000);
   const local = [{ ...node("a", "大きい文書"), collapsed: true,
     children: Array.from({ length: 11431 }, (_, i) => node(`child-${i}`, `行${i}`)) }];
   // 試験用のサーバー写しをsessionStorageへ置くため、空の任意列は省く。
@@ -1214,13 +1223,14 @@ test("11432行と疎な並び番号を受信しても、起動と手動取り込
   }));
   await open(page, { local: [], remote, cas: true });
   await pauseClock(page);
-  await settleSync(page);
+  await page.clock.runFor(3000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced", { timeout: 60000 });
   await page.locator("[data-outline-view]").click();
   await page.locator("[data-outline-pull]").click();
   await page.clock.runFor(10000);
-  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "synced", { timeout: 60000 });
   expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
-  expect((await bigRecord(page)).nodes[0].children).toHaveLength(11431);
+  await expect.poll(async () => (await bigRecord(page))?.nodes[0]?.children?.length, { timeout: 60000 }).toBe(11431);
 });
 
 test("本文だけの編集は対象行だけを送り、疎な並び番号の兄弟を移動させない", async ({ page }) => {
@@ -1393,6 +1403,28 @@ test("送信前の世代確認中に向こうへ合わせても古い確認結�
   await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
   await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
   expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(0);
+});
+
+test("世代確認中の追加入力を古い本文の送信完了として消さない", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  const reads = await page.evaluate(() => window.__outlineSync.reads);
+  await page.evaluate(() => { window.__outlineSync.revisions = {}; });
+  await page.locator("[data-outline-link]").click();
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
+  await page.evaluate(() => {
+    window.__outlineSync.holdReadsRemaining = 2;
+    window.__outlineSync.revisions = { a: 1, b: 1 };
+  });
+  await editRow(page, "a", "確認を始めた時点の本文");
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(2);
+  await editRow(page, "a", "確認中にも書き足した最新の本文");
+  await page.evaluate(() => window.__outlineSync.readPending.splice(0).forEach((resolve) => resolve()));
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("確認中にも書き足した最新の本文");
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
 });
 
 test("保存済み本文を読めない場合は同期表示でも読み出しエラーを知らせる", async ({ page }) => {

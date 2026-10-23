@@ -560,8 +560,14 @@ export function OutlineProvider({ children }) {
       if (casRef.current === "available") {
         if (sent.some((op) => op?.expectedRevision === undefined
           || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
+          const checkedSequence = queueRef.current.sequence;
           const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
-          if (syncGeneration !== syncGenerationRef.current || !readyRef.current) return;
+          if (syncGeneration !== syncGenerationRef.current || !readyRef.current || stoppedRef.current || !ownerRef.current || sendingRef.current) return;
+          if (checkedSequence !== queueRef.current.sequence) {
+            // 世代を読んでいる間にも書ける。古い本文を新しい操作として確定させない。
+            setRetry((n) => n + 1);
+            return;
+          }
           if (!latestRows || !(latestRevisions instanceof Map)) {
             setSyncNote("error:送信前の世代を確認できませんでした");
             return;

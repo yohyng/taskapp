@@ -99,6 +99,14 @@ describe("送信する世代と、あとから直した世代を分ける", () =
     expect(got.conflicts).toEqual([]);
     expect(got.queue.pending.get("a")).toMatchObject({ expectedRevision: 7, baseSignature: "before-a" });
   });
+  it("サーバーに履歴のない下書きの編集は作成できるが、削除済みの行は復活させない", () => {
+    const draft = queueOutlineRows(queue(), [{ ...change("draft"), baseSignature: "下書き" }]);
+    const fresh = resolveOutlineRevisions(draft, ["draft"], new Map(), new Map());
+    expect(fresh.conflicts).toEqual([]);
+    expect(fresh.queue.pending.get("draft").expectedRevision).toBe(0);
+    const removed = resolveOutlineRevisions(draft, ["draft"], new Map([["draft", 2]]), new Map());
+    expect(removed.conflicts).toEqual(["draft"]);
+  });
   it("空表示用のstartも編集直前の署名があれば世代1として扱える", () => {
     const first = queueOutlineRows(queue(), [{ ...change("start", "delete"), baseSignature: "empty-start" }]);
     const got = resolveOutlineRevisions(first, ["start"], new Map([["start", 1]]), new Map([["start", "empty-start"]]));

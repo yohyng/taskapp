@@ -117,6 +117,12 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
     if (!op || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
     const currentSignature = signatures.get(id);
     if (op.baseSignature !== undefined) {
+      // 旧端末にしか無かった下書きを実際に編集した場合は新規作成になる。
+      // 削除履歴のあるIDはrevisionsに残るので、消された行の復活とは区別できる。
+      if (op.kind === "put" && currentSignature === undefined && !revisions.has(id)) {
+        pending.set(id, { ...op, expectedRevision: 0 });
+        continue;
+      }
       if (currentSignature !== op.baseSignature || !revisions.has(id)) {
         conflicts.push(id);
         continue;
