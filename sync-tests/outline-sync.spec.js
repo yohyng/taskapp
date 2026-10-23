@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { outlineRowSignature } from "../src/lib/outline.js";
+import { readTaskspaceBackup } from "../src/lib/backup.js";
+import { createGas } from "../tests/fixtures/gas-backup.js";
 
 const KEY = "taskspace-outline-v1";
 const REMOTE_KEY = "test-outline-remote";
@@ -1084,6 +1086,96 @@ test("大きい文書を小さくしたあと開き直しても、毎回の全�
 
 
 const syncChip = (page) => page.locator("[data-outline-sync]");
+
+async function configureBackup(page, api, legacy = false) {
+  const requests = [];
+  await page.route("https://backup.test/exec*", async (route) => {
+    const request = route.request();
+    requests.push(request.method());
+    const response = request.method() === "POST" ? api.post(JSON.parse(request.postData()))
+      : legacy ? { ok: true, folder: "旧GAS" } : api.ping();
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(response) });
+  });
+  await page.locator("[data-outline-view]").click();
+  await page.locator("[data-drive-url]").fill("https://backup.test/exec");
+  await page.locator("[data-drive-token]").fill("ここに合言葉");
+  return requests;
+}
+
+test("控えを圧縮してGASへ保存し、別の環境で本文・未送信・削除・タスクを読み戻せる", async ({ page, browser }) => {
+  await open(page, { remote: null });
+  await pauseClock(page);
+  await editRow(page, "a", "控えに残す日本語🌿");
+  await deleteRow(page, "b");
+  await page.evaluate(() => {
+    localStorage.setItem("notion-like-taskdb-prototype-v4", JSON.stringify({ tasks: [{ id: "task-a", title: "控えのタスク" }] }));
+    localStorage.setItem("taskspace-font", "mincho");
+  });
+  const api = createGas();
+  const requests = await configureBackup(page, api);
+  await page.locator("[data-drive-backup]").click();
+  await expect(page.locator("[data-outline-note]")).toContainText("控えました");
+  expect(requests).toEqual(["GET", "POST"]);
+  expect(api.readbacks).toHaveLength(1);
+  const got = readTaskspaceBackup(api.created[0].text);
+  expect(got.outline.nodes[0].text).toBe("控えに残す日本語🌿");
+  expect(got.outline.sync.pending.map((op) => [op.id, op.kind]).sort()).toEqual([["a", "put"], ["b", "delete"]]);
+  expect(got.payload.store["taskspace-drive-token"]).toBeUndefined();
+  const context = await browser.newContext();
+  try {
+    const restored = await context.newPage();
+    await restored.addInitScript((store) => { for (const [key, value] of Object.entries(store)) localStorage.setItem(key, value); }, got.payload.store);
+    await open(restored, { seedLocal: false, remote: null });
+    await expect(restored.locator('[data-row="a"]')).toContainText("控えに残す日本語🌿");
+    await expect(restored.locator('[data-row="b"]')).toHaveCount(0);
+    expect((await storedRecord(restored)).sync.pending).toEqual(got.outline.sync.pending);
+    expect(await restored.evaluate(() => JSON.parse(localStorage.getItem("notion-like-taskdb-prototype-v4")).tasks[0].title)).toBe("控えのタスク");
+    expect(await restored.evaluate(() => localStorage.getItem("taskspace-font"))).toBe("mincho");
+  } finally { await context.close(); }
+});
+
+test("控え先が旧GASなら本文を送らず、空の控えを作らせない", async ({ page }) => {
+  await open(page, { remote: null });
+  await pauseClock(page);
+  const api = createGas();
+  const requests = await configureBackup(page, api, true);
+  await page.locator("[data-drive-backup]").click();
+  await expect(page.locator("[data-outline-note]")).toContainText("GASを最新版");
+  expect(requests).toEqual(["GET"]);
+  expect(api.created).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem("taskspace-drive-last-backup"))).toBeNull();
+});
+
+test("保存した控えを読み直して一致しなければ、成功にせず以前の控えを整理しない", async ({ page }) => {
+  await open(page, { remote: null });
+  await pauseClock(page);
+  await editRow(page, "a", "日本語の控えを照合する");
+  const api = createGas({ corruptReadback: true });
+  await configureBackup(page, api);
+  await page.locator("[data-drive-backup]").click();
+  await expect(page.locator("[data-outline-note]")).toContainText("読み直しが一致しません");
+  expect(api.trashed.filter((id) => typeof id === "number")).toEqual([]);
+  expect(await page.evaluate(() => localStorage.getItem("taskspace-drive-last-backup"))).toBeNull();
+});
+
+test("端末のタスクを読めないときは部分的な控えを送らない", async ({ page }) => {
+  await open(page, { remote: null });
+  await pauseClock(page);
+  await page.evaluate(() => localStorage.setItem("notion-like-taskdb-prototype-v4", "{}"));
+  const api = createGas();
+  const requests = await configureBackup(page, api);
+  await page.evaluate(() => {
+    const read = Storage.prototype.getItem;
+    Storage.prototype.getItem = function (key) {
+      if (key === "notion-like-taskdb-prototype-v4") throw new Error("試験用の読み出し失敗");
+      return read.call(this, key);
+    };
+  });
+  await page.locator("[data-drive-backup]").click();
+  await expect(page.locator("[data-outline-note]")).toContainText("控えを中止");
+  expect(requests).toEqual([]);
+  expect(api.created).toEqual([]);
+});
 async function settleSync(page) {
   await expect.poll(async () => {
     await page.clock.runFor(1000);

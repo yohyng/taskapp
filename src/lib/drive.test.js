@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup } from './drive.js'
 
 // localStorage と fetch を、この試験のあいだだけ置き換える
@@ -86,34 +87,70 @@ async function ungzip(b64) {
 }
 
 describe('控え', () => {
+  const payload = () => ({ app: 'taskspace', store: { 'taskspace-outline-v1': JSON.stringify([{ id: 'a', text: '日本語🌿', children: [] }]) } })
+  const backupReply = (data, patch = {}) => {
+    const text = JSON.stringify(data)
+    const got = { ok: true, id: 'backup-1', name: 'taskspace-2026-10-23-00-00.json', bytes: text.length,
+      sha256: createHash('sha256').update(text).digest('hex'), ...patch }
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ ok: true, backupProtocol: 2 }) })
+      .mockResolvedValueOnce({ ok: true, json: async () => got })
+    return got
+  }
   it('控えると、いつ控えたか覚える', async () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
-    const payload = { hello: 1 }
-    globalThis.fetch = reply({ ok: true, name: 'taskspace-2026-10-17-10-00.json', bytes: JSON.stringify(payload).length })
+    const data = payload()
+    backupReply(data)
     expect(hoursSinceBackup()).toBe(Infinity)
 
-    const got = await backupToDrive(payload)
+    const got = await backupToDrive(data)
     expect(got.name).toContain('taskspace-')
     expect(hoursSinceBackup()).toBeLessThan(1)
 
-    const sent = JSON.parse(globalThis.fetch.mock.calls[0][1].body)
+    const sent = JSON.parse(globalThis.fetch.mock.calls[1][1].body)
     expect(sent.kind).toBe('backup')
     // 大きさ対策で縮めて送る。縮められない環境では、そのまま。
     const text = sent.json ?? await ungzip(sent.gzipBase64)
-    expect(JSON.parse(text)).toEqual({ hello: 1 })
+    expect(JSON.parse(text)).toEqual(data)
+    expect(sent.expectedSha256).toBe(got.sha256)
+    expect(globalThis.fetch.mock.calls[1][1].headers).toBeUndefined()
   })
 
   it('断られたときは、覚えない', async () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
-    globalThis.fetch = reply({ error: 'だめ' })
-    await expect(backupToDrive({})).rejects.toThrow('だめ')
+    backupReply(payload(), { error: 'だめ' })
+    await expect(backupToDrive(payload())).rejects.toThrow('だめ')
     expect(hoursSinceBackup()).toBe(Infinity)
   })
-  it('旧GASが空ファイルを成功扱いしても、控えたことにしない', async () => {
+  it('旧GASには本文を送らず、空ファイルを作らせない', async () => {
     writeDriveSetting({ url: 'https://x/exec', token: 't' })
-    globalThis.fetch = reply({ ok: true, name: 'taskspace-empty.json' })
-    await expect(backupToDrive({ hello: 1 })).rejects.toThrow(/GASを最新版/)
+    globalThis.fetch = reply({ ok: true, folder: '置き場' })
+    await expect(backupToDrive(payload())).rejects.toThrow(/GASを最新版/)
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+    expect(globalThis.fetch.mock.calls[0][1]).toBeUndefined()
     expect(hoursSinceBackup()).toBe(Infinity)
+  })
+  it.each([{ sha256: '0'.repeat(64) }, { bytes: 2 }, { id: '' }, { ok: false }])('照合結果が不正なら成功時刻を変えない: %j', async (patch) => {
+    writeDriveSetting({ url: 'https://x/exec', token: 't' })
+    store.set('taskspace-drive-last-backup', '2026-10-21T00:00:00.000Z')
+    backupReply(payload(), patch)
+    await expect(backupToDrive(payload())).rejects.toThrow(/控え/)
+    expect(store.get('taskspace-drive-last-backup')).toBe('2026-10-21T00:00:00.000Z')
+  })
+  it('不完全な本文は送信前に止める', async () => {
+    writeDriveSetting({ url: 'https://x/exec', token: 't' })
+    globalThis.fetch = vi.fn()
+    await expect(backupToDrive({})).rejects.toThrow(/控え/)
+    expect(globalThis.fetch).not.toHaveBeenCalled()
+  })
+  it('圧縮が使えない環境でも、元の本文の照合を保つ', async () => {
+    writeDriveSetting({ url: 'https://x/exec', token: 't' })
+    backupReply(payload())
+    vi.stubGlobal('CompressionStream', undefined)
+    try {
+      await backupToDrive(payload())
+      expect(JSON.parse(globalThis.fetch.mock.calls[1][1].body).json).toBe(JSON.stringify(payload()))
+    } finally { vi.unstubAllGlobals() }
   })
 })
 
