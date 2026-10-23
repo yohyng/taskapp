@@ -182,12 +182,20 @@ describe("送信する世代と、あとから直した世代を分ける", () =
   it("送信中の再編集は操作IDを外し、完了したサーバー世代から次を送る", () => {
     const first = queueOutlineRows(queue(), [change("a")], new Map([["a", 4]]));
     const prepared = prepareOutlineOperation(first, ["a"], "11111111-1111-4111-8111-111111111111");
-    const edited = queueOutlineRows(prepared.queue, [change("a")]);
+    const rows = flattenTree([n("a")]);
+    const frozen = freezeOutlineOperation(prepared.queue, prepared, rows, [],
+      [{ id: "a", kind: "put", expected_revision: 4, row: rows[0] }]);
+    const edited = queueOutlineRows(frozen, [change("a")]);
     expect(edited.pending.get("a")).toMatchObject({ expectedRevision: 4 });
     expect(edited.pending.get("a").operationId).toBeUndefined();
     const acknowledged = acknowledgeOutlineRows(edited, prepared.sent, new Map([["a", 5]]));
     expect(acknowledged.pending.get("a")).toMatchObject({ expectedRevision: 5 });
     expect(acknowledged.pending.get("a").operationId).toBeUndefined();
+  });
+  it("元の要求が無い旧操作は再編集しても引き継ぎ対象から外さない", () => {
+    const prepared = prepareOutlineOperation(queueOutlineRows(queue(), [change("a")]), ["a"], "11111111-1111-4111-8111-111111111111");
+    const edited = queueOutlineRows(prepared.queue, [change("a", "delete")]);
+    expect(edited.pending.get("a")).toMatchObject({ kind: "delete", operationId: prepared.operationId, version: 2 });
   });
   it("連続編集は同じ行の最新世代だけを残す", () => {
     const first = queueOutlineRows(queue(), [change("a")]);

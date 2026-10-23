@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { readFile } from "node:fs/promises";
+import { outlineRowSignature } from "../src/lib/outline.js";
 
 const KEY = "taskspace-outline-v1";
 const REMOTE_KEY = "test-outline-remote";
@@ -27,6 +28,20 @@ export async function loadOutlineRevisions() {
 export function outlineCasChanges(rows, gone, expected) {
   return [...rows.map((row) => ({ id: row.id, kind: 'put', expected_revision: expected.get(row.id), row })),
     ...gone.map((id) => ({ id, kind: 'delete', expected_revision: expected.get(id) }))];
+}
+export async function recoverOutlineOperationResults(operationIds) {
+  const state = window.__outlineSync;
+  state.recoveries.push(operationIds);
+  if (state.holdRecovery) await new Promise((resolve) => state.recoveryPending.push(resolve));
+  if (!state.recoveryAvailable) return undefined;
+  const results = new Map();
+  for (const id of operationIds) {
+    const previous = state.operations[id] ||= { hash: 'retired', retired: true };
+    results.set(id, previous.revisions ? { ok: true, revisions: Object.fromEntries(previous.revisions) }
+      : previous.conflicts ? { ok: false, conflicts: previous.conflicts } : { ok: false, retired: true });
+  }
+  sessionStorage.setItem('test-outline-operations', JSON.stringify(state.operations));
+  return { results };
 }
 export async function saveOutlineRowsCas(rows, gone, operationId, expected, frozenChanges) {
   const state = window.__outlineSync;
@@ -149,7 +164,7 @@ const asRows = (nodes, parentId = null) => nodes.flatMap((node, sortOrder) => [{
   createdAt: node.createdAt, updatedAt: node.updatedAt,
 }, ...asRows(node.children || [], node.id)]);
 
-async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true, seedLocal = true, cas = false, conflict = false } = {}) {
+async function open(page, { local = saved(), remote = asRows(local), known = asRows(local).map((row) => row.id), storage = {}, localRecord, waitForRemote = true, seedLocal = true, cas = false, conflict = false, operations = {}, revisions, recoveryAvailable = true, holdRecovery = false } = {}) {
   await page.route("**/*", (route) =>
     route.request().url().startsWith("http://127.0.0.1:4174/")
       ? route.continue() : route.abort());
@@ -157,7 +172,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     route.fulfill({ contentType: "application/javascript", body: dbModule }));
   await page.route(/\/src\/lib\/localstore\.js$/, (route) =>
     route.fulfill({ contentType: "application/javascript", body: storageModule }));
-  await page.addInitScript(({ key, remoteKey, local, remote, known, storage, seedLocal, cas, conflict }) => {
+  await page.addInitScript(({ key, remoteKey, local, remote, known, storage, seedLocal, cas, conflict, operations, revisions, recoveryAvailable, holdRecovery }) => {
     // リロードで初期値を入れ直すと、保存・読み直しの不具合を隠してしまう。
     if (!sessionStorage.getItem("test-outline-seeded")) {
       if (seedLocal) {
@@ -166,10 +181,13 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       }
       sessionStorage.setItem(remoteKey, JSON.stringify(remote));
       sessionStorage.setItem("test-outline-seeded", "1");
+      sessionStorage.setItem('test-outline-operations', JSON.stringify(operations));
+      if (revisions) sessionStorage.setItem('test-outline-revisions', JSON.stringify(revisions));
     }
     window.__outlineSync = {
       reads: 0, writes: [], casWrites: [], pending: [], hold: false, active: 0, maxActive: 0,
       holdReadsRemaining: 0, readPending: [],
+      recoveries: [], recoveryAvailable, holdRecovery, recoveryPending: [],
       cas, conflict, operations: JSON.parse(sessionStorage.getItem('test-outline-operations') || '{}'),
       revisions: JSON.parse(sessionStorage.getItem('test-outline-revisions') || 'null')
         || Object.fromEntries((remote || []).map((row) => [row.id, 1])),
@@ -186,7 +204,7 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
       }
       return nativeSet.call(this, name, value);
     };
-  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage, seedLocal, cas, conflict });
+  }, { key: KEY, remoteKey: REMOTE_KEY, local: localRecord ?? local, remote, known, storage, seedLocal, cas, conflict, operations, revisions, recoveryAvailable, holdRecovery });
   await page.clock.install();
   await page.goto("/sync-tests/fixture.html");
   if (waitForRemote) await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(0);
@@ -1073,6 +1091,112 @@ async function settleSync(page) {
   }).toBe("synced");
 }
 
+const oldOperationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+const oldPending = (overrides = {}) => ({ id: "a", kind: "put", version: 1, expectedRevision: 0,
+  baseSignature: outlineRowSignature(asRows(saved())[0]), operationId: oldOperationId, ...overrides });
+
+test("旧版で拒否された世代0の編集は、操作を引き継いで自動で続きを送る", async ({ page }) => {
+  const local = [node("a", "旧版で止まっていた本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending()] }), remote: asRows(saved()).map((row) => ({ ...row, sortOrder: row.sortOrder * 10 + 5 })), cas: true,
+    operations: { [oldOperationId]: { hash: "旧版の要求", conflicts: [{ id: "a", expected_revision: 0, actual_revision: 1 }] } } });
+  await pauseClock(page);
+  await settleSync(page);
+  const state = await page.evaluate(() => ({ recoveries: window.__outlineSync.recoveries, writes: window.__outlineSync.casWrites }));
+  expect(state.recoveries).toEqual([[oldOperationId]]);
+  expect(state.writes).toHaveLength(1);
+  expect(state.writes[0].operationId).not.toBe(oldOperationId);
+  expect(state.writes[0].expected).toEqual([["a", 1]]);
+  expect(state.writes[0].rows[0].sortOrder).toBe(5);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe(local[0].text);
+  await page.reload();
+  await pauseClock(page);
+  await settleSync(page);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toEqual([]);
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+});
+
+test("旧版の未着要求は失効してから新しいIDで送り、未送信の本文を残す", async ({ page }) => {
+  const local = [node("a", "まだ届いていなかった本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending({ expectedRevision: 1 })] }), remote: asRows(saved()), cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  expect(await page.evaluate((id) => window.__outlineSync.operations[id].retired, oldOperationId)).toBe(true);
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts).toHaveLength(1);
+  expect(attempts[0].operationId).not.toBe(oldOperationId);
+  expect((await remoteRows(page))[0].text).toBe(local[0].text);
+});
+
+test("旧版の送信が既に成功していた場合は、同じ本文を送り直さない", async ({ page }) => {
+  const local = [node("a", "既に届いていた本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending({ expectedRevision: 1 })] }), remote: asRows(local), cas: true,
+    revisions: { a: 2, b: 1 }, operations: { [oldOperationId]: { hash: "旧版の要求", revisions: [["a", 2]] } } });
+  await pauseClock(page);
+  await settleSync(page);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toEqual([]);
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("旧操作の確認中に書き続けても、古い確認結果で追加入力を消さない", async ({ page }) => {
+  await open(page, { localRecord: checkpointSeed(saved(), { pending: [oldPending({ expectedRevision: 1 })] }), remote: asRows(saved()), cas: true, holdRecovery: true });
+  await pauseClock(page);
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.recoveryPending.length)).toBe(1);
+  await editRow(page, "a", "確認中にも書いた本文");
+  await page.evaluate(() => { const state = window.__outlineSync; state.holdRecovery = false; for (const resolve of state.recoveryPending.splice(0)) resolve(); });
+  await settleSync(page);
+  expect((await remoteRows(page))[0].text).toBe("確認中にも書いた本文");
+  expect((await storedRecord(page)).nodes[0].text).toBe("確認中にも書いた本文");
+});
+
+test("旧操作の確認中に別端末で消した行は、引き継ぎ後に復活させない", async ({ page }) => {
+  await open(page, { localRecord: checkpointSeed(saved(), { pending: [oldPending({ expectedRevision: 1 })] }), remote: asRows(saved()), cas: true, holdRecovery: true });
+  await pauseClock(page);
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.recoveryPending.length)).toBe(1);
+  await page.evaluate(({ key, remote }) => {
+    const state = window.__outlineSync;
+    sessionStorage.setItem(key, JSON.stringify(remote));
+    state.revisions.b = 2;
+    state.holdRecovery = false;
+    for (const resolve of state.recoveryPending.splice(0)) resolve();
+  }, { key: REMOTE_KEY, remote: [asRows(saved())[0]] });
+  await settleSync(page);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  expect((await storedRecord(page)).nodes.map((node) => node.id)).toEqual(["a"]);
+  expect(await writes(page)).toEqual([]);
+});
+
+test("旧操作の引き継ぎが未導入なら、手元を残し直接保存へ抜けない", async ({ page }) => {
+  const local = [node("a", "準備が整うまで残す本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending()] }), remote: asRows(saved()), cas: true, recoveryAvailable: false });
+  await pauseClock(page);
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "error");
+  expect(await writes(page)).toEqual([]);
+  expect((await storedRecord(page)).nodes[0].text).toBe(local[0].text);
+  expect((await storedRecord(page)).sync.pending[0].operationId).toBe(oldOperationId);
+  await page.evaluate(() => { window.__outlineSync.recoveryAvailable = true; });
+  await page.clock.runFor(15000);
+  await settleSync(page);
+  expect((await remoteRows(page))[0].text).toBe(local[0].text);
+});
+
+test("旧操作でも別端末の両立できない本文は上書きせず、両方を保つ", async ({ page }) => {
+  const local = [node("a", "手元に保つ本文"), saved()[1]];
+  const remote = [node("a", "別端末に保つ本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending({ expectedRevision: 1 })] }), remote: asRows(remote), revisions: { a: 2, b: 1 }, cas: true });
+  await pauseClock(page);
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  expect(await writes(page)).toEqual([]);
+  expect((await storedRecord(page)).nodes[0].text).toBe(local[0].text);
+  expect((await remoteRows(page))[0].text).toBe(remote[0].text);
+  const recoveries = await page.evaluate(() => window.__outlineSync.recoveries.length);
+  await page.clock.runFor(10000);
+  expect(await page.evaluate(() => window.__outlineSync.recoveries.length)).toBe(recoveries);
+});
+
 test("送信成功の返事を失って再編集・再起動しても、先の結果を確かめてから続きを送る", async ({ page }) => {
   await open(page, { cas: true });
   await pauseClock(page);
@@ -1455,12 +1579,12 @@ test("送信前の世代確認中に向こうへ合わせても古い確認結�
   await page.locator("[data-outline-link]").click();
   await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
   await page.evaluate(() => {
-    window.__outlineSync.holdReadsRemaining = 2;
+    window.__outlineSync.holdReadsRemaining = 1;
     window.__outlineSync.revisions = { a: 2, b: 1 };
   });
   await editRow(page, "a", "取り込み前の未送信本文");
   await page.clock.runFor(1000);
-  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(1);
   await page.locator("[data-outline-view]").click();
   await page.locator("[data-outline-pull]").click();
   await expect(page.locator('[data-row="a"]')).toContainText("前に同期した行");
@@ -1480,12 +1604,12 @@ test("世代確認中の追加入力を古い本文の送信完了として消�
   await page.locator("[data-outline-link]").click();
   await expect.poll(() => page.evaluate(() => window.__outlineSync.reads)).toBeGreaterThan(reads);
   await page.evaluate(() => {
-    window.__outlineSync.holdReadsRemaining = 2;
+    window.__outlineSync.holdReadsRemaining = 1;
     window.__outlineSync.revisions = { a: 1, b: 1 };
   });
   await editRow(page, "a", "確認を始めた時点の本文");
   await page.clock.runFor(1000);
-  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(1);
   await editRow(page, "a", "確認中にも書き足した最新の本文");
   await page.evaluate(() => window.__outlineSync.readPending.splice(0).forEach((resolve) => resolve()));
   await settleSync(page);

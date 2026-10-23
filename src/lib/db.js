@@ -614,7 +614,7 @@ export async function loadOutlineRows() {
 function looksLikeMissingOutlineRpc(error) {
   if (!error) return false
   const text = `${error.message ?? ''} ${error.details ?? ''} ${error.hint ?? ''} ${error.code ?? ''}`
-  return /PGRST202|42883/.test(text) || /taskspace_outline_(heads|apply)/i.test(text) && /not find|does not exist/i.test(text)
+  return /PGRST202|42883/.test(text) || /taskspace_outline_(heads|apply|recover_operations)/i.test(text) && /not find|does not exist/i.test(text)
 }
 
 // CASをまだ入れていない本番ではundefined、通信などで読めない場合はnullを返す。
@@ -716,4 +716,29 @@ export async function saveOutlineRowsCas(rows, deletedIds, operationId, expected
   }
   if (!data?.ok) return { conflicts: data?.conflicts || [] }
   return { revisions: new Map(Object.entries(data.revisions || {}).map(([id, revision]) => [id, Number(revision)])) }
+}
+
+// 元の要求が無い旧操作だけに使う。未着分はサーバー側で失効し、遅れた適用を防ぐ。
+// RPC未導入・通信失敗・欠けた結果を、移行成功として扱わない。
+export async function recoverOutlineOperationResults(operationIds) {
+  if (!isSupabaseEnabled || outlineTableMissing) return undefined
+  const ids = [...new Set(operationIds)]
+  const { data, error } = await supabase.rpc('taskspace_outline_recover_operations', { operation_ids: ids })
+  if (error) {
+    if (looksLikeMissingOutlineRpc(error)) return undefined
+    return { error: error.message || String(error) }
+  }
+  if (!Array.isArray(data) || data.length !== ids.length) return { error: '旧版の送信結果が揃っていません' }
+  const results = new Map()
+  for (const item of data) {
+    const result = item?.result
+    if (!ids.includes(item?.operation_id) || results.has(item.operation_id)
+      || !result || typeof result.ok !== 'boolean'
+      || (result.ok ? !result.revisions || typeof result.revisions !== 'object' || Array.isArray(result.revisions)
+        : result.retired !== true && (!Array.isArray(result.conflicts) || !result.conflicts.length))) {
+      return { error: '旧版の送信結果を読めませんでした' }
+    }
+    results.set(item.operation_id, result)
+  }
+  return { results }
 }

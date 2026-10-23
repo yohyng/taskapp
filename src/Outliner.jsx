@@ -11,7 +11,8 @@ import {
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
   groupByDate, fillDates, imageUrlOf, applyRemoteRows,
 } from "./lib/outline";
-import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
+import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, recoverOutlineOperationResults, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
+import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
@@ -530,6 +531,48 @@ export function OutlineProvider({ children }) {
       sendWaitRef.current = null;
       if (!ownerRef.current || sendingRef.current || stoppedRef.current) return;
       const syncGeneration = syncGenerationRef.current;
+      if (casRef.current === "available" && !queueRef.current.flight) {
+        const checkedQueue = queueRef.current;
+        const oldIds = [...new Set([...checkedQueue.pending.values()].map((op) => op.operationId).filter(Boolean))].slice(0, 500);
+        if (oldIds.length) {
+          const active = () => syncGeneration === syncGenerationRef.current && readyRef.current
+            && ownerRef.current && !stoppedRef.current && !sendingRef.current && queueRef.current === checkedQueue;
+          try {
+            setSyncStatus("checking");
+            const result = await recoverOutlineOperationResults(oldIds);
+            if (!active()) { if (!stoppedRef.current) setRetry((n) => n + 1); return; }
+            if (!result || result.error) throw new Error(result?.error || "旧版の送信を引き継ぐ準備ができていません");
+            const baseline = await readOutlineBaseline(loadOutlineRows, loadOutlineRevisions);
+            if (!active()) { if (!stoppedRef.current) setRetry((n) => n + 1); return; }
+            if (!baseline) throw new Error("送信結果の確認中に更新がありました。自動で確認し直します");
+            const selected = { ...checkedQueue, pending: new Map([...checkedQueue.pending].filter(([, op]) => oldIds.includes(op.operationId))) };
+            const recovered = recoverOutlineOperations(selected, result.results, flattenTree(nodesRef.current), baseline.rows, baseline.revisions);
+            const pending = new Map(checkedQueue.pending);
+            for (const id of selected.pending.keys()) {
+              if (recovered.queue.pending.has(id)) pending.set(id, recovered.queue.pending.get(id));
+              else pending.delete(id);
+            }
+            queueRef.current = { ...checkedQueue, pending };
+            for (const id of recovered.settled) tombRef.current.delete(id);
+            const remote = buildTree(baseline.rows);
+            serverRevisionsRef.current = baseline.revisions;
+            serverRowsRef.current = new Map(baseline.rows.map((row) => [row.id, row]));
+            syncedRef.current = new Map(flattenTree(remote).map((row) => [row.id, outlineRowSignature(row)]));
+            // 真の競合では木を更新して送信effectを再起動し続けない。
+            if (!recovered.conflicts.length) applyRaw((mine) => mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), { preferRemote: true }));
+            knownRef.current = new Set(syncedRef.current.keys());
+            setSyncNote(recovered.conflicts.length ? `conflict:${recovered.conflicts.join(",")}` : "");
+            await saveLocal();
+            if (!recovered.conflicts.length && !stoppedRef.current) setRetry((n) => n + 1);
+          } catch (error) {
+            if (!active()) return;
+            setSyncNote(`error:${error?.message || String(error)}`);
+            clearTimeout(retryRef.current);
+            retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
+          }
+          return;
+        }
+      }
       const rows = flattenTree(nodesRef.current);
       const before = new Map(syncedRef.current);
       const here = new Set(rows.map((r) => r.id));
@@ -569,17 +612,20 @@ export function OutlineProvider({ children }) {
           if (sent.some((op) => op?.expectedRevision === undefined
             || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
             const checkedSequence = queueRef.current.sequence;
-            const [latestRows, latestRevisions] = await Promise.all([loadOutlineRows(), loadOutlineRevisions()]);
+            const baseline = await readOutlineBaseline(loadOutlineRows, loadOutlineRevisions);
             if (syncGeneration !== syncGenerationRef.current || !readyRef.current || stoppedRef.current || !ownerRef.current || sendingRef.current) return;
             if (checkedSequence !== queueRef.current.sequence) {
               // 世代を読んでいる間にも書ける。古い本文を新しい操作として確定させない。
               setRetry((n) => n + 1);
               return;
             }
-            if (!latestRows || !(latestRevisions instanceof Map)) {
+            if (!baseline) {
               setSyncNote("error:送信前の世代を確認できませんでした");
+              clearTimeout(retryRef.current);
+              retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
               return;
             }
+            const { rows: latestRows, revisions: latestRevisions } = baseline;
             const signatures = new Map(flattenTree(buildTree(latestRows)).map((row) => [row.id, outlineRowSignature(row)]));
             const resolved = resolveOutlineRevisions(
               queueRef.current, sent.map((op) => op.id), latestRevisions, signatures);
@@ -669,7 +715,7 @@ export function OutlineProvider({ children }) {
 
     })()), wait);
     return () => clearTimeout(timerRef.current);
-  }, [nodes, retry, saveLocal]);
+  }, [nodes, retry, saveLocal, applyRaw]);
 
   // アウトラインを触っていたときの Ctrl+Z は、こちらで受ける。
   // タスク側の取り消しと取り合いにならないよう、先に捕まえて止める。

@@ -121,6 +121,9 @@ export function queueOutlineRows(queue, changes, revisions = new Map()) {
       expectedRevision: previous?.expectedRevision ?? change.expectedRevision
         ?? revisions.get(change.id) ?? (baseSignature === undefined ? 0 : undefined),
     };
+    // 元の要求が無い旧操作は、追加入力しても引き継ぎ対象だと分かるようにする。
+    // 新経路の送信中はflight側に元のIDが残るので、次の編集へは引き継がない。
+    if (!queue.flight && previous?.operationId) operation.operationId = previous.operationId;
     if (baseSignature !== undefined) operation.baseSignature = baseSignature;
     if (change.positionChanged !== undefined || previous?.positionChanged !== undefined) {
       operation.positionChanged = previous?.positionChanged === true || change.positionChanged === true;
