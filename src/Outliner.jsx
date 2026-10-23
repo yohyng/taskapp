@@ -14,6 +14,7 @@ import {
 import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, recoverOutlineOperationResults, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
 import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
 import { collectTaskspaceBackup } from "./lib/backup";
+import { applyOutlineHistory } from "./lib/outline-history";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
@@ -79,6 +80,7 @@ export function OutlineProvider({ children }) {
     setHistCount({ past: next.past.length, future: next.future.length });
   };
   const coalesceRef = useRef({ key: null, at: 0 });
+  const [historyNote, setHistoryNote] = useState("");
   const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
   const [view, setViewState] = useState(readView);
   const setView = useCallback((patch) => {
@@ -246,11 +248,13 @@ export function OutlineProvider({ children }) {
     setNodes(next);
     const now = Date.now();
     const c = coalesceRef.current;
-    const same = opts.coalesce && c.key === opts.coalesce && now - c.at < 900;
-    coalesceRef.current = { key: opts.coalesce || null, at: now };
-    if (same) return;
     const h = histRef.current;
-    syncHist({ past: [...h.past, prev].slice(-100), future: [] });
+    // 受信を挟んだ入力まで一手にすると、その受信も自分の操作へ混ざってしまう。
+    const same = opts.coalesce && c.key === opts.coalesce && now - c.at < 900 && h.past.at(-1)?.after === prev;
+    coalesceRef.current = { key: opts.coalesce || null, at: now };
+    setHistoryNote("");
+    syncHist({ past: same ? [...h.past.slice(0, -1), { before: h.past.at(-1).before, after: next }]
+      : [...h.past, { before: prev, after: next }].slice(-100), future: [] });
   }, [prepareLocal]);
 
   // 同期で入ってきたぶんは、履歴に積まない（自分の操作ではないので）
@@ -499,26 +503,39 @@ export function OutlineProvider({ children }) {
     if (!ownerRef.current || stoppedRef.current) return;
     const h = histRef.current;
     if (!h.past.length) return;
-    const prev = h.past[h.past.length - 1];
+    const entry = h.past[h.past.length - 1];
     const now = nodesRef.current;
-    const restored = prepareLocal(now, prev);
+    const result = applyOutlineHistory(now, entry.after, entry.before);
+    if (result.blocked) {
+      setHistoryNote("対象が別端末で変更されているため、取り消していません。現在の内容と操作履歴を残しています。");
+      return;
+    }
+    const restored = result.nodes === now ? now : prepareLocal(now, result.nodes);
     nodesRef.current = restored;
     setNodes(restored);
+    setHistoryNote("");
     coalesceRef.current = { key: null, at: 0 };
-    syncHist({ past: h.past.slice(0, -1), future: [...h.future, now].slice(-100) });
+    syncHist({ past: h.past.slice(0, -1), future: restored === now ? h.future
+      : [...h.future, { before: restored, after: now }].slice(-100) });
   }, [prepareLocal]);
 
   const redo = useCallback(() => {
     if (!ownerRef.current || stoppedRef.current) return;
     const h = histRef.current;
     if (!h.future.length) return;
-    const node = h.future[h.future.length - 1];
+    const entry = h.future[h.future.length - 1];
     const now = nodesRef.current;
-    const restored = prepareLocal(now, node);
+    const result = applyOutlineHistory(now, entry.before, entry.after);
+    if (result.blocked) {
+      setHistoryNote("対象が別端末で変更されているため、やり直していません。現在の内容と操作履歴を残しています。");
+      return;
+    }
+    const restored = result.nodes === now ? now : prepareLocal(now, result.nodes);
     nodesRef.current = restored;
     setNodes(restored);
+    setHistoryNote("");
     coalesceRef.current = { key: null, at: 0 };
-    syncHist({ past: [...h.past, now].slice(-100), future: h.future.slice(0, -1) });
+    syncHist({ past: restored === now ? h.past : [...h.past, { before: now, after: restored }].slice(-100), future: h.future.slice(0, -1) });
   }, [prepareLocal]);
 
 
@@ -772,15 +789,16 @@ export function OutlineProvider({ children }) {
       serverRowsRef.current = new Map(rows.map((row) => [row.id, row]));
       const replacement = remote.length ? remote : [ensureNode({ id: "start", text: "" })];
       // 通常編集の経路を通すと、置換そのものが一瞬だけ未送信変更になる。
-      // 先にキューを捨て、履歴だけを手動で残して受信扱いで置き換える。
+      // 先にキューを捨て、受信扱いで置き換える。
       queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
       tombRef.current = new Set();
       syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
       knownRef.current = new Set(syncedRef.current.keys());
-      const previous = nodesRef.current;
       applyRaw(() => replacement);
-      const history = histRef.current;
-      syncHist({ past: [...history.past, previous].slice(-100), future: [] });
+      // 明示的に最新版へ合わせたあと、Undoで破棄した編集や他端末の変更を送り返さない。
+      syncHist({ past: [], future: [] });
+      coalesceRef.current = { key: null, at: 0 };
+      setHistoryNote("");
       setSyncNote((cur) => cur.startsWith("conflict:") ? "" : cur);
       const saved = await saveLocal();
       if (!saved) return { ok: false, why: "この端末への保存が完了していません" };
@@ -798,6 +816,7 @@ export function OutlineProvider({ children }) {
     clearRemote: () => ownerRef.current && !stoppedRef.current ? trackOutlineWork(workRef.current, clearOutlineRows()) : Promise.resolve("別のタブで編集中です"),
     owner, link, syncedAt, syncStatus, refresh: () => wakeRef.current?.(),
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
+    historyNote, dismissHistoryNote: () => setHistoryNote(""),
     syncNote, dismissSync: () => setSyncNote(""), localSave, retryLocalSave: () => {
       saveLocal();
       setRetry((n) => n + 1);
@@ -805,7 +824,7 @@ export function OutlineProvider({ children }) {
     dismissLocalInfo: () => setLocalSave((prev) => ({ ...prev, hidden: true })),
     getLocalCheckpoint: () => bigReadRef.current
       ? outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString()) : null,
-  }), [nodes, apply, applyRaw, undo, redo, histCount, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -917,7 +936,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh } = useOutline();
   // 接続中でも、保存失敗や未送信の編集があれば同期済みとは表示しない。
   const syncState = owner === "unavailable" ? "tab-unavailable"
     : owner !== "active" ? "tab-waiting"
@@ -2102,6 +2121,13 @@ alter table outline_nodes disable row level security;
               閉じる
             </button>
           </div>
+        </div>
+      )}
+
+      {historyNote && (
+        <div data-outline-history-note role="status" className="mb-2 flex items-center justify-between gap-2 rounded border border-amber-300/20 bg-amber-400/[0.04] px-2 py-1 text-[10px] text-amber-100">
+          <span>{historyNote}</span>
+          <button onClick={dismissHistoryNote} className="rounded px-1">閉じる</button>
         </div>
       )}
 
