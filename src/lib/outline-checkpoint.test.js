@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
 import {
   outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
-  changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows, queuedOutlineChanges,
+  changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, freezeOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows, queuedOutlineChanges,
 } from "./outline-checkpoint.js";
 
 const n = (id, children = []) => ensureNode({ id, text: id, children });
@@ -11,6 +11,51 @@ const change = (id, kind = "put") => ({ id, kind });
 const checkpoint = (nodes = [n("a")], q = queue(), revision = 1) =>
   outlineCheckpoint(nodes, q, new Set([...q.pending.values()].filter((op) => op.kind === "delete").map((op) => op.id)),
     new Set(["a"]), revision, "2035-01-01T00:00:00.000Z");
+
+describe("返事待ちの要求を現在の編集から切り離す", () => {
+  const id = "11111111-1111-4111-8111-111111111111";
+  const frozen = () => {
+    const prepared = prepareOutlineOperation(queueOutlineRows(queue(), [change("a")], new Map([["a", 1]])), ["a"], id);
+    const rows = flattenTree([n("a")]);
+    return freezeOutlineOperation(prepared.queue, prepared, rows, [],
+      [{ id: "a", kind: "put", expected_revision: 1, row: { id: "a", text: "送った本文", sort_order: 100 } }]);
+  };
+  it("再編集や削除をして保存・復元しても、先の本文・位置・世代を残す", () => {
+    const initial = frozen();
+    const edited = queueOutlineRows(initial, [change("a", "delete")]);
+    const saved = JSON.parse(JSON.stringify(checkpoint([], edited)));
+    expect(readOutlineSnapshot(saved).sync.flight).toEqual(initial.flight);
+    expect(saved.sync.pending[0].kind).toBe("delete");
+    expect(saved.sync.flight.sent[0].kind).toBe("put");
+    const ack = acknowledgeOutlineRows(edited, initial.flight.sent, new Map([["a", 2]]));
+    expect(ack.flight).toBeUndefined();
+    expect(ack.pending.get("a")).toMatchObject({ kind: "delete", expectedRevision: 2 });
+  });
+  it.each([
+    ["要求の欠落", (flight) => { flight.changes = []; }],
+    ["行の欠落", (flight) => { flight.rows = []; }],
+    ["別の行", (flight) => { flight.changes[0].row.id = "b"; }],
+    ["世代の改変", (flight) => { flight.changes[0].expected_revision = 2; }],
+    ["送信IDの改変", (flight) => { flight.operationId = "invalid"; }],
+    ["送信行の重複", (flight) => { flight.sent.push(flight.sent[0]); }],
+  ])("%sを空として処理せず、元の控えを守って止める", (_label, corrupt) => {
+    const saved = JSON.parse(JSON.stringify(checkpoint([n("a")], frozen())));
+    corrupt(saved.sync.flight);
+    expect(() => readOutlineSnapshot(saved)).toThrow("送信中の記録");
+  });
+  it("大きい編集はサーバーの上限500行で区切り、残りを次へ残す", () => {
+    const changes = Array.from({ length: 501 }, (_, i) => change(`row-${i}`));
+    const prepared = prepareOutlineOperation(queueOutlineRows(queue(), changes), changes.map((op) => op.id), id);
+    expect(prepared.sent).toHaveLength(500);
+    expect(acknowledgeOutlineRows(prepared.queue, prepared.sent).pending.size).toBe(1);
+  });
+  it("既にIDを付けた旧要求の世代を、再送前に変更しない", () => {
+    const q = queueOutlineRows(queue(), [{ ...change("a"), expectedRevision: 0, baseSignature: "元の本文" }]);
+    const prepared = prepareOutlineOperation(q, ["a"], id);
+    const got = resolveOutlineRevisions(prepared.queue, ["a"], new Map([["a", 1]]), new Map([["a", "元の本文"]]));
+    expect(got.queue.pending.get("a").expectedRevision).toBe(0);
+  });
+});
 
 describe("送るのはユーザーが編集した行だけ", () => {
   it("受信した行の並び番号が詰まっても、未送信操作が無ければ書き込まない", () => {

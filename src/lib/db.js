@@ -693,15 +693,19 @@ export async function saveOutlineRows(rows, deletedIds = []) {
 
 // 世代が一致する行だけを、ひとつの操作として確定する。
 // undefinedはRPC未導入、errorは導入済みだが送れない、conflictsは古い端末からの保存。
-export async function saveOutlineRowsCas(rows, deletedIds, operationId, expectedRevisions) {
-  if (!isSupabaseEnabled || outlineTableMissing) return undefined
-  const changes = [
+export function outlineCasChanges(rows, deletedIds, expectedRevisions) {
+  return [
     ...rows.map((row) => ({
       id: row.id, kind: 'put', expected_revision: expectedRevisions.get(row.id) ?? 0,
       row: outlineNodeToRow(row),
     })),
     ...deletedIds.map((id) => ({ id, kind: 'delete', expected_revision: expectedRevisions.get(id) ?? 0 })),
   ]
+}
+
+export async function saveOutlineRowsCas(rows, deletedIds, operationId, expectedRevisions, frozenChanges) {
+  if (!isSupabaseEnabled || outlineTableMissing) return undefined
+  const changes = frozenChanges ?? outlineCasChanges(rows, deletedIds, expectedRevisions)
   const { data, error } = await supabase.rpc('taskspace_outline_apply', {
     operation_id: operationId, changes,
   })

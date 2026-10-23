@@ -24,13 +24,28 @@ export async function loadOutlineRevisions() {
   }
   return state.cas ? new Map(Object.entries(state.revisions)) : undefined;
 }
-export async function saveOutlineRowsCas(rows, gone, operationId, expected) {
+export function outlineCasChanges(rows, gone, expected) {
+  return [...rows.map((row) => ({ id: row.id, kind: 'put', expected_revision: expected.get(row.id), row })),
+    ...gone.map((id) => ({ id, kind: 'delete', expected_revision: expected.get(id) }))];
+}
+export async function saveOutlineRowsCas(rows, gone, operationId, expected, frozenChanges) {
   const state = window.__outlineSync;
   if (!state.cas) return undefined;
   state.casWrites.push(structuredClone({ rows, gone, operationId, expected: [...expected] }));
+  const hash = JSON.stringify(frozenChanges || outlineCasChanges(rows, gone, expected));
+  const previous = state.operations[operationId];
+  if (previous) {
+    if (previous.hash !== hash) return { error: '操作IDが別の内容ですでに使われています' };
+    return previous.conflicts ? { conflicts: previous.conflicts } : { revisions: new Map(previous.revisions) };
+  }
   const conflicts = [...expected].filter(([id, revision]) => Number(state.revisions[id] || 0) !== revision)
     .map(([id, revision]) => ({ id, expected_revision: revision, actual_revision: Number(state.revisions[id] || 0) }));
-  if (conflicts.length || state.conflict) return { conflicts: conflicts.length ? conflicts : [{ id: rows[0]?.id || gone[0], actual_revision: 99 }] };
+  if (conflicts.length || state.conflict) {
+    const result = { conflicts: conflicts.length ? conflicts : [{ id: rows[0]?.id || gone[0], actual_revision: 99 }] };
+    state.operations[operationId] = { hash, ...result };
+    sessionStorage.setItem('test-outline-operations', JSON.stringify(state.operations));
+    return result;
+  }
   const error = await saveOutlineRows(rows, gone);
   if (error) return { error };
   const accepted = new Map();
@@ -38,6 +53,10 @@ export async function saveOutlineRowsCas(rows, gone, operationId, expected) {
     state.revisions[id] = Number(state.revisions[id] || 0) + 1;
     accepted.set(id, state.revisions[id]);
   }
+  state.operations[operationId] = { hash, revisions: [...accepted] };
+  sessionStorage.setItem('test-outline-operations', JSON.stringify(state.operations));
+  sessionStorage.setItem('test-outline-revisions', JSON.stringify(state.revisions));
+  if (state.loseReply) { state.loseReply = false; return { error: '送信成功後の返事を失った' }; }
   return { revisions: accepted };
 }
 export async function saveOutlineRows(rows, gone) {
@@ -151,7 +170,9 @@ async function open(page, { local = saved(), remote = asRows(local), known = asR
     window.__outlineSync = {
       reads: 0, writes: [], casWrites: [], pending: [], hold: false, active: 0, maxActive: 0,
       holdReadsRemaining: 0, readPending: [],
-      cas, conflict, revisions: Object.fromEntries((remote || []).map((row) => [row.id, 1])),
+      cas, conflict, operations: JSON.parse(sessionStorage.getItem('test-outline-operations') || '{}'),
+      revisions: JSON.parse(sessionStorage.getItem('test-outline-revisions') || 'null')
+        || Object.fromEntries((remote || []).map((row) => [row.id, 1])),
     };
     window.__outlineStorage = {
       writes: [], completed: [], pending: [], active: 0, maxActive: 0,
@@ -1051,6 +1072,51 @@ async function settleSync(page) {
     return syncChip(page).getAttribute("data-sync");
   }).toBe("synced");
 }
+
+test("送信成功の返事を失って再編集・再起動しても、先の結果を確かめてから続きを送る", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await page.evaluate(() => { window.__outlineSync.loseReply = true; });
+  await editRow(page, "a", "返事を失った最初の本文");
+  await page.clock.runFor(1000);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "error");
+  const first = await page.evaluate(() => window.__outlineSync.casWrites[0]);
+  await editRow(page, "a", "その後も書き続けた本文");
+  await expect.poll(async () => (await storedRecord(page)).nodes[0].text).toBe("その後も書き続けた本文");
+  await page.reload();
+  await pauseClock(page);
+  await settleSync(page);
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0]).toEqual(first);
+  expect(attempts[1].operationId).not.toBe(first.operationId);
+  expect(attempts[1].expected).toEqual([["a", 2]]);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("その後も書き続けた本文");
+  expect(await page.evaluate(() => window.__outlineSync.revisions.a)).toBe(3);
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("送信前の通信失敗後に削除しても、開き直して先の本文と削除を順に確定する", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await holdWrites(page);
+  await editRow(page, "b", "送信中に削除する本文");
+  await advanceToWrites(page, 1);
+  const first = await page.evaluate(() => window.__outlineSync.casWrites[0]);
+  await releaseWrite(page, { error: "送信前の通信失敗" });
+  await deleteRow(page, "b");
+  await expect.poll(async () => (await storedRecord(page)).sync.pending.find((op) => op.id === "b")?.kind).toBe("delete");
+  await page.reload();
+  await pauseClock(page);
+  await settleSync(page);
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts[0]).toEqual(first);
+  expect(attempts[1].gone).toEqual(["b"]);
+  expect(attempts[1].expected).toEqual([["b", 2]]);
+  expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(false);
+});
 
 test("接続中でも向こうを読めなければ同期済みと表示しない", async ({ page }) => {
   await open(page, { remote: null });

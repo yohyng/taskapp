@@ -1,13 +1,15 @@
 import { flattenTree, buildTree, outlineRow } from "./outline.js";
 
 export const OUTLINE_FORMAT = "taskspace-outline/1";
+const operationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 // 本文だけを復元すると、送信待ちだったことを忘れて受信で消してしまう。
 // 本文・削除・未送信の世代は、1回の保存で同じ姿を残す。
 export function outlineCheckpoint(nodes, queue, deleted, known, revision, at) {
   return {
     format: OUTLINE_FORMAT, revision, at, nodes,
-    sync: { sequence: queue.sequence, pending: [...queue.pending.values()], deleted: [...deleted], known: [...known] },
+    sync: { sequence: queue.sequence, pending: [...queue.pending.values()], deleted: [...deleted], known: [...known],
+      ...(queue.flight ? { flight: queue.flight } : {}) },
   };
 }
 
@@ -32,12 +34,36 @@ export function readOutlineSnapshot(value) {
       || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
       || (op.baseSignature !== undefined && typeof op.baseSignature !== "string")
       || (op.positionChanged !== undefined && typeof op.positionChanged !== "boolean")
-      || (op.operationId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(op.operationId))
+      || (op.operationId !== undefined && !operationIdPattern.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
       throw new Error("未送信の記録を読めません");
     }
     seen.add(op.id);
+  }
+  // 返事待ちの本文は現在の木と違ってよい。削除・再編集後も元の要求を再現する。
+  if (sync.flight !== undefined) {
+    const flight = sync.flight;
+    if (!flight || !operationIdPattern.test(flight.operationId) || !Array.isArray(flight.sent)
+      || !flight.sent.length || flight.sent.length > 500 || !Array.isArray(flight.rows)
+      || !ids(flight.gone) || !Array.isArray(flight.changes)
+      || flight.changes.length !== flight.sent.length) throw new Error("送信中の記録を読めません");
+    const sentIds = new Set();
+    for (const op of flight.sent) {
+      if (!op || typeof op.id !== "string") throw new Error("送信中の記録を読めません");
+      const change = flight.changes.find((item) => item.id === op.id);
+      if (sentIds.has(op.id) || !seen.has(op.id) || op.operationId !== flight.operationId
+        || !Number.isSafeInteger(op.version) || op.version < 1 || op.version > sync.sequence
+        || !Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0
+        || !change || change.kind !== op.kind || change.expected_revision !== op.expectedRevision
+        || (op.kind === "put" ? !flight.rows.some((row) => row?.id === op.id) || change.row?.id !== op.id
+          : op.kind !== "delete" || !flight.gone.includes(op.id))) throw new Error("送信中の記録を読めません");
+      sentIds.add(op.id);
+    }
+    if (flight.rows.length + flight.gone.length !== sentIds.size
+      || flight.rows.some((row) => !sentIds.has(row?.id)) || flight.gone.some((id) => !sentIds.has(id))) {
+      throw new Error("送信中の記録を読めません");
+    }
   }
   return value;
 }
@@ -101,7 +127,7 @@ export function queueOutlineRows(queue, changes, revisions = new Map()) {
     }
     pending.set(change.id, operation);
   }
-  return { sequence: version, pending };
+  return { ...queue, sequence: version, pending };
 }
 
 // 編集時に世代一覧を取得できていなかった行は、送信直前にもう一度読む。
@@ -114,7 +140,7 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
     // v1.15.14〜16が既存行を新規行と誤認して残した世代0も、比較基準が
     // ある場合は確定値として扱わず、送信直前の本文と照合して修復する。
     const repairLegacyZero = op?.expectedRevision === 0 && op.baseSignature !== undefined;
-    if (!op || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
+    if (!op || op.operationId || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
     const currentSignature = signatures.get(id);
     if (op.baseSignature !== undefined) {
       // 旧端末にしか無かった下書きを実際に編集した場合は新規作成になる。
@@ -148,11 +174,18 @@ export function prepareOutlineOperation(queue, ids, operationId) {
   for (const op of candidates) {
     if (op.operationId && op.operationId !== chosen) continue;
     if (existing && !op.operationId) continue;
+    if (!existing && sent.length === 500) break;
     const prepared = op.operationId ? op : { ...op, operationId: chosen };
     pending.set(op.id, prepared);
     sent.push(prepared);
   }
   return { queue: { ...queue, pending }, sent, operationId: chosen };
+}
+
+// 操作IDだけでは再送できない。行・順序・世代・省略列まで通信時のまま確定する。
+export function freezeOutlineOperation(queue, prepared, rows, gone, changes) {
+  const flight = structuredClone({ operationId: prepared.operationId, sent: prepared.sent, rows, gone, changes });
+  return { ...queue, flight };
 }
 
 // 返ってきたのは送った世代の返事。待っている間に同じ行を直したぶんは残す。
@@ -165,7 +198,7 @@ export function acknowledgeOutlineRows(queue, sent, revisions = new Map()) {
       pending.set(op.id, { ...current, expectedRevision: revisions.get(op.id), operationId: undefined });
     }
   }
-  return { ...queue, pending };
+  return { ...queue, pending, flight: undefined };
 }
 
 export function pendingOutlineIds(queue) {
