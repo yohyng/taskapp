@@ -734,7 +734,125 @@ test("削除の送信が失敗しても、再試行を待つ間の受信で行�
   expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(false);
 });
 
-test("削除を取り消すと印をすぐ外し、やり直すと受信による復活を再び止める", async ({ page }) => {
+test("Undoで受信した別の行を巻き戻さず、自分の行だけを送る", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await editRow(page, "a", "この端末の編集");
+  await settleSync(page);
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "別端末から届いた本文", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toContainText("別端末から届いた本文");
+  const count = (await writes(page)).length;
+  await page.locator("[data-outline-undo]").click();
+  await settleSync(page);
+  await expect(page.locator('[data-row="a"]')).toContainText(saved()[0].text);
+  await expect(page.locator('[data-row="b"]')).toContainText("別端末から届いた本文");
+  expect((await writes(page)).slice(count).flatMap((write) => write.rows.map((row) => row.id))).toEqual(["a"]);
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "別端末の続き", updatedAt: "2041-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toContainText("別端末の続き");
+  await page.locator("[data-outline-redo]").click();
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("この端末の編集");
+  expect((await remoteRows(page)).find((row) => row.id === "b").text).toBe("別端末の続き");
+  await page.reload();
+  await expect(page.locator('[data-row="b"]')).toContainText("別端末の続き");
+});
+
+test("Undoで連続入力を戻しても、途中で受信した別の行を自分の操作に含めない", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await editRow(page, "a", "入力1");
+  await emitRemote(page, [{ ...asRows(saved())[1], text: "入力の途中で受信", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="b"]')).toContainText("入力の途中で受信");
+  await editRow(page, "a", "入力2");
+  await page.locator("[data-outline-undo]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText("入力1");
+  await page.locator("[data-outline-undo]").click();
+  await expect(page.locator('[data-row="a"]')).toContainText(saved()[0].text);
+  await expect(page.locator('[data-row="b"]')).toContainText("入力の途中で受信");
+  await settleSync(page);
+  expect((await writes(page)).flatMap((write) => write.rows).every((row) => row.id === "a")).toBe(true);
+});
+
+test("Undoで字下げを戻しても、受信した本文と追加された子を残す", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await page.locator('[data-row="b"] [data-row-text]').click();
+  await inputFor(page, "b").press("Tab");
+  await settleSync(page);
+  const b = (await remoteRows(page)).find((row) => row.id === "b");
+  // 本番では受信した追加行にも世代がある。本文だけ存在する不整合な置き場にしない。
+  await page.evaluate(() => {
+    window.__outlineSync.revisions.b += 1;
+    window.__outlineSync.revisions['new-child'] = 1;
+  });
+  await emitRemote(page, [{ ...b, text: "別端末で更新した子", updatedAt: "2040-01-01T00:00:00.000Z" },
+    { ...asRows([node("new-child", "別端末で追加した子")], "a")[0], sortOrder: 1 }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="new-child"]')).toBeVisible();
+  await page.locator("[data-outline-undo]").click();
+  await settleSync(page);
+  const rows = await remoteRows(page);
+  expect(rows.find((row) => row.id === "b")).toMatchObject({parentId:null,text:"別端末で更新した子"});
+  expect(rows.find((row) => row.id === "new-child")).toMatchObject({parentId:"a",text:"別端末で追加した子"});
+});
+
+test("Undoで戻した削除を受信が変えていなければ、Redoで再び削除できる", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await deleteRow(page, "b");
+  await settleSync(page);
+  await page.locator("[data-outline-undo]").click();
+  await settleSync(page);
+  await expect(page.locator('[data-row="b"]')).toBeVisible();
+  expect(await tombs(page)).not.toContain("b");
+  await page.locator("[data-outline-redo]").click();
+  expect(await tombs(page)).toContain("b");
+  await settleSync(page);
+  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  expect((await remoteRows(page)).some((row) => row.id === "b")).toBe(false);
+});
+
+test("Undoは同じ行で受信した色を保ち、本文だけを取り消す", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await editRow(page, "a", "この端末の編集");
+  await settleSync(page);
+  const row = (await remoteRows(page)).find((row) => row.id === "a");
+  await page.evaluate(() => { window.__outlineSync.revisions.a += 1; });
+  await emitRemote(page, [{ ...row, bgColor: "#123456", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect.poll(async () => (await stored(page))[0].bgColor).toBe("#123456");
+  await page.locator("[data-outline-undo]").click();
+  await settleSync(page);
+  const undone = (await remoteRows(page)).find((row) => row.id === "a");
+  expect(undone.text).toBe(saved()[0].text);
+  expect(undone.bgColor).toBe("#123456");
+  expect((await page.evaluate(() => window.__outlineSync.casWrites)).at(-1).expected).toContainEqual(["a", 3]);
+});
+
+test("Undoの対象本文が他端末で変わっていたら、現在の本文と履歴を残す", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await editRow(page, "a", "この端末の編集");
+  await settleSync(page);
+  const row = (await remoteRows(page)).find((row) => row.id === "a");
+  await emitRemote(page, [{ ...row, text: "別端末で続けた本文", updatedAt: "2040-01-01T00:00:00.000Z" }], { persist: true });
+  await page.clock.runFor(300);
+  await expect(page.locator('[data-row="a"]')).toContainText("別端末で続けた本文");
+  const count = (await writes(page)).length;
+  await page.locator("[data-outline-undo]").click();
+  await expect(page.locator("[data-outline-history-note]")).toContainText("取り消していません");
+  await page.clock.runFor(1500);
+  await expect(page.locator('[data-row="a"]')).toContainText("別端末で続けた本文");
+  expect(await writes(page)).toHaveLength(count);
+  await expect(page.locator("[data-outline-undo]")).toBeEnabled();
+  await expect(page.locator("[data-outline-redo]")).toBeDisabled();
+});
+
+test("削除を取り消したあと受信した内容を、Redoで再び削除しない", async ({ page }) => {
   await open(page);
   await pauseClock(page);
   await deleteRow(page, "b");
@@ -748,10 +866,9 @@ test("削除を取り消すと印をすぐ外し、やり直すと受信によ�
   await page.clock.runFor(300);
   await expect(page.locator('[data-row="b"]')).toContainText("取り消し後に届いた内容");
   await page.locator("[data-outline-redo]").click();
-  expect(await tombs(page)).toContain("b");
-  await emitRemote(page, [asRows(saved())[1]]);
-  await page.clock.runFor(300);
-  await expect(page.locator('[data-row="b"]')).toHaveCount(0);
+  await expect(page.locator("[data-outline-history-note]")).toContainText("やり直していません");
+  expect(await tombs(page)).not.toContain("b");
+  await expect(page.locator('[data-row="b"]')).toContainText("取り消し後に届いた内容");
 });
 
 test("送信の待機時間中に開き直しても、削除の印を読み戻して削除を送る", async ({ page }) => {
@@ -1672,6 +1789,8 @@ test("競合後に向こうへ合わせると未送信記録を再送せず同�
   await expect(syncChip(page)).toHaveAttribute("data-sync", "synced");
   await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
   expect(await page.evaluate(() => window.__outlineSync.casWrites)).toHaveLength(1);
+  await expect(page.locator("[data-outline-undo]")).toBeDisabled();
+  await expect(page.locator("[data-outline-redo]")).toBeDisabled();
 });
 
 test("送信前の世代確認中に向こうへ合わせても古い確認結果で競合表示を戻さない", async ({ page }) => {
