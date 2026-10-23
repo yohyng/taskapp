@@ -2047,7 +2047,7 @@ alter table outline_nodes disable row level security;
 
       {syncNote.startsWith("conflict:") && (
         <div data-outline-sync-conflict role="alert" className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
-          <div className="mb-1 font-semibold">別の端末に新しい変更があります</div>
+          <div className="mb-1 font-semibold">自動でまとめられない変更があります</div>
           <div className="mb-2 text-amber-100/80">
             この端末の未送信内容は端末内に残し、上書きを止めました。JSONへ控えてから「向こうに合わせる」で最新版を取り込めます。
           </div>

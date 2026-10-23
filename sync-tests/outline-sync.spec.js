@@ -1197,6 +1197,18 @@ test("旧操作でも別端末の両立できない本文は上書きせず、�
   expect(await page.evaluate(() => window.__outlineSync.recoveries.length)).toBe(recoveries);
 });
 
+test("旧操作の比較基準が無い場合は、別端末の更新と決めつけず内容を保つ", async ({ page }) => {
+  const local = [node("a", "比較基準が残っていない本文"), saved()[1]];
+  await open(page, { localRecord: checkpointSeed(local, { pending: [oldPending({ baseSignature: undefined })] }), remote: asRows(saved()), cas: true });
+  await pauseClock(page);
+  await page.clock.runFor(1000);
+  const banner = page.locator("[data-outline-sync-conflict]");
+  await expect(banner).toContainText("自動でまとめられない変更があります");
+  await expect(banner).not.toContainText("別の端末に新しい変更");
+  expect(await writes(page)).toEqual([]);
+  expect((await storedRecord(page)).nodes[0].text).toBe(local[0].text);
+});
+
 test("送信成功の返事を失って再編集・再起動しても、先の結果を確かめてから続きを送る", async ({ page }) => {
   await open(page, { cas: true });
   await pauseClock(page);
