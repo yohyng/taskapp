@@ -12,6 +12,16 @@ const checkpoint = (nodes = [n("a")], q = queue(), revision = 1) =>
   outlineCheckpoint(nodes, q, new Set([...q.pending.values()].filter((op) => op.kind === "delete").map((op) => op.id)),
     new Set(["a"]), revision, "2035-01-01T00:00:00.000Z");
 
+describe("本文を確認できた空と読み込み途中を区別する", () => {
+  it.each([true, false])("読み込み完了の印%sを、本文と一緒に読み戻せる", (complete) => {
+    const saved = { ...checkpoint([]), complete };
+    expect(readOutlineSnapshot(JSON.parse(JSON.stringify(saved)))).toEqual(saved);
+  });
+  it("不正な完了の印を、確認済みや空として扱わない", () => {
+    expect(() => readOutlineSnapshot({ ...checkpoint([]), complete: "true" })).toThrow("保存形式");
+  });
+});
+
 describe("返事待ちの要求を現在の編集から切り離す", () => {
   const id = "11111111-1111-4111-8111-111111111111";
   const frozen = () => {

@@ -21,7 +21,8 @@
       window.__outlineUnmount = () => root.unmount();
       root.render(
         React.createElement(React.StrictMode, null,
-          React.createElement(OutlineProvider, null, React.createElement(Probe), React.createElement(Outliner))),
+          React.createElement(OutlineProvider, null, React.createElement(Probe),
+            ...Array.from({ length: window.__outlinePanes || 1 }, (_, i) => React.createElement(Outliner, { key: i })))),
       );
     </script>
   </body>

@@ -25,6 +25,7 @@ import {
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
 const OUTLINE_KEY = "taskspace-outline-v1";
+const READ_SYNC_ERRORS = new Set(["error:サーバーの世代を確認できませんでした", "error:受信した変更の世代を確認できませんでした"]);
 
 // 木はひとつ。枠（ペイン）をいくつ開いても、同じものを見ている。
 // 枠ごとに違うのは「どこにズームしているか」だけ。
@@ -134,15 +135,26 @@ export function OutlineProvider({ children }) {
     });
   }, []);
   const bigReadRef = useRef(false);   // IndexedDB を読み終えたか
+  // 端末に本文が無い場合、サーバーの取得完了まで空を確定しない。
+  // IndexedDBを読み終えただけで控えると、起動用の空行が正常な控えを押し出す。
+  const contentReadyRef = useRef(false);
+  const [contentReady, setContentReady] = useState(false);
+  const pullRetryRef = useRef(null);
+  const pullSequenceRef = useRef(0);
+  const replacingRef = useRef(false);
+  const backupFlightRef = useRef(null);
+  const [backupState, setBackupState] = useState({ status: "idle", error: "" });
   const localWriteRef = useRef({ pending: null, running: false, version: 0 });
   const localRetryRef = useRef(null);
   const saveLocal = useCallback(() => {
     // 読む前に書くと、起き抜けの空の木が本物を押しのけてしまう。
-    if (!ownerRef.current || !bigReadRef.current || stoppedRef.current) return Promise.resolve(false);
+    if (!ownerRef.current || !bigReadRef.current || stoppedRef.current
+      || (!contentReadyRef.current && !queueRef.current.pending.size)) return Promise.resolve(false);
     clearTimeout(localRetryRef.current);
     const snapshot = nodesRef.current;
     const at = new Date().toISOString();
     const record = outlineCheckpoint(snapshot, queueRef.current, tombRef.current, knownRef.current, ++revisionRef.current, at);
+    record.complete = contentReadyRef.current;
     if (rowSaveRef.current) record.large = true;
     let localOk = false;
     if (!rowSaveRef.current) {
@@ -213,6 +225,42 @@ export function OutlineProvider({ children }) {
     localWriteRef.current.pending = null;
   }, []);
 
+  const runBackup = useCallback(() => {
+    if (backupFlightRef.current) return backupFlightRef.current;
+    if (!ownerRef.current || stoppedRef.current || !bigReadRef.current || !contentReadyRef.current) {
+      return Promise.reject(new Error("本文を読み込んでいます。控えは読み込み後に作成できます"));
+    }
+    const attempt = (async () => {
+      setBackupState({ status: "saving", error: "" });
+      try {
+        if (!await saveLocal()) throw new Error("この端末への保存が完了していないため、控えを見送りました");
+        if (!ownerRef.current || stoppedRef.current) throw new Error("画面が切り替わったため、控えを見送りました");
+        const checkpoint = outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString());
+        checkpoint.complete = true;
+        const result = await backupToDrive(collectTaskspaceBackup(localStorage, checkpoint));
+        if (!stoppedRef.current) setBackupState({ status: "saved", error: "" });
+        return result;
+      } catch (error) {
+        if (!stoppedRef.current) setBackupState({ status: "error", error: error?.message || String(error) });
+        throw error;
+      } finally {
+        backupFlightRef.current = null;
+      }
+    })();
+    backupFlightRef.current = trackOutlineWork(workRef.current, attempt);
+    return attempt;
+  }, [saveLocal]);
+
+  // 枠を増やしても控えは文書に一つ。失敗は設定内に残し、裏で再試行する。
+  useEffect(() => {
+    if (owner !== "active" || !contentReady || !hasDrive() || backupState.status === "saving") return;
+    const delay = backupState.status === "error" ? 60000 : Math.max(30000, (24 - hoursSinceBackup()) * 3600000);
+    const timer = setTimeout(() => {
+      if (hoursSinceBackup() >= 24) runBackup().catch(() => { /* 設定に結果を残して再試行する */ });
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [owner, contentReady, backupState, runBackup]);
+
   // 削除の意図は送信待ちの間も有効。戻した行の印は、その場で外す。
   const prepareLocal = useCallback((before, after) => {
     const change = prepareOutlineChange(before, after);
@@ -270,14 +318,21 @@ export function OutlineProvider({ children }) {
 
   // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
   // 手元を読み終えてから、一度だけ呼ぶ。
-  const pullOnce = useCallback(() => {
-    if (!ownerRef.current || stoppedRef.current) return;
+  const pullOnce = useCallback(function pullOutline() {
+    if (!ownerRef.current || stoppedRef.current || replacingRef.current) return;
+    const generation = syncGenerationRef.current;
+    const sequence = ++pullSequenceRef.current;
+    clearTimeout(pullRetryRef.current);
+    const retryRead = () => {
+      pullRetryRef.current = setTimeout(pullOutline, 15000);
+    };
     trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]).then(([rows, revisions]) => {
-      if (!ownerRef.current || stoppedRef.current) return;
+      if (!ownerRef.current || stoppedRef.current || generation !== syncGenerationRef.current || sequence !== pullSequenceRef.current) return;
       if (!rows) {
         // 読めていないのに送り始めると、向こうの新しい行を手元の古い木で
         // 上書きしてしまう。置き場が無いときだけ、知らせて黙る。
         if (isOutlineTableMissing()) setSyncNote("missing-table");
+        else retryRead();
         return;
       }
       if (revisions instanceof Map) {
@@ -287,9 +342,11 @@ export function OutlineProvider({ children }) {
         casRef.current = "legacy";
       } else if (casRef.current !== "legacy") {
         setSyncNote("error:サーバーの世代を確認できませんでした");
+        retryRead();
         return;
       }
       readyRef.current = true;
+      setSyncNote((cur) => READ_SYNC_ERRORS.has(cur) ? "" : cur);
       setSyncStatus(sendingRef.current ? "sending" : "waiting");
       // 置き場に列が足りないと、その持ち物（日付・画像の幅・色）だけが
       // ほかの端末に伝わらない。黙っていると「端末ごとに違う」になる。
@@ -297,7 +354,8 @@ export function OutlineProvider({ children }) {
       const remote = buildTree(rows);
       serverRowsRef.current = new Map(rows.map((row) => [row.id, row]));
       applyRaw((mine) => {
-        const merged = mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), {
+        const base = !contentReadyRef.current && isOutlinePlaceholder(mine) && !queueRef.current.pending.has("start") ? [] : mine;
+        const merged = mergeOutline(base, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), {
           preferRemote: casRef.current === "available",
         });
         // 向こうの姿を覚えておく。食い違うぶんは、このあとの保存で送られる。
@@ -307,8 +365,12 @@ export function OutlineProvider({ children }) {
         // 全件削除も読み込み成功の結果。空を失敗扱いすると、古い行を送り返してしまう。
         return merged;
       });
+      contentReadyRef.current = true;
+      setContentReady(true);
       saveLocal();
       setSyncedAt(new Date().toISOString());
+    }).catch(() => {
+      if (ownerRef.current && !stoppedRef.current && generation === syncGenerationRef.current && sequence === pullSequenceRef.current) retryRead();
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -327,12 +389,15 @@ export function OutlineProvider({ children }) {
     const gone = [...box.gone];
     inboxRef.current = { rows: new Map(), gone: new Set() };
     if (!rows.length && !gone.length) return;
+    const generation = syncGenerationRef.current;
     trackOutlineWork(workRef.current, (async () => {
       if (casRef.current === "available") {
         const revisions = await loadOutlineRevisions();
-        if (!ownerRef.current || stoppedRef.current) return;
+        if (!ownerRef.current || stoppedRef.current || generation !== syncGenerationRef.current) return;
         if (!(revisions instanceof Map)) {
           setSyncNote("error:受信した変更の世代を確認できませんでした");
+          clearTimeout(pullRetryRef.current);
+          pullRetryRef.current = setTimeout(() => pullOnce(), 15000);
           return;
         }
         serverRevisionsRef.current = revisions;
@@ -354,7 +419,7 @@ export function OutlineProvider({ children }) {
       saveLocal();
       setSyncedAt(new Date().toISOString());
     })());
-  }, [applyRaw, saveLocal]);
+  }, [applyRaw, saveLocal, pullOnce]);
 
   const listen = useCallback(() => subscribeOutline(({ rows = [], gone = [] }) => {
     const box = inboxRef.current;
@@ -412,7 +477,7 @@ export function OutlineProvider({ children }) {
           return;
         }
         if (!alive) return;
-        const base = chosen?.nodes || nodesRef.current;
+        const base = chosen?.nodes || (supabaseReady() ? [] : nodesRef.current);
         const deleted = chosen && !chosen.legacy ? new Set(chosen.sync.deleted) : await readIds(OUTLINE_TOMB_KEY);
         const known = chosen && !chosen.legacy ? new Set(chosen.sync.known) : await readIds(OUTLINE_KNOWN_KEY);
         if (!alive) return;
@@ -447,6 +512,11 @@ export function OutlineProvider({ children }) {
         revisionRef.current = Math.max(chosen?.revision || 0, got?.revision || 0, initial?.revision || 0);
         rowSaveRef.current = chosen?.large === true;
         applyRaw(() => restored.map(ensureNode));
+        // 古い版が残したstartの空行だけでは、本文を読めた証拠にならない。
+        contentReadyRef.current = !supabaseReady() || !!(chosen && (chosen.complete === true || (chosen.complete === undefined && (
+          (base.length > 0 && !isOutlinePlaceholder(base))
+          || queue.pending.size || deleted.size))));
+        setContentReady(contentReadyRef.current);
         // 本文と記録を読み終えたここから、ひとまとめに保存してよい。
         bigReadRef.current = true;
         saveLocal();
@@ -479,6 +549,8 @@ export function OutlineProvider({ children }) {
         ownerRef.current = false;
         bigReadRef.current = false;
         readyRef.current = false;
+        contentReadyRef.current = false;
+        clearTimeout(pullRetryRef.current);
         clearTimeout(timerRef.current);
         clearTimeout(inboxTimer.current);
         clearTimeout(retryRef.current);
@@ -547,7 +619,7 @@ export function OutlineProvider({ children }) {
     const wait = Math.min(800, Math.max(0, 2000 - (Date.now() - sendWaitRef.current)));
     timerRef.current = setTimeout(() => trackOutlineWork(workRef.current, (async () => {
       sendWaitRef.current = null;
-      if (!ownerRef.current || sendingRef.current || stoppedRef.current) return;
+      if (!ownerRef.current || !readyRef.current || sendingRef.current || stoppedRef.current) return;
       const syncGeneration = syncGenerationRef.current;
       if (casRef.current === "available" && !queueRef.current.flight) {
         const checkedQueue = queueRef.current;
@@ -775,19 +847,28 @@ export function OutlineProvider({ children }) {
   const pullRemote = useCallback(async () => {
     if (!ownerRef.current || stoppedRef.current) return { ok: false, why: "別のタブで編集中です" };
     if (sendingRef.current) return { ok: false, why: "送信が終わってから、もう一度押してください" };
+    if (replacingRef.current) return { ok: false, why: "読み込みが終わるまでお待ちください" };
+    replacingRef.current = true;
+    const wasReady = readyRef.current;
+    let read = false;
     // 置き換えの途中で、直前の送信タイマーが古い未送信記録を再送しないよう止める。
     syncGenerationRef.current += 1;
+    clearTimeout(pullRetryRef.current);
     readyRef.current = false;
     clearTimeout(timerRef.current);
     sendWaitRef.current = null;
     try {
       const [rows, revisions] = await trackOutlineWork(workRef.current, Promise.all([loadOutlineRows(), loadOutlineRevisions()]));
       if (!ownerRef.current || stoppedRef.current || !rows) return { ok: false, why: isOutlineTableMissing() ? "置き場がありません" : "読めませんでした" };
-      if (casRef.current === "available" && !(revisions instanceof Map)) return { ok: false, why: "向こうの世代を確認できませんでした" };
-      if (revisions instanceof Map) serverRevisionsRef.current = revisions;
+      if (revisions instanceof Map) {
+        serverRevisionsRef.current = revisions;
+        casRef.current = "available";
+      } else if (revisions === undefined && casRef.current !== "available") {
+        casRef.current = "legacy";
+      } else return { ok: false, why: "向こうの世代を確認できませんでした" };
       const remote = buildTree(rows);
       serverRowsRef.current = new Map(rows.map((row) => [row.id, row]));
-      const replacement = remote.length ? remote : [ensureNode({ id: "start", text: "" })];
+      const replacement = remote;
       // 通常編集の経路を通すと、置換そのものが一瞬だけ未送信変更になる。
       // 先にキューを捨て、受信扱いで置き換える。
       queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
@@ -795,26 +876,34 @@ export function OutlineProvider({ children }) {
       syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
       knownRef.current = new Set(syncedRef.current.keys());
       applyRaw(() => replacement);
+      contentReadyRef.current = true;
+      setContentReady(true);
+      read = true;
       // 明示的に最新版へ合わせたあと、Undoで破棄した編集や他端末の変更を送り返さない。
       syncHist({ past: [], future: [] });
       coalesceRef.current = { key: null, at: 0 };
       setHistoryNote("");
-      setSyncNote((cur) => cur.startsWith("conflict:") ? "" : cur);
+      setSyncNote((cur) => cur.startsWith("conflict:") || READ_SYNC_ERRORS.has(cur) ? "" : cur);
       const saved = await saveLocal();
       if (!saved) return { ok: false, why: "この端末への保存が完了していません" };
       setSyncStatus("synced");
       return { ok: true, count: flattenTree(remote).length };
     } finally {
-      readyRef.current = true;
+      readyRef.current = wasReady || read;
+      replacingRef.current = false;
+      if (!readyRef.current && ownerRef.current && !stoppedRef.current) {
+        pullRetryRef.current = setTimeout(() => pullOnce(), 15000);
+      }
       // 置換中に止めた送信判定を、空になったキューからやり直す。
       if (ownerRef.current && !stoppedRef.current) setRetry((n) => n + 1);
     }
-  }, [applyRaw, saveLocal]);
+  }, [applyRaw, saveLocal, pullOnce]);
 
   const value = useMemo(() => ({
     nodes, setNodes: apply, setNodesRaw: applyRaw, view, setView, resetSync, pullRemote,
     clearRemote: () => ownerRef.current && !stoppedRef.current ? trackOutlineWork(workRef.current, clearOutlineRows()) : Promise.resolve("別のタブで編集中です"),
     owner, link, syncedAt, syncStatus, refresh: () => wakeRef.current?.(),
+    contentReady, backupState, createBackup: runBackup,
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     historyNote, dismissHistoryNote: () => setHistoryNote(""),
     syncNote, dismissSync: () => setSyncNote(""), localSave, retryLocalSave: () => {
@@ -822,9 +911,9 @@ export function OutlineProvider({ children }) {
       setRetry((n) => n + 1);
     },
     dismissLocalInfo: () => setLocalSave((prev) => ({ ...prev, hidden: true })),
-    getLocalCheckpoint: () => bigReadRef.current
-      ? outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString()) : null,
-  }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal]);
+    getLocalCheckpoint: () => bigReadRef.current && contentReadyRef.current
+      ? { ...outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString()), complete: true } : null,
+  }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal, contentReady, backupState, runBackup]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -903,6 +992,14 @@ function defaultOutline() {
   return [ensureNode({ id: "start", text: "" })];
 }
 
+function isOutlinePlaceholder(nodes) {
+  if (nodes.length !== 1) return false;
+  const node = nodes[0];
+  return node.id === "start" && !String(node.text || "").trim() && !node.children?.length
+    && !node.favorite && !node.collapsed && !node.completed && !node.date && !node.headingLevel
+    && !node.textColor && !node.bgColor && !node.imageWidth;
+}
+
 function readLocalOutline() {
   try { return JSON.parse(localStorage.getItem(OUTLINE_KEY) || "null"); }
   catch { return null; }
@@ -936,21 +1033,33 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup } = useOutline();
+  const loading = !contentReady && (nodes.length === 0 || isOutlinePlaceholder(nodes));
+  const syncFailed = syncNote.startsWith("error:");
+  const localFailed = localSave.status === "error";
+  const [showSyncFailure, setShowSyncFailure] = useState(false);
+  useEffect(() => {
+    // 手元に残せている短い通信失敗では、赤い通知を点滅させず自動再送を待つ。
+    // 端末保存まで失敗した場合と、長引く失敗は見逃さない。
+    const timer = setTimeout(() => setShowSyncFailure(syncFailed), !syncFailed || localFailed ? 0 : 30000);
+    return () => clearTimeout(timer);
+  }, [syncFailed, localFailed]);
   // 接続中でも、保存失敗や未送信の編集があれば同期済みとは表示しない。
   const syncState = owner === "unavailable" ? "tab-unavailable"
     : owner !== "active" ? "tab-waiting"
     : localSave.status === "read-error" ? "read-error"
     : localSave.status === "error" ? "local-error"
+      : loading ? "loading"
       : link === "off" ? "local-only"
         : localSave.busy || localSave.status === "loading" ? "saving"
-          : syncNote === "missing-table" || syncNote.startsWith("error:") ? "error"
+          : syncNote === "missing-table" ? "error"
+            : syncFailed ? (showSyncFailure ? "error" : "retrying")
             : syncNote.startsWith("conflict:") ? "conflict"
             : syncNote.startsWith("missing-col:") || absentOutlineColumns().length > 0 ? "partial" : syncStatus;
   const syncLabel = {
     "tab-unavailable": "編集を保留", "tab-waiting": "別タブで編集中", checking: "同期を確認中", waiting: "送信待ち", sending: "送信中", synced: "同期済み",
-    saving: "保存待ち", "local-error": "保存できません", "read-error": "読み出しエラー",
-    error: "同期エラー", conflict: "確認が必要", partial: "一部未同期", "local-only": "この端末のみ",
+    loading: "読み込み中", saving: "保存待ち", "local-error": "保存できません", "read-error": "読み出しエラー",
+    error: "同期エラー", retrying: "同期を再試行中", conflict: "確認が必要", partial: "一部未同期", "local-only": "この端末のみ",
   }[syncState];
   const [viewOpen, setViewOpen] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
@@ -1429,10 +1538,6 @@ export default function Outliner() {
 
   // 控え：この端末に置いてあるもの一式を、ドライブへ。
   // Supabase が飛んでも、ここから戻せるようにしておく。
-  function collectAll() {
-    return collectTaskspaceBackup(localStorage, getLocalCheckpoint());
-  }
-
   async function runBackup(manual = false) {
     if (!hasDrive()) {
       if (manual) setNote("置き場が決まっていません（上の URL と合言葉を入れてください）");
@@ -1440,20 +1545,12 @@ export default function Outliner() {
     }
     if (manual) setNote("控えています…");
     try {
-      const got = await backupToDrive(collectAll());
-      setNote(`控えました（${got.name || "backups"}）`);
+      const got = await createBackup();
+      if (manual) setNote(`控えました（${got.name || "backups"}）`);
     } catch (e) {
-      setNote(`控えられませんでした：${e?.message || e}`);
+      if (manual) setNote(`控えられませんでした：${e?.message || e}`);
     }
   }
-
-  // ほどよい間隔で、ひとりでに控える（開いたあと少し置いてから、1日1回）
-  useEffect(() => {
-    if (!hasDrive() || hoursSinceBackup() < 24) return;
-    const id = setTimeout(() => runBackup(false), 30000);
-    return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   // 画像をドライブに預けて、その URL を行に書く。
   // 行が空ならそこへ、文字があれば下に新しい行を作って入れる。
@@ -1840,10 +1937,17 @@ export default function Outliner() {
                   <button
                     data-drive-backup
                     onClick={() => runBackup(true)}
-                    className="min-h-[34px] flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07]"
+                    disabled={!contentReady || backupState.status === "saving"}
+                    className="min-h-[34px] flex-1 rounded border border-white/10 px-2 py-1 text-[10px] text-neutral-400 hover:bg-white/[0.07] disabled:opacity-40"
                   >
                     いま控える
                   </button>
+                </div>
+                <div data-drive-backup-state role="status" className="mb-1 text-[10px] text-neutral-500">
+                  {!contentReady ? "本文の読み込み後に控えを作成します"
+                    : backupState.status === "saving" ? "控えを保存しています…"
+                      : backupState.status === "error" ? `控えは再試行を待っています：${backupState.error}`
+                        : lastBackupAt() ? "前回の控えを確認済みです" : "控えをまだ作成していません"}
                 </div>
                 <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
                   画像はドライブに置き、行には URL だけを書きます。
@@ -2034,7 +2138,7 @@ export default function Outliner() {
         </div>
       )}
 
-      {syncNote.startsWith("error:") && (
+      {syncFailed && showSyncFailure && (
         <div data-outline-sync-error className="mb-2 rounded border border-red-400/30 bg-red-400/[0.08] p-2 text-[10px] leading-relaxed text-red-100">
           <div className="mb-1 font-semibold">ほかの端末へ送れていません</div>
           <div className="mb-1 text-red-100/80">Supabase に送れませんでした：{syncNote.slice(6)}</div>
@@ -2220,7 +2324,12 @@ alter table outline_nodes disable row level security;
         />
       )}
 
-      <div
+      {loading && (
+        <div data-outline-loading role="status" className="px-2 py-6 text-sm text-neutral-500">
+          アウトラインを読み込んでいます…
+        </div>
+      )}
+      {!loading && <div
         ref={listRef}
         data-outline-list
         onPointerDown={(e) => {
@@ -2622,7 +2731,7 @@ alter table outline_nodes disable row level security;
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {picked.length > 0 && (
         <div
@@ -2643,6 +2752,7 @@ alter table outline_nodes disable row level security;
 
       <button
         data-outline-add
+        disabled={loading}
         onClick={addAtEnd}
         className="mt-1 w-full rounded px-2 py-2 text-left text-[12px] text-neutral-600 transition hover:bg-white/[0.03] hover:text-neutral-400"
       >
