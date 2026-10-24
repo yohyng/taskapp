@@ -39,4 +39,4 @@ jobs:
       - name: 既存のアウトライン操作と本番ビルドを確認
         run: |
           export PLAYWRIGHT_CHROMIUM_PATH="$(node -p "require('playwright').chromium.executablePath()")"
-          npm test -- tests/outliner.spec.js
+          npm test -- tests/outliner.spec.js tests/drive.spec.js

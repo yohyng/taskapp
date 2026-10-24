@@ -1,4 +1,6 @@
 import { test, expect } from "./helpers.js";
+import { createHash } from "node:crypto";
+import { gunzipSync } from "node:zlib";
 
 // 画像の置き場（Google ドライブ／GAS）まわり
 const GAS = "https://example.test/exec";
@@ -27,12 +29,18 @@ async function fakeGas(page, reply = { url: "https://drive.google.com/thumbnail?
   const sent = [];
   await page.route(`${GAS}**`, async (route) => {
     const body = route.request().postData();
-    sent.push(body ? JSON.parse(body) : null);
+    const parsed = body ? JSON.parse(body) : null;
+    if (parsed) sent.push(parsed);
+    let response = { ...reply, backupProtocol: 2 };
+    if (parsed?.kind === 'backup' && !reply.error) {
+      const text = parsed.json || gunzipSync(Uint8Array.from(atob(parsed.gzipBase64),(c)=>c.charCodeAt(0))).toString('utf8');
+      response = { ...reply, ok:true, id:'backup-test', bytes:text.length, sha256:createHash('sha256').update(text).digest('hex') };
+    }
     await route.fulfill({
       status: 200,
       headers: { "access-control-allow-origin": "*" },
       contentType: "application/json",
-      body: JSON.stringify(reply),
+      body: JSON.stringify(response),
     });
   });
   return sent;
@@ -159,16 +167,17 @@ test.describe("控え（バックアップ）", () => {
     expect(sent[0].gzipBase64.length).toBeLessThan(20000);
   });
 
-  test("送れなかったら、大きさを添えて知らせる", async ({ page }) => {
+  test("控え先への接続に失敗したときは本文を送らない", async ({ page }) => {
     await withDrive(page);
     await page.reload();
     await page.waitForSelector("header");
-    await page.route(`${GAS}**`, (route) => route.abort("failed"));
+    const methods = [];
+    await page.route(`${GAS}**`, (route) => { methods.push(route.request().method()); return route.abort("failed"); });
     await open(page);
     await gear(page);
     await page.locator("[data-drive-backup]").click();
-    await expect(note(page)).toContainText("送れませんでした");
-    await expect(note(page)).toContainText("MB");
+    await expect(note(page)).toContainText("控えられませんでした");
+    expect(methods).toEqual(['GET']);
   });
 
   test("いま控える、で中身一式が飛ぶ", async ({ page }) => {
