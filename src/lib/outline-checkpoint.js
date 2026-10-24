@@ -20,6 +20,7 @@ export function readOutlineSnapshot(value) {
   const sync = value.sync;
   const ids = (list) => Array.isArray(list) && list.every((id) => typeof id === "string");
   if (value.format !== OUTLINE_FORMAT || !Array.isArray(value.nodes)
+    || (value.complete !== undefined && typeof value.complete !== "boolean")
     || !Number.isSafeInteger(value.revision) || value.revision < 0
     || !sync || !Number.isSafeInteger(sync.sequence) || sync.sequence < 0
     || !ids(sync.deleted) || !ids(sync.known) || !Array.isArray(sync.pending)) {
