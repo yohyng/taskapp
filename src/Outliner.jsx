@@ -15,6 +15,7 @@ import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRows
 import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
 import { collectTaskspaceBackup } from "./lib/backup";
 import { applyOutlineHistory } from "./lib/outline-history";
+import { placeUploadedImage, hasDraggedImage } from "./lib/outline-image";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
@@ -981,6 +982,8 @@ export default function Outliner() {
   // 指やマウスが動いたら、すぐ戻す（押したいものが見えないと困るので）。
   const [calm, setCalm] = useState(false);
   const calmTimer = useRef(null);
+  const imageResizeRef = useRef(null);
+  useEffect(() => () => imageResizeRef.current?.(), []);
   const wake = useCallback(() => {
     clearTimeout(calmTimer.current);
     setCalm(false);
@@ -1465,15 +1468,12 @@ export default function Outliner() {
     setNote(`画像を置いています… ${file.name || ""}`);
     try {
       // どこに貼ったものかを、名前と説明に残す（あとで探せるように）
-      const where = pathTo(nodes, node?.id)?.slice(0, -1).map((n) => truncateTitle(n.text, 20)).join(" / ");
+      const targetPath = pathTo(nodes, node?.id);
+      const scope = { nodeId: node?.id, parentId: targetPath?.at(-2)?.id ?? zoomNode?.id ?? null };
+      const where = targetPath?.slice(0, -1).map((n) => truncateTitle(n.text, 20)).join(" / ");
       const hint = String(node?.text || "").trim() || where?.split(" / ").at(-1) || "";
       const got = await uploadToDrive(file, readDriveSetting(), { hint, where });
-      if (node && !String(node.text || "").trim()) {
-        patch(node.id, { text: got.url });
-      } else {
-        const made = makeNode(got.url);
-        applyShown((list) => (node ? insertAfter(list, node.id, made) : [...list, made]));
-      }
+      setNodes((prev) => placeUploadedImage(prev, scope, got.url));
       setNote("画像を置きました");
     } catch (e) {
       setNote(`置けませんでした：${e?.message || e}`);
@@ -1483,27 +1483,61 @@ export default function Outliner() {
   // 画像の右下を掴んで、大きさを変える。
   // 離したときにだけ木へ書き戻す（動かしているあいだは絵だけ動かす）。
   function startResize(e, node) {
+    if (e.button !== 0 || e.isPrimary === false) return;
     e.preventDefault();
     e.stopPropagation();
-    const box = e.currentTarget.closest("[data-row-image-box]");
+    imageResizeRef.current?.();
+    const handle = e.currentTarget;
+    const box = handle.closest("[data-row-image-box]");
     const img = box?.querySelector("img");
     if (!img) return;
     const startX = e.clientX;
+    const pointerId = e.pointerId;
     const startW = img.getBoundingClientRect().width;
+    const originalWidth = img.style.width;
     const limit = box.parentElement?.getBoundingClientRect().width || 1200;
     let last = startW;
+    let ended = false;
     const move = (ev) => {
+      if (ev.pointerId !== pointerId) return;
       last = Math.max(60, Math.min(limit, Math.round(startW + (ev.clientX - startX))));
       img.style.width = `${last}px`;
       img.style.maxHeight = "none";
     };
-    const up = () => {
+    const cleanup = () => {
+      if (ended) return;
+      ended = true;
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      patch(node.id, { imageWidth: Math.round(last) });
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("blur", cancel);
+      handle.removeEventListener("lostpointercapture", cancel);
+      // 中断中にも受信した幅があれば、その最新の保存値へ戻す。
+      const record = getLocalCheckpoint();
+      const current = record && pathTo(record.nodes, node.id)?.at(-1);
+      img.style.width = current ? (current.imageWidth ? `${current.imageWidth}px` : "") : originalWidth;
+      img.style.maxHeight = "";
+      if (imageResizeRef.current === cancel) imageResizeRef.current = null;
+      try { if (handle.hasPointerCapture?.(pointerId)) handle.releasePointerCapture(pointerId); } catch { /* すでにブラウザーが解放した */ }
     };
+    const cancel = (ev) => { if (ev?.pointerId === undefined || ev.pointerId === pointerId) cleanup(); };
+    const up = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      cleanup();
+      if (Math.round(last) === Math.round(startW)) return;
+      setNodes((prev) => {
+        const current = pathTo(prev, node.id)?.at(-1);
+        // 別の画像へ切り替わったあとに、古いドラッグの幅を書き込まない。
+        return current?.text === node.text ? updateNode(prev, node.id, { imageWidth: Math.round(last) }) : prev;
+      });
+    };
+    imageResizeRef.current = cancel;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("blur", cancel);
+    handle.addEventListener("lostpointercapture", cancel);
+    try { handle.setPointerCapture?.(pointerId); } catch { /* 捕捉できない環境ではwindowで受ける */ }
   }
 
   // 貼り付け・落とし込みから画像を拾う
@@ -2229,11 +2263,12 @@ alter table outline_nodes disable row level security;
           clearPick();
           startBand(e);
         }}
-        onDragOver={(e) => { if (imageFrom(e.dataTransfer)) e.preventDefault(); }}
+        onDragOver={(e) => { if (hasDraggedImage(e.dataTransfer)) e.preventDefault(); }}
         onDrop={(e) => {
           const file = imageFrom(e.dataTransfer);
           if (!file) return;
           e.preventDefault();
+          e.stopPropagation();
           const row = e.target.closest("[data-row]")?.getAttribute("data-row");
           putImage(file, row ? pathTo(listed, row)?.at(-1) : null);
         }}
@@ -2368,12 +2403,14 @@ alter table outline_nodes disable row level security;
                     const file = imageFrom(e.clipboardData);
                     if (!file) return;           // 文字の貼り付けは、これまで通り
                     e.preventDefault();
+                    e.stopPropagation();
                     putImage(file, node);
                   }}
                   onDrop={(e) => {
                     const file = imageFrom(e.dataTransfer);
                     if (!file) return;
                     e.preventDefault();
+                    e.stopPropagation();
                     putImage(file, node);
                   }}
                   onBlur={() => { setEditingId((cur) => (cur === node.id ? null : cur)); setTagHint(null); }}
@@ -2407,7 +2444,7 @@ alter table outline_nodes disable row level security;
                   {(() => {
                     const img = imageUrlOf(node.text);
                     if (!img) return node.text ? <Marked text={node.text} query={query} /> : "空の行";
-                    // 画像の行。押せば、これまで通り文字（URL）を直せる。
+                    // 画像は表示のまま保ち、URLの編集は行メニューから行う。
                     return (
                       <span data-row-image-box className="relative inline-block max-w-full align-top">
                         <img
@@ -2428,7 +2465,7 @@ alter table outline_nodes disable row level security;
                           onPointerDown={(e) => startResize(e, node)}
                           title="ドラッグで大きさを変える（ダブルクリックでもとに戻す）"
                           onDoubleClick={(e) => { e.stopPropagation(); patch(node.id, { imageWidth: null }); }}
-                          className="absolute bottom-1 right-1 h-3.5 w-3.5 cursor-nwse-resize rounded-sm border border-white/40 bg-black/50 opacity-0 transition hover:opacity-100 group-hover/row:opacity-70"
+                          className="absolute bottom-1 right-1 h-6 w-6 touch-none cursor-nwse-resize rounded-sm border border-white/40 bg-black/50 opacity-60 transition hover:opacity-100"
                         />
                       </span>
                     );
