@@ -7,6 +7,162 @@ import { createGas } from "../tests/fixtures/gas-backup.js";
 const KEY = "taskspace-outline-v1";
 const REMOTE_KEY = "test-outline-remote";
 
+async function imageUploads(page, { hold = false } = {}) {
+  const requests = [], waiting = [];
+  await page.route('https://images.test/exec', async (route) => {
+    requests.push(JSON.parse(route.request().postData()));
+    if (hold) await new Promise((resolve) => waiting.push(resolve));
+    await route.fulfill({ contentType:'application/json', body:JSON.stringify({id:'test-image',url:'https://images.test/photo.png'}) });
+  });
+  await page.route('https://images.test/photo.png', (route) => route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200"><rect width="400" height="200" fill="teal"/></svg>'}));
+  await page.evaluate(() => {
+    localStorage.setItem('taskspace-drive-url','https://images.test/exec');
+    localStorage.setItem('taskspace-drive-token','試験用');
+    localStorage.setItem('taskspace-drive-last-backup',new Date().toISOString());
+  });
+  return { requests, release: () => waiting.splice(0).forEach((resolve) => resolve()) };
+}
+
+async function sendImage(page, id, type = 'paste') {
+  await inputFor(page,id).evaluate((input, type) => {
+    const data = new DataTransfer();
+    const bytes = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII='),(c)=>c.charCodeAt(0));
+    data.items.add(new File([bytes],'image.png',{type:'image/png'}));
+    input.dispatchEvent(type === 'paste'
+      ? new ClipboardEvent('paste',{clipboardData:data,bubbles:true,cancelable:true})
+      : new DragEvent('drop',{dataTransfer:data,bubbles:true,cancelable:true}));
+  },type);
+}
+
+test('画像のドロップは編集欄から親へ重複してアップロードしない', async ({page}) => {
+  await open(page,{local:[node('a','')],cas:true});
+  await pauseClock(page);
+  const api = await imageUploads(page);
+  await page.locator('[data-row="a"] [data-row-text]').click();
+  await sendImage(page,'a','drop');
+  await expect(page.locator('[data-outline-note]')).toContainText('画像を置きました');
+  expect(api.requests).toHaveLength(1);
+  await settleSync(page);
+  expect((await remoteRows(page)).map((row)=>row.text)).toEqual(['https://images.test/photo.png']);
+});
+
+test('画像の送信待ちに入力した本文を上書きせず、その下へ画像を残す', async ({page}) => {
+  await open(page,{local:[node('a','')],cas:true});
+  await pauseClock(page);
+  const api = await imageUploads(page,{hold:true});
+  await page.locator('[data-row="a"] [data-row-text]').click();
+  await sendImage(page,'a');
+  await expect.poll(()=>api.requests.length).toBe(1);
+  await editRow(page,'a','送信を待ちながら書いた本文');
+  api.release();
+  await expect(page.locator('[data-outline-note]')).toContainText('画像を置きました');
+  await settleSync(page);
+  expect((await stored(page)).map((node)=>node.text)).toEqual(['送信を待ちながら書いた本文','https://images.test/photo.png']);
+});
+
+test('画像のサイズ変更を中断したら、元の幅へ戻して送信しない', async ({page}) => {
+  await open(page,{local:[node('a','http://127.0.0.1:4174/icon-512.png')],cas:true});
+  await pauseClock(page);
+  await imageUploads(page);
+  const image = page.locator('[data-row-image]');
+  await expect.poll(()=>image.evaluate((img)=>img.naturalWidth)).toBeGreaterThan(0);
+  const before = (await image.boundingBox()).width;
+  const count = (await writes(page)).length;
+  await page.locator('[data-image-resize]').dispatchEvent('pointerdown',{pointerId:41,pointerType:'touch',isPrimary:true,button:0,clientX:200});
+  await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointermove',{pointerId:41,pointerType:'touch',isPrimary:true,clientX:120})));
+  expect((await image.boundingBox()).width).toBeLessThan(before);
+  await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointercancel',{pointerId:41,pointerType:'touch',isPrimary:true})));
+  await expect.poll(async()=>(await image.boundingBox()).width).toBeCloseTo(before,0);
+  await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{pointerId:41,pointerType:'touch',isPrimary:true})));
+  await page.clock.runFor(1500);
+  expect(await writes(page)).toHaveLength(count);
+  expect((await stored(page))[0].imageWidth).toBeNull();
+});
+
+test('画像の送信待ちに元の行を削除しても、本文を復活させず画像を残す', async ({page}) => {
+  await open(page,{local:[node('a',''),node('b','残す本文')],cas:true});
+  await pauseClock(page);
+  await expect.poll(async()=>(await stored(page)).find((node)=>node.id==='b')?.text).toBe('残す本文');
+  const api = await imageUploads(page,{hold:true});
+  await page.locator('[data-row="a"] [data-row-text]').click();
+  expect((await stored(page)).find((node)=>node.id==='b')?.text).toBe('残す本文');
+  await sendImage(page,'a');
+  await expect.poll(()=>api.requests.length).toBe(1);
+  await deleteRow(page,'a');
+  expect((await stored(page)).find((node)=>node.id==='b')?.text).toBe('残す本文');
+  api.release();
+  await expect(page.locator('[data-outline-note]')).toContainText('画像を置きました');
+  await settleSync(page);
+  expect((await stored(page)).map((node)=>node.text)).toEqual(['残す本文','https://images.test/photo.png']);
+  expect((await remoteRows(page)).some((row)=>row.id==='a')).toBe(false);
+});
+
+test('画像はドラッグ中に本体が隠されてもドロップを受け付ける', async ({page}) => {
+  await open(page);
+  const accepted = await page.locator('[data-outline-list]').evaluate((list)=>{
+    const event = new Event('dragover',{bubbles:true,cancelable:true});
+    Object.defineProperty(event,'dataTransfer',{value:{files:[],items:[{kind:'file',type:'image/png',getAsFile:()=>null}]}});
+    list.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  expect(accepted).toBe(true);
+});
+
+test('画像の幅は操作中の指だけで確定し、スマホ幅の別環境にも反映する', async ({page,browser},testInfo) => {
+  await open(page,{local:[{...node('a','http://127.0.0.1:4174/icon-512.png'),imageWidth:240}],cas:true});
+  await pauseClock(page);
+  const image = page.locator('[data-row-image]'), grip = page.locator('[data-image-resize]');
+  await expect.poll(()=>image.evaluate((img)=>img.naturalWidth)).toBeGreaterThan(0);
+  expect(await grip.evaluate((el)=>getComputedStyle(el).touchAction)).toBe('none');
+  expect(await grip.evaluate((el)=>Number(getComputedStyle(el).opacity))).toBeGreaterThan(0);
+  await grip.dispatchEvent('pointerdown',{pointerId:11,pointerType:'touch',isPrimary:true,button:0,clientX:200});
+  await page.evaluate(()=>{
+    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:12,pointerType:'touch',isPrimary:false,clientX:70}));
+    window.dispatchEvent(new PointerEvent('pointerup',{pointerId:12,pointerType:'touch',isPrimary:false}));
+  });
+  expect((await image.boundingBox()).width).toBeCloseTo(240,0);
+  await page.evaluate(()=>{
+    window.dispatchEvent(new PointerEvent('pointermove',{pointerId:11,pointerType:'touch',isPrimary:true,clientX:140}));
+    window.dispatchEvent(new PointerEvent('pointerup',{pointerId:11,pointerType:'touch',isPrimary:true}));
+  });
+  await settleSync(page);
+  const remote = await remoteRows(page);
+  expect(remote[0].imageWidth).toBe(180);
+  const context = await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true,deviceScaleFactor:2});
+  try {
+    const receiver = await context.newPage();
+    await open(receiver,{local:[],remote,cas:true});
+    const receivedImage = receiver.locator('[data-row-image]');
+    await expect.poll(()=>receivedImage.evaluate((img)=>img.naturalWidth)).toBeGreaterThan(0);
+    expect(await receiver.evaluate(()=>innerWidth)).toBe(390);
+    expect((await receivedImage.boundingBox()).width).toBeCloseTo(180,0);
+    expect((await stored(receiver))[0].imageWidth).toBe(180);
+    await pauseClock(receiver);
+    await settleSync(receiver);
+    expect(await writes(receiver)).toEqual([]);
+    await receiver.screenshot({path:`.tmp/image-mobile-${testInfo.project.name}.png`});
+  } finally { await context.close(); }
+});
+
+test('画像のサイズ変更中に別画像を受信したら、古い画像の幅を送らない', async ({page}) => {
+  const original = {...node('a','http://127.0.0.1:4174/icon-512.png'),imageWidth:240};
+  await open(page,{local:[original],cas:true});
+  await pauseClock(page);
+  const image = page.locator('[data-row-image]');
+  await expect.poll(()=>image.evaluate((img)=>img.naturalWidth)).toBeGreaterThan(0);
+  await page.locator('[data-image-resize]').dispatchEvent('pointerdown',{pointerId:11,pointerType:'touch',isPrimary:true,button:0,clientX:200});
+  await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointermove',{pointerId:11,pointerType:'touch',isPrimary:true,clientX:120})));
+  await page.evaluate(()=>{window.__outlineSync.revisions.a=2;});
+  await emitRemote(page,[{...asRows([original])[0],text:'http://127.0.0.1:4174/icon-512.png?v=2',imageWidth:100,updatedAt:'2040-01-01T00:00:00.000Z'}],{persist:true});
+  await page.clock.runFor(300);
+  await expect(image).toHaveAttribute('src',/v=2$/);
+  await page.evaluate(()=>window.dispatchEvent(new PointerEvent('pointerup',{pointerId:11,pointerType:'touch',isPrimary:true})));
+  await page.clock.runFor(1500);
+  expect(await writes(page)).toEqual([]);
+  expect((await stored(page))[0].imageWidth).toBe(100);
+  expect((await image.boundingBox()).width).toBeCloseTo(100,0);
+});
+
 // サーバーの応答だけを差し替える。空配列は取得成功、nullは取得失敗。
 // 画面・Provider・木の操作・IndexedDBは本物を動かす。
 const dbModule = `
