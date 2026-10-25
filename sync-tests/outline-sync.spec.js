@@ -1412,6 +1412,187 @@ async function settleSync(page) {
 }
 
 const oldOperationId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+async function changeRemoteRow(page, id, patch, revision) {
+  await page.evaluate(({ key, id, patch, revision }) => {
+    const rows = JSON.parse(sessionStorage.getItem(key));
+    if (patch === null) sessionStorage.setItem(key, JSON.stringify(rows.filter((row) => row.id !== id)));
+    else {
+      Object.assign(rows.find((row) => row.id === id), patch);
+      sessionStorage.setItem(key, JSON.stringify(rows));
+    }
+    window.__outlineSync.revisions[id] = revision;
+  }, { key: REMOTE_KEY, id, patch, revision });
+}
+
+test("同じ行の本文と折りたたみを別々に変えても、両方を自動で残して同期する", async ({ page }) => {
+  const local = saved();
+  local[0].children = [node("child", "子の本文")];
+  await open(page, { local, cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "この端末で書いた本文");
+  await page.evaluate((key) => {
+    const rows = JSON.parse(sessionStorage.getItem(key));
+    rows.find((row) => row.id === "a").collapsed = true;
+    sessionStorage.setItem(key, JSON.stringify(rows));
+    window.__outlineSync.revisions.a = 2;
+  }, REMOTE_KEY);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a")).toMatchObject({ text: "この端末で書いた本文", collapsed: true });
+  expect((await storedRecord(page)).nodes[0]).toMatchObject({ text: "この端末で書いた本文", collapsed: true });
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts).toHaveLength(2);
+  expect(attempts[0].operationId).not.toBe(attempts[1].operationId);
+  expect(attempts[1].expected).toEqual([["a", 2]]);
+});
+
+test("同じ本文の競合だけを保留し、他の行の編集は送り続ける", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "この端末に保全する本文");
+  await editRow(page, "b", "こちらの行は送れる本文");
+  await page.evaluate((key) => {
+    const rows = JSON.parse(sessionStorage.getItem(key));
+    rows[0].text = "別端末で変更した本文";
+    sessionStorage.setItem(key, JSON.stringify(rows));
+    window.__outlineSync.revisions.a = 2;
+  }, REMOTE_KEY);
+  await page.clock.runFor(3000);
+  await expect.poll(async () => {
+    await page.clock.runFor(1000);
+    return (await remoteRows(page)).find((row) => row.id === "b").text;
+  }).toBe("こちらの行は送れる本文");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("別端末で変更した本文");
+  const record = await storedRecord(page);
+  expect(record.nodes[0].text).toBe("この端末に保全する本文");
+  expect(record.sync.pending).toHaveLength(1);
+  expect(record.sync.pending[0]).toMatchObject({ id: "a", blocked: true });
+  await expect(page.locator("[data-outline-sync-conflict]")).toBeVisible();
+  await page.locator("[data-outline-conflict-dismiss]").click();
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  await editRow(page, "b", "保留中でも続きを書ける");
+  await page.clock.runFor(2000);
+  await expect.poll(async () => (await remoteRows(page)).find((row) => row.id === "b").text).toBe("保留中でも続きを書ける");
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  await expect(syncChip(page)).toHaveAttribute("data-sync", "conflict");
+  await page.locator("[data-outline-show-conflict]").click();
+  await expect(page.locator("[data-outline-sync-conflict]")).toBeVisible();
+  await page.reload();
+  await pauseClock(page);
+  await expect(page.locator("[data-outline-sync-conflict]")).toBeVisible();
+  await page.clock.runFor(2000);
+  expect((await storedRecord(page)).sync.pending[0]).toMatchObject({ id: "a", blocked: true });
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toEqual([]);
+  await page.evaluate(() => { window.__outlineSync.revisions.a = 3; });
+  const resolved = { ...asRows(saved())[0], text: "この端末に保全する本文", updatedAt: "2031-01-01T00:00:00Z" };
+  await emitRemote(page, [resolved], { persist: true });
+  await settleSync(page);
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites)).toEqual([]);
+});
+
+test("この端末の折りたたみと別端末の本文も、自動で両方を残す", async ({ page }) => {
+  const local = saved();
+  local[0].children = [node("child", "子の本文")];
+  await open(page, { local, cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await page.locator('[data-row="a"]').getByTitle("折りたたむ", { exact: true }).click();
+  await changeRemoteRow(page, "a", { text: "別端末で書いた本文" }, 2);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a")).toMatchObject({ text: "別端末で書いた本文", collapsed: true });
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("自動マージの確認中に書き続けても、最新の入力を古い要求の結果で消さない", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "確認前の本文");
+  await changeRemoteRow(page, "a", { favorite: true }, 2);
+  await page.evaluate(() => { window.__outlineSync.holdReadsRemaining = 1; });
+  await page.clock.runFor(1000);
+  await expect.poll(() => page.evaluate(() => window.__outlineSync.readPending.length)).toBe(1);
+  await editRow(page, "a", "確認中にも書き足した本文");
+  await page.evaluate(() => window.__outlineSync.readPending.splice(0).forEach((resolve) => resolve()));
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a")).toMatchObject({ text: "確認中にも書き足した本文", favorite: true });
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts[0].operationId).toBe(attempts[1].operationId);
+  expect(attempts[0].rows).toEqual(attempts[1].rows);
+  expect(attempts.at(-1).operationId).not.toBe(attempts[0].operationId);
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+});
+
+test("圏外の未送信記録を読み戻し、送信前の比較でも両立する変更を合わせる", async ({ page }) => {
+  const local = saved();
+  local[0].text = "圏外で書いた本文";
+  const remote = asRows(saved());
+  remote[0].favorite = true;
+  await open(page, { cas: true, localRecord: checkpointSeed(local, { pending: [{ id: "a", kind: "put", version: 1,
+    baseSignature: outlineRowSignature(asRows(saved())[0]), positionChanged: false }] }), remote, revisions: { a: 2, b: 1 } });
+  await pauseClock(page);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a")).toMatchObject({ text: "圏外で書いた本文", favorite: true });
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites);
+  expect(attempts).toHaveLength(1);
+  expect(attempts[0].expected).toEqual([["a", 2]]);
+});
+
+test("別端末で削除された行は復活させず、他の編集だけを送る", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "端末に残す本文");
+  await editRow(page, "b", "ほかの編集");
+  await changeRemoteRow(page, "a", null, 2);
+  await expect.poll(async () => {
+    await page.clock.runFor(1000);
+    return (await remoteRows(page)).find((row) => row.id === "b").text;
+  }).toBe("ほかの編集");
+  expect((await remoteRows(page)).some((row) => row.id === "a")).toBe(false);
+  expect((await storedRecord(page)).nodes.find((row) => row.id === "a").text).toBe("端末に残す本文");
+  expect((await storedRecord(page)).sync.pending).toHaveLength(1);
+});
+
+test("保留した自分の編集を取り消せば、サーバーの最新を採って保留を解消する", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await editRow(page, "a", "この端末で書いた本文");
+  await changeRemoteRow(page, "a", { text: "サーバーの最新本文" }, 2);
+  await page.clock.runFor(2000);
+  await expect(page.locator("[data-outline-sync-conflict]")).toBeVisible();
+  const attempts = await page.evaluate(() => window.__outlineSync.casWrites.length);
+  await page.locator("[data-outline-undo]").click();
+  await settleSync(page);
+  await expect(page.locator('[data-row="a"]')).toContainText("サーバーの最新本文");
+  expect((await remoteRows(page)).find((row) => row.id === "a").text).toBe("サーバーの最新本文");
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+  expect(await page.evaluate(() => window.__outlineSync.casWrites.length)).toBe(attempts);
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+});
+
+test("送信中の追加入力を、受理済みの自分の本文との競合と誤認しない", async ({ page }) => {
+  await open(page, { cas: true });
+  await pauseClock(page);
+  await settleSync(page);
+  await startHeldWrite(page);
+  await editRow(page, "a", "送信中にも書き足した本文");
+  await releaseWrite(page);
+  await expect.poll(async () => (await storedRecord(page)).sync.pending[0]?.expectedRevision).toBe(2);
+  await changeRemoteRow(page, "a", { favorite: true }, 3);
+  await settleSync(page);
+  expect((await remoteRows(page)).find((row) => row.id === "a")).toMatchObject({ text: "送信中にも書き足した本文", favorite: true });
+  expect((await storedRecord(page)).sync.pending).toEqual([]);
+  await expect(page.locator("[data-outline-sync-conflict]")).toHaveCount(0);
+});
+
 const oldPending = (overrides = {}) => ({ id: "a", kind: "put", version: 1, expectedRevision: 0,
   baseSignature: outlineRowSignature(asRows(saved())[0]), operationId: oldOperationId, ...overrides });
 
@@ -1975,7 +2156,8 @@ test("古い端末の保存を止め、本文と操作IDを未送信のまま端
   const record = await storedRecord(page);
   expect(record.nodes[0].text).toBe("古い端末に残す本文");
   expect(record.sync.pending[0]).toMatchObject({ id: "a", expectedRevision: 1 });
-  expect(record.sync.pending[0].operationId).toMatch(/^[0-9a-f-]{36}$/);
+  expect(record.sync.pending[0]).toMatchObject({ blocked: true });
+  expect(record.sync.pending[0].rejectedOperationId).toMatch(/^[0-9a-f-]{36}$/);
 });
 
 test("競合後に向こうへ合わせると未送信記録を再送せず同期済みを保つ", async ({ page }) => {
