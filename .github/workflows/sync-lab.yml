@@ -1,0 +1,55 @@
+name: 同期方式の独立比較
+on:
+  pull_request:
+    paths:
+      - 'experiments/sync-lab/**'
+      - '.github/workflows/sync-lab.yml'
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    env:
+      LAB_POWERSYNC: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 検証用の依存関係を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+          pnpm prepare:assets
+      - name: ChromiumとWebKitを準備
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: 使い捨てのPostgreSQLとPowerSyncを起動
+        run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 150
+      - name: 列の統合と三端末の動作を比較
+        run: |
+          pnpm test:unit
+          pnpm test --reporter=line,json > test-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: comparison-results.json
+      - name: 試験結果を出力
+        if: always()
+        run: cat test-output.log 2>/dev/null || true
+      - name: 実サーバーのログを出力
+        if: always()
+        run: docker compose -f infra/compose.yaml logs --no-color --tail=100
+      - name: 失敗時のトレースと結果を残す
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-comparison
+          path: |
+            experiments/sync-lab/comparison-results.json
+            experiments/sync-lab/test-results/
+          retention-days: 7
+      - name: 使い捨てのDBを終了
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v
