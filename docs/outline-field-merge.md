@@ -66,3 +66,8 @@ SQL・GASの更新は不要。
 画面では、本文と折りたたみの両方向、圏外の未送信記録、確認中と送信中の追加入力、
 他の行の継続、保留中の再起動、通知の閉じ直し、サーバー側での解消、Undoを検証する。
 既存の返事喪失・再送・1万行の未編集起動・端末保存・バックアップの試験も継続する。
+
+コードhead `970f849` の[Linux CI run 40170054677](https://github.com/yohyng/taskapp/actions/runs/40170054677)で、
+単体401件、Chromium/WebKit同期266件、既存アウトライン・Drive画面155件とビルドがすべて成功した。
+Vercelプレビューも成功。WindowsのWebKitで時間切れになった既存の1万行保存試験も、Linuxでは成功した。
+[PR #25](https://github.com/yohyng/taskapp/pull/25)は本番へ未統合で、実際の3台のPWAでの確認は別途残る。
