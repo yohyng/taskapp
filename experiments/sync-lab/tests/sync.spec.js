@@ -13,12 +13,16 @@ async function devices(browser, engine, use) {
     await Promise.all(pages.map((page) => expect(page.locator('[data-row]')).toHaveCount(30, { timeout: 60000 })));
     await Promise.all(pages.map((page) => page.waitForFunction(() => !!window.lab)));
     await use(pages, doc);
+    for (const page of pages) await expect(page.locator('[data-error]')).toBeEmpty();
     expect(errors).toEqual([]);
   } finally { await Promise.all(contexts.map((context) => context.close())); }
 }
 const rows = (page) => page.evaluate(() => window.lab.snapshot());
 const text = (page) => page.locator('[data-row="row-0"] textarea');
 async function converged(pages) {
+  // UIへの入力と非同期の端末取引を分ける。入力前の同じ表示だけで合格させない。
+  await Promise.all(pages.map((page) => page.evaluate(() => window.lab.localBarrier())));
+  await expect.poll(async () => (await Promise.all(pages.map((page) => page.evaluate(() => window.lab.queued())))).every((queued) => !queued)).toBe(true);
   await expect.poll(async () => {
     const snapshots = await Promise.all(pages.map(rows));
     return snapshots.every((item) => JSON.stringify(item) === JSON.stringify(snapshots[0]));
@@ -41,6 +45,7 @@ test('三端末で続きを書き、開いただけの端末は内容を書き�
     const before = await pages[0].evaluate(() => window.lab.serverState());
     await pages[2].goto(`http://127.0.0.1:4180/?doc=${doc}&engine=${engine}`);
     await expect(text(pages[2])).toHaveValue('PCで書いた続き、スマホから追記、iPadも追記');
+    await pages[2].waitForFunction(() => !!window.lab);
     await pages[2].evaluate(() => window.lab.localBarrier());
     const after = await pages[0].evaluate(() => window.lab.serverState());
     expect(after.changes).toBe(before.changes);
@@ -60,6 +65,26 @@ test('圏外の端末で追記し、別端末のお気に入りと両方を残�
   });
 });
 
+test('古い写しだけを持つ未編集端末は復帰しても最新版を上書きしない', async ({ browser }) => {
+  await devices(browser, engine, async (pages, doc) => {
+    await pages[0].evaluate(() => window.lab.disconnect());
+    await pages[0].evaluate(() => window.lab.localBarrier());
+    await text(pages[1]).fill('未編集の古い端末からは上書きしない');
+    await pages[1].locator('[data-row="row-0"] [data-attribute="favorite"]').check();
+    await expect(text(pages[2])).toHaveValue('未編集の古い端末からは上書きしない');
+    await pages[0].goto(`http://127.0.0.1:4180/?doc=${doc}&offline=1&engine=${engine}`);
+    await expect(text(pages[0])).toHaveValue('最初のメモ');
+    await pages[0].waitForFunction(() => !!window.lab);
+    await expect(pages[0].locator('[data-status]')).toContainText('圏外・再接続待ち');
+    const before = await pages[1].evaluate(() => window.lab.serverState());
+    await pages[0].evaluate(() => window.lab.connect());
+    await expect(text(pages[0])).toHaveValue('未編集の古い端末からは上書きしない');
+    await converged(pages);
+    expect((await rows(pages[0]))[0].favorite).toBe(true);
+    expect((await pages[1].evaluate(() => window.lab.serverState())).changes).toBe(before.changes);
+  });
+});
+
 test('圏外の編集を再読み込み後も残し、接続後に最新へ合流する', async ({ browser }) => {
   await devices(browser, engine, async (pages, doc) => {
     await pages[0].evaluate(() => window.lab.disconnect());
@@ -67,6 +92,7 @@ test('圏外の編集を再読み込み後も残し、接続後に最新へ合�
     await pages[0].evaluate(() => window.lab.localBarrier());
     await pages[0].goto(`http://127.0.0.1:4180/?doc=${doc}&offline=1&engine=${engine}`);
     await expect(text(pages[0])).toHaveValue('再起動しても残す下書き');
+    await pages[0].waitForFunction(() => !!window.lab);
     await pages[1].locator('[data-row="row-1"] textarea').fill('別の行も更新');
     await pages[0].evaluate(() => window.lab.connect());
     await converged(pages);
@@ -123,6 +149,10 @@ if (engine === 'powersync') {
       const state = await pages[0].evaluate(() => window.lab.serverState());
       expect(state.conflicts[0]).toMatchObject({ mine: JSON.stringify('スマホで書いた本文'), theirs: JSON.stringify('PCで書いた本文') });
       await expect(pages[1].locator('[data-conflicts]')).toContainText('スマホで書いた本文');
+      await pages[1].locator('[data-row="row-1"] textarea').fill('競合した端末から別の行は書ける');
+      await expect(pages[0].locator('[data-row="row-1"] textarea')).toHaveValue('競合した端末から別の行は書ける');
+      await converged(pages);
+      expect((await pages[2].evaluate(() => window.lab.conflicts())).length).toBe(1);
     });
   });
   test('保存後の返事を失った再送でも操作を一度だけ適用する', async ({ browser }) => {

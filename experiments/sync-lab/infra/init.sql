@@ -9,7 +9,7 @@ CREATE TABLE lab_conflicts (
   id text PRIMARY KEY, doc_id text NOT NULL, node_id text NOT NULL,
   field text NOT NULL, mine text NOT NULL, theirs text NOT NULL, operation_id text NOT NULL
 );
-CREATE TABLE lab_operations(id text PRIMARY KEY, request_hash text NOT NULL, result jsonb NOT NULL);
+CREATE TABLE lab_operations(id text PRIMARY KEY, doc_id text NOT NULL, request_hash text NOT NULL, result jsonb NOT NULL);
 ALTER TABLE lab_rows REPLICA IDENTITY FULL;
 ALTER TABLE lab_conflicts REPLICA IDENTITY FULL;
 CREATE PUBLICATION powersync FOR TABLE lab_rows, lab_conflicts;

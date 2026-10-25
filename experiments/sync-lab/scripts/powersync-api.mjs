@@ -48,11 +48,13 @@ export async function powerSyncApi() {
         if (old.request_hash !== hash) throw new Error('同じ操作IDの内容が違います');
         await client.query('commit'); return old.result;
       }
-      let conflictCount = 0;
+      let conflictCount = 0, operationDoc = null;
       for (const [index, entry] of entries.entries()) {
         if (entry.table !== 'lab_rows' || entry.op !== 'PATCH' || !entry.opData || !entry.previousValues) throw new Error('実験では既存行の列更新だけを受け付けます');
         const current = (await client.query('select * from lab_rows where id=$1 for update', [entry.id])).rows[0];
         if (!current) throw new Error('行がありません');
+        if (operationDoc !== null && operationDoc !== current.doc_id) throw new Error('実験では複数文書を一括更新できません');
+        operationDoc = current.doc_id;
         const { changes, conflicts } = mergeFields(current, entry.opData, entry.previousValues);
         const keys = Object.keys(changes);
         if (keys.length) await client.query(`update lab_rows set ${keys.map((key, i) => `${key}=$${i + 2}`).join(',')} where id=$1`, [entry.id, ...keys.map((key) => changes[key])]);
@@ -63,7 +65,7 @@ export async function powerSyncApi() {
         }
       }
       const result = { ok: true, conflicts: conflictCount };
-      await client.query('insert into lab_operations(id,request_hash,result) values($1,$2,$3)', [operationId, hash, result]);
+      await client.query('insert into lab_operations(id,doc_id,request_hash,result) values($1,$2,$3,$4)', [operationId, operationDoc, hash, result]);
       await client.query('commit'); return result;
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
   }
@@ -84,7 +86,7 @@ export async function powerSyncApi() {
           if (!validDoc(doc)) throw new Error('文書IDが不正です');
           const data = (await pool.query('select * from lab_rows where doc_id=$1 order by sort_order,node_id', [doc])).rows;
           const conflicts = (await pool.query('select * from lab_conflicts where doc_id=$1 order by id', [doc])).rows;
-          const changes = Number((await pool.query('select count(*) as n from lab_operations')).rows[0].n);
+          const changes = Number((await pool.query('select count(*) as n from lab_operations where doc_id=$1', [doc])).rows[0].n);
           result = { rows: data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed })), conflicts, changes, bytes: Buffer.byteLength(JSON.stringify(data)) };
         } else if (url.pathname.endsWith('/upload') && request.method === 'POST') {
           const chunks = []; let size = 0;

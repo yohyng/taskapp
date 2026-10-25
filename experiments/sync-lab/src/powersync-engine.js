@@ -84,6 +84,7 @@ export async function createEngine({ docId, offline, onChange }) {
   if (!offline) await db.connect(connector);
   return {
     snapshot: () => cache,
+    queued: async () => (await db.getUploadQueueStats()).count > 0,
     conflicts: () => conflicts,
     replaceText: (id, value) => enqueue(() => change(id, 'text', value)),
     insertText: (id, index, value) => enqueue(async () => {
