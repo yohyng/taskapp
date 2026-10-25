@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline } from "./outline.js";
+import { ensureNode, updateNode, indent, prepareOutlineChange, flattenTree, mergeOutline, outlineRowSignature } from "./outline.js";
 import {
   outlineRowDelta, OUTLINE_FORMAT, outlineCheckpoint, readOutlineSnapshot, chooseOutlineSnapshot,
   changedOutlineRows, queueOutlineRows, resolveOutlineRevisions, prepareOutlineOperation, freezeOutlineOperation, acknowledgeOutlineRows, pendingOutlineIds, replayOutlineRows, queuedOutlineChanges,
@@ -19,6 +19,40 @@ describe("本文を確認できた空と読み込み途中を区別する", () =
   });
   it("不正な完了の印を、確認済みや空として扱わない", () => {
     expect(() => readOutlineSnapshot({ ...checkpoint([]), complete: "true" })).toThrow("保存形式");
+  });
+});
+
+describe("競合箇所だけを保留して読み戻す", () => {
+  const rejectedOperationId = "11111111-1111-4111-8111-111111111111";
+  it("保留と新しい比較基準を復元し、他の行だけを送信対象にする", () => {
+    const a = { ...change("a"), version: 1, blocked: true, rejectedOperationId };
+    const b = { ...change("b"), version: 1, rebased: true, expectedRevision: 2 };
+    const saved = checkpoint([n("a"), n("b")], { sequence: 1, pending: new Map([["a", a], ["b", b]]) });
+    const restored = readOutlineSnapshot(JSON.parse(JSON.stringify(saved)));
+    const pending = new Map(restored.sync.pending.map((op) => [op.id, op]));
+    const next = { sequence: 1, pending };
+    expect(queuedOutlineChanges(flattenTree(saved.nodes), next).rows.map((row) => row.id)).toEqual(["b"]);
+    expect(prepareOutlineOperation(next, ["a", "b"], rejectedOperationId).sent.map((op) => op.id)).toEqual(["b"]);
+    expect(pendingOutlineIds(next).has("a")).toBe(true);
+  });
+  it.each([{ blocked: "true" }, { rebased: 1 }, { rejectedOperationId: "不正なID" }])("不正な保留記録で送信を再開しない: %j", (patch) => {
+    const saved = checkpoint([n("a")], { sequence: 1, pending: new Map([["a", { ...change("a"), version: 1, ...patch }]]) });
+    expect(() => readOutlineSnapshot(saved)).toThrow("未送信の記録");
+  });
+  it("保留していた行を新しく編集したら、その編集をもう一度比較できる", () => {
+    const next = queueOutlineRows({ sequence: 1, pending: new Map([["a", { ...change("a"), version: 1, blocked: true, expectedRevision: 1 }]]) }, [change("a")]);
+    expect(next.pending.get("a")).toMatchObject({ version: 2, expectedRevision: 1 });
+    expect(next.pending.get("a").blocked).toBeUndefined();
+  });
+  it("送信中の追加入力は、最初の編集前でなく受理された本文から比較する", () => {
+    const before = flattenTree([n("a")])[0];
+    const first = queueOutlineRows(queue(), [{ ...change("a"), baseSignature: outlineRowSignature(before), positionChanged: false }], new Map([["a", 1]]));
+    const sent = [...first.pending.values()];
+    const edited = queueOutlineRows(first, [change("a")]);
+    const accepted = { ...before, text: "先に送れた本文" };
+    const got = acknowledgeOutlineRows(edited, sent, new Map([["a", 2]]), new Map([["a", accepted]]));
+    expect(JSON.parse(got.pending.get("a").baseSignature).text).toBe("先に送れた本文");
+    expect(got.pending.get("a")).toMatchObject({ version: 2, expectedRevision: 2 });
   });
 });
 

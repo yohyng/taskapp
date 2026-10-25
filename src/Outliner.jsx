@@ -15,6 +15,7 @@ import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRows
 import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
 import { collectTaskspaceBackup } from "./lib/backup";
 import { applyOutlineHistory } from "./lib/outline-history";
+import { rebaseOutlineRows, applyOutlineRebase } from "./lib/outline-rebase";
 import { parseByFormat, parseZip } from "./lib/import-formats";
 import { bigGet, bigPut } from "./lib/localstore";
 import { holdOutlineOwner, trackOutlineWork } from "./lib/outline-owner";
@@ -83,6 +84,7 @@ export function OutlineProvider({ children }) {
   const coalesceRef = useRef({ key: null, at: 0 });
   const [historyNote, setHistoryNote] = useState("");
   const [syncNote, setSyncNote] = useState("");  // 置き場が無いときの知らせ
+  const [dismissedConflict, setDismissedConflict] = useState("");
   const [view, setViewState] = useState(readView);
   const setView = useCallback((patch) => {
     setViewState((prev) => {
@@ -99,6 +101,7 @@ export function OutlineProvider({ children }) {
   const tombRef = useRef(new Set());
   const knownRef = useRef(new Set());   // 向こうにもあると確かめた id
   const queueRef = useRef({ sequence: 0, pending: new Map() });
+  const blockedChecksRef = useRef(new Set());
   const revisionRef = useRef(0);
   const rowSaveRef = useRef(false);
   const nodeCountRef = useRef(0);
@@ -316,6 +319,13 @@ export function OutlineProvider({ children }) {
     setNodes(next);
   }, []);
 
+  const syncConflicts = useCallback(() => {
+    const ids = [...queueRef.current.pending.values()].filter((op) => op.blocked).map((op) => op.id);
+    if (!ids.length) setDismissedConflict("");
+    setSyncNote((cur) => cur.startsWith("error:") ? cur
+      : ids.length ? `conflict:${ids.join(",")}` : cur.startsWith("conflict:") ? "" : cur);
+  }, []);
+
   // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
   // 手元を読み終えてから、一度だけ呼ぶ。
   const pullOnce = useCallback(function pullOutline() {
@@ -336,6 +346,9 @@ export function OutlineProvider({ children }) {
         return;
       }
       if (revisions instanceof Map) {
+        for (const op of queueRef.current.pending.values()) {
+          if (op.blocked && serverRevisionsRef.current.get(op.id) !== revisions.get(op.id)) blockedChecksRef.current.add(op.id);
+        }
         serverRevisionsRef.current = revisions;
         casRef.current = "available";
       } else if (revisions === undefined) {
@@ -369,11 +382,48 @@ export function OutlineProvider({ children }) {
       setContentReady(true);
       saveLocal();
       setSyncedAt(new Date().toISOString());
+      if (blockedChecksRef.current.size) setRetry((n) => n + 1);
     }).catch(() => {
       if (ownerRef.current && !stoppedRef.current && generation === syncGenerationRef.current && sequence === pullSequenceRef.current) retryRead();
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const reconcileRejected = useCallback(async (ids, baseline = null, conflicts = []) => {
+    const checked = queueRef.current;
+    const generation = syncGenerationRef.current;
+    const latest = baseline || await readOutlineBaseline(loadOutlineRows, loadOutlineRevisions);
+    if (!ownerRef.current || stoppedRef.current || !readyRef.current || generation !== syncGenerationRef.current) return;
+    if (checked !== queueRef.current) {
+      // 確認中の追加入力も、元の要求の不適用を確かめてから比較し直す。
+      setRetry((n) => n + 1);
+      for (const id of ids) if (queueRef.current.pending.get(id)?.blocked) blockedChecksRef.current.add(id);
+      return;
+    }
+    if (!latest || [...serverRevisionsRef.current].some(([id, revision]) => revision > (latest.revisions.get(id) ?? 0))) {
+      for (const id of ids) if (queueRef.current.pending.get(id)?.blocked) blockedChecksRef.current.add(id);
+      setSyncNote("error:変更の確認中に更新がありました。自動で確認し直します");
+      clearTimeout(retryRef.current);
+      retryRef.current = setTimeout(() => setRetry((n) => n + 1), 15000);
+      return;
+    }
+    const result = rebaseOutlineRows(checked, flattenTree(nodesRef.current), latest.rows, latest.revisions, ids, conflicts);
+    queueRef.current = result.queue;
+    for (const id of result.settled) tombRef.current.delete(id);
+    serverRevisionsRef.current = latest.revisions;
+    serverRowsRef.current = new Map(latest.rows.map((row) => [row.id, row]));
+    const remote = buildTree(latest.rows);
+    syncedRef.current = new Map(flattenTree(remote).map((row) => [row.id, outlineRowSignature(row)]));
+    if (result.patches.size || result.retry.length || result.settled.size) {
+      applyRaw((mine) => mergeOutline(applyOutlineRebase(mine, result.patches), remote, tombRef.current,
+        knownRef.current, pendingOutlineIds(queueRef.current), { preferRemote: true }));
+    }
+    knownRef.current = new Set(syncedRef.current.keys());
+    setSyncNote("");
+    syncConflicts();
+    await saveLocal();
+    if (!stoppedRef.current && ownerRef.current && generation === syncGenerationRef.current) setRetry((n) => n + 1);
+  }, [applyRaw, saveLocal, syncConflicts]);
 
   // ほかの端末の変化を、すぐ受け取る（Supabase Realtime）。
   // 細かく届くので、少しためてから一度に入れる。
@@ -400,6 +450,9 @@ export function OutlineProvider({ children }) {
           pullRetryRef.current = setTimeout(() => pullOnce(), 15000);
           return;
         }
+        for (const op of queueRef.current.pending.values()) {
+          if (op.blocked && serverRevisionsRef.current.get(op.id) !== revisions.get(op.id)) blockedChecksRef.current.add(op.id);
+        }
         serverRevisionsRef.current = revisions;
       }
       setSyncStatus(sendingRef.current ? "sending" : "waiting");
@@ -418,6 +471,7 @@ export function OutlineProvider({ children }) {
       knownRef.current = new Set(next.keys());
       saveLocal();
       setSyncedAt(new Date().toISOString());
+      if (blockedChecksRef.current.size) setRetry((n) => n + 1);
     })());
   }, [applyRaw, saveLocal, pullOnce]);
 
@@ -506,6 +560,7 @@ export function OutlineProvider({ children }) {
         }
         for (const row of flattenTree(restored)) deleted.delete(row.id);
         queueRef.current = queue;
+        syncConflicts();
         setSyncStatus(queue.pending.size ? "waiting" : "checking");
         tombRef.current = deleted;
         knownRef.current = known;
@@ -621,9 +676,16 @@ export function OutlineProvider({ children }) {
       sendWaitRef.current = null;
       if (!ownerRef.current || !readyRef.current || sendingRef.current || stoppedRef.current) return;
       const syncGeneration = syncGenerationRef.current;
+      syncConflicts();
       if (casRef.current === "available" && !queueRef.current.flight) {
+        const checks = [...blockedChecksRef.current].filter((id) => queueRef.current.pending.get(id)?.blocked);
+        blockedChecksRef.current.clear();
+        if (checks.length) {
+          await reconcileRejected(checks);
+          return;
+        }
         const checkedQueue = queueRef.current;
-        const oldIds = [...new Set([...checkedQueue.pending.values()].map((op) => op.operationId).filter(Boolean))].slice(0, 500);
+        const oldIds = [...new Set([...checkedQueue.pending.values()].filter((op) => !op.blocked).map((op) => op.operationId).filter(Boolean))].slice(0, 500);
         if (oldIds.length) {
           const active = () => syncGeneration === syncGenerationRef.current && readyRef.current
             && ownerRef.current && !stoppedRef.current && !sendingRef.current && queueRef.current === checkedQueue;
@@ -642,6 +704,10 @@ export function OutlineProvider({ children }) {
               if (recovered.queue.pending.has(id)) pending.set(id, recovered.queue.pending.get(id));
               else pending.delete(id);
             }
+            for (const id of recovered.conflicts) {
+              const op = pending.get(id);
+              pending.set(id, { ...op, blocked: true, operationId: undefined, rejectedOperationId: op.operationId });
+            }
             queueRef.current = { ...checkedQueue, pending };
             for (const id of recovered.settled) tombRef.current.delete(id);
             const remote = buildTree(baseline.rows);
@@ -651,9 +717,10 @@ export function OutlineProvider({ children }) {
             // 真の競合では木を更新して送信effectを再起動し続けない。
             if (!recovered.conflicts.length) applyRaw((mine) => mergeOutline(mine, remote, tombRef.current, knownRef.current, pendingOutlineIds(queueRef.current), { preferRemote: true }));
             knownRef.current = new Set(syncedRef.current.keys());
-            setSyncNote(recovered.conflicts.length ? `conflict:${recovered.conflicts.join(",")}` : "");
+            setSyncNote("");
+            syncConflicts();
             await saveLocal();
-            if (!recovered.conflicts.length && !stoppedRef.current) setRetry((n) => n + 1);
+            if (!stoppedRef.current) setRetry((n) => n + 1);
           } catch (error) {
             if (!active()) return;
             setSyncNote(`error:${error?.message || String(error)}`);
@@ -668,15 +735,15 @@ export function OutlineProvider({ children }) {
       const here = new Set(rows.map((r) => r.id));
       const queued = queuedOutlineChanges(rows, queueRef.current, serverRowsRef.current);
       const changed = casRef.current === "available" ? queued.rows
-        : rows.filter((r) => queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== outlineRowSignature(r));
+        : rows.filter((r) => !queueRef.current.pending.get(r.id)?.blocked && (queueRef.current.pending.get(r.id)?.kind === "put" || before.get(r.id) !== outlineRowSignature(r)));
       const gone = casRef.current === "available" ? queued.gone
-        : [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id));
+        : [...new Set([...before.keys(), ...tombRef.current])].filter((id) => !here.has(id) && !queueRef.current.pending.get(id)?.blocked);
       for (const id of here) tombRef.current.delete(id);
       if (!changed.length && !gone.length && !queueRef.current.flight) {
         // 旧版の控えにしかない本文は勝手に送らず残すが、同期済みとも表示しない。
         const untracked = casRef.current === "available" && rows.some((row) =>
           !before.has(row.id) && String(row.text || "").trim());
-        setSyncStatus(untracked ? "local-only" : "synced");
+        setSyncStatus(queueRef.current.pending.size ? "waiting" : untracked ? "local-only" : "synced");
         return;
       }
       // CAS未導入の旧環境だけ、従来の差分から未送信記録へ移す。
@@ -699,6 +766,11 @@ export function OutlineProvider({ children }) {
           sendChanged = flight.rows;
           sendGone = flight.gone;
         } else {
+          if (sent.some((op) => op?.expectedRevision !== undefined && serverRevisionsRef.current.has(op.id)
+            && op.expectedRevision !== serverRevisionsRef.current.get(op.id))) {
+            await reconcileRejected(sent.map((op) => op.id));
+            return;
+          }
           if (sent.some((op) => op?.expectedRevision === undefined
             || (op?.expectedRevision === 0 && op?.baseSignature !== undefined))) {
             const checkedSequence = queueRef.current.sequence;
@@ -716,14 +788,17 @@ export function OutlineProvider({ children }) {
               return;
             }
             const { rows: latestRows, revisions: latestRevisions } = baseline;
+            if ([...serverRevisionsRef.current].some(([id, revision]) => revision > (latestRevisions.get(id) ?? 0))) {
+              setRetry((n) => n + 1);
+              return;
+            }
             const signatures = new Map(flattenTree(buildTree(latestRows)).map((row) => [row.id, outlineRowSignature(row)]));
             const resolved = resolveOutlineRevisions(
               queueRef.current, sent.map((op) => op.id), latestRevisions, signatures);
             queueRef.current = resolved.queue;
             serverRevisionsRef.current = latestRevisions;
             if (resolved.conflicts.length) {
-              setSyncNote(`conflict:${resolved.conflicts.join(",")}`);
-              saveLocal();
+              await reconcileRejected(sent.map((op) => op.id), baseline);
               return;
             }
             sent = sent.map((op) => queueRef.current.pending.get(op.id));
@@ -765,7 +840,9 @@ export function OutlineProvider({ children }) {
               err = await saveOutlineRows(sendChanged, sendGone);
             } else if (result.error) err = result.error;
             else if (result.conflicts?.length) {
-              setSyncNote(`conflict:${result.conflicts.map((item) => item.id).join(",")}`);
+              const ids = [...queueRef.current.pending.values()]
+                .filter((op) => !op.blocked && (!op.operationId || op.operationId === operationId)).map((op) => op.id);
+              await reconcileRejected(ids, null, result.conflicts);
               return;
             } else {
               acceptedRevisions = result.revisions;
@@ -786,7 +863,8 @@ export function OutlineProvider({ children }) {
         }
         clearTimeout(retryRef.current);
         setSyncNote((cur) => (cur.startsWith("error:") ? "" : cur));
-        queueRef.current = acknowledgeOutlineRows(queueRef.current, sent, acceptedRevisions);
+        queueRef.current = acknowledgeOutlineRows(queueRef.current, sent, acceptedRevisions, new Map(sendChanged.map((row) => [row.id, row])));
+        syncConflicts();
         for (const id of sendGone) if (!queueRef.current.pending.has(id)) tombRef.current.delete(id);
         const next = new Map(syncedRef.current);
         sendGone.forEach((id) => serverRowsRef.current.delete(id));
@@ -797,6 +875,7 @@ export function OutlineProvider({ children }) {
         knownRef.current = new Set(next.keys());
         // 送信完了と、送信中の追加編集も同じ本文の控えへ確定する。
         saveLocal();
+        if (sent.some((op) => op.rebased)) pullOnce();
         setRetry((n) => n + 1);
       } finally {
         sendingRef.current = false;
@@ -805,7 +884,7 @@ export function OutlineProvider({ children }) {
 
     })()), wait);
     return () => clearTimeout(timerRef.current);
-  }, [nodes, retry, saveLocal, applyRaw]);
+  }, [nodes, retry, saveLocal, applyRaw, reconcileRejected, syncConflicts, pullOnce]);
 
   // アウトラインを触っていたときの Ctrl+Z は、こちらで受ける。
   // タスク側の取り消しと取り合いにならないよう、先に捕まえて止める。
@@ -872,6 +951,7 @@ export function OutlineProvider({ children }) {
       // 通常編集の経路を通すと、置換そのものが一瞬だけ未送信変更になる。
       // 先にキューを捨て、受信扱いで置き換える。
       queueRef.current = { sequence: queueRef.current.sequence, pending: new Map() };
+      blockedChecksRef.current.clear();
       tombRef.current = new Set();
       syncedRef.current = new Map(flattenTree(remote).map((r) => [r.id, outlineRowSignature(r)]));
       knownRef.current = new Set(syncedRef.current.keys());
@@ -883,6 +963,7 @@ export function OutlineProvider({ children }) {
       syncHist({ past: [], future: [] });
       coalesceRef.current = { key: null, at: 0 };
       setHistoryNote("");
+      setDismissedConflict("");
       setSyncNote((cur) => cur.startsWith("conflict:") || READ_SYNC_ERRORS.has(cur) ? "" : cur);
       const saved = await saveLocal();
       if (!saved) return { ok: false, why: "この端末への保存が完了していません" };
@@ -906,6 +987,7 @@ export function OutlineProvider({ children }) {
     contentReady, backupState, createBackup: runBackup,
     undo, redo, canUndo: histCount.past > 0, canRedo: histCount.future > 0,
     historyNote, dismissHistoryNote: () => setHistoryNote(""),
+    dismissedConflict, dismissConflict: () => setDismissedConflict(syncNote), showConflict: () => setDismissedConflict(""),
     syncNote, dismissSync: () => setSyncNote(""), localSave, retryLocalSave: () => {
       saveLocal();
       setRetry((n) => n + 1);
@@ -913,7 +995,7 @@ export function OutlineProvider({ children }) {
     dismissLocalInfo: () => setLocalSave((prev) => ({ ...prev, hidden: true })),
     getLocalCheckpoint: () => bigReadRef.current && contentReadyRef.current
       ? { ...outlineCheckpoint(nodesRef.current, queueRef.current, tombRef.current, knownRef.current, revisionRef.current, new Date().toISOString()), complete: true } : null,
-  }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal, contentReady, backupState, runBackup]);
+  }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal, contentReady, backupState, runBackup, dismissedConflict]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
     addMemo: (dateLabel, text) => {
@@ -1033,7 +1115,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup, dismissedConflict, dismissConflict, showConflict } = useOutline();
   const loading = !contentReady && (nodes.length === 0 || isOutlinePlaceholder(nodes));
   const syncFailed = syncNote.startsWith("error:");
   const localFailed = localSave.status === "error";
@@ -1804,7 +1886,9 @@ export default function Outliner() {
             "shrink-0 text-[10px]",
             syncState === "synced" ? "text-emerald-300/80" : "text-neutral-500",
           )}
-        >{syncLabel}</span>
+        >{syncState === "conflict"
+          ? <button data-outline-show-conflict onClick={showConflict} title="保留中の変更を表示">{syncLabel}</button>
+          : syncLabel}</span>
         <button
           data-outline-link
           data-link={link}
@@ -2155,17 +2239,17 @@ alter table outline_nodes disable row level security;
         </div>
       )}
 
-      {syncNote.startsWith("conflict:") && (
+      {syncNote.startsWith("conflict:") && syncNote !== dismissedConflict && (
         <div data-outline-sync-conflict role="alert" className="mb-2 rounded border border-amber-400/30 bg-amber-400/[0.08] p-2 text-[10px] leading-relaxed text-amber-100">
           <div className="mb-1 font-semibold">自動でまとめられない変更があります</div>
           <div className="mb-2 text-amber-100/80">
-            この端末の未送信内容は端末内に残し、上書きを止めました。JSONへ控えてから「向こうに合わせる」で最新版を取り込めます。
+            重なった箇所の送信を保留し、この端末の内容を残しています。ほかの変更は同期を続けています。
           </div>
           <div className="flex flex-wrap gap-1.5">
             <button data-outline-conflict-export onClick={exportJson} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
               JSONに書き出す
             </button>
-            <button onClick={dismissSync} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
+            <button data-outline-conflict-dismiss onClick={dismissConflict} className="rounded border border-amber-300/30 px-2 py-1 text-[10px] text-amber-100 transition hover:bg-amber-400/15">
               閉じる
             </button>
           </div>

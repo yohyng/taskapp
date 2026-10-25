@@ -1,4 +1,4 @@
-import { flattenTree, buildTree, outlineRow } from "./outline.js";
+import { flattenTree, buildTree, outlineRow, outlineRowSignature } from "./outline.js";
 
 export const OUTLINE_FORMAT = "taskspace-outline/1";
 const operationIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -35,6 +35,9 @@ export function readOutlineSnapshot(value) {
       || (op.expectedRevision !== undefined && (!Number.isSafeInteger(op.expectedRevision) || op.expectedRevision < 0))
       || (op.baseSignature !== undefined && typeof op.baseSignature !== "string")
       || (op.positionChanged !== undefined && typeof op.positionChanged !== "boolean")
+      || (op.blocked !== undefined && typeof op.blocked !== "boolean")
+      || (op.rebased !== undefined && typeof op.rebased !== "boolean")
+      || (op.rejectedOperationId !== undefined && !operationIdPattern.test(op.rejectedOperationId))
       || (op.operationId !== undefined && !operationIdPattern.test(op.operationId))
       || !["put", "delete"].includes(op.kind)
       || (op.kind === "put" ? !rows.has(op.id) : rows.has(op.id) || !deleted.has(op.id))) {
@@ -144,7 +147,7 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
     // v1.15.14〜16が既存行を新規行と誤認して残した世代0も、比較基準が
     // ある場合は確定値として扱わず、送信直前の本文と照合して修復する。
     const repairLegacyZero = op?.expectedRevision === 0 && op.baseSignature !== undefined;
-    if (!op || op.operationId || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
+    if (!op || op.blocked || op.operationId || (op.expectedRevision !== undefined && !repairLegacyZero)) continue;
     const currentSignature = signatures.get(id);
     if (op.baseSignature !== undefined) {
       // 旧端末にしか無かった下書きを実際に編集した場合は新規作成になる。
@@ -170,7 +173,7 @@ export function resolveOutlineRevisions(queue, ids, revisions, signatures) {
 // 返事を失って再起動しても同じ操作IDで再送できるよう、通信前にキューへ付ける。
 // すでにIDのある操作があれば、その一団だけを先に送り、別の再送と混ぜない。
 export function prepareOutlineOperation(queue, ids, operationId) {
-  const candidates = ids.map((id) => queue.pending.get(id)).filter(Boolean);
+  const candidates = ids.map((id) => queue.pending.get(id)).filter((op) => op && !op.blocked);
   const existing = candidates.find((op) => op.operationId)?.operationId;
   const chosen = existing || operationId;
   const pending = new Map(queue.pending);
@@ -193,13 +196,15 @@ export function freezeOutlineOperation(queue, prepared, rows, gone, changes) {
 }
 
 // 返ってきたのは送った世代の返事。待っている間に同じ行を直したぶんは残す。
-export function acknowledgeOutlineRows(queue, sent, revisions = new Map()) {
+export function acknowledgeOutlineRows(queue, sent, revisions = new Map(), acceptedRows = new Map()) {
   const pending = new Map(queue.pending);
   for (const op of sent) {
     const current = pending.get(op.id);
     if (current?.version === op.version) pending.delete(op.id);
     else if (current && revisions.has(op.id)) {
-      pending.set(op.id, { ...current, expectedRevision: revisions.get(op.id), operationId: undefined });
+      // 送信中の追加入力は、受理された本文の続き。最初の編集前へ基準を戻さない。
+      pending.set(op.id, { ...current, expectedRevision: revisions.get(op.id), operationId: undefined,
+        ...(acceptedRows.has(op.id) ? { baseSignature: outlineRowSignature(acceptedRows.get(op.id)) } : {}) });
     }
   }
   return { ...queue, pending, flight: undefined };
@@ -214,7 +219,7 @@ export function pendingOutlineIds(queue) {
 export function queuedOutlineChanges(rows, queue, serverRows = new Map()) {
   const present = new Set(rows.map((row) => row.id));
   return {
-    rows: rows.filter((row) => queue.pending.get(row.id)?.kind === "put").map((row) => {
+    rows: rows.filter((row) => queue.pending.get(row.id)?.kind === "put" && !queue.pending.get(row.id).blocked).map((row) => {
       const op = queue.pending.get(row.id);
       const base = serverRows.get(row.id);
       // 画面で0始まりに詰めた番号を、本文編集のついでに書くと行が移動する。
@@ -223,7 +228,7 @@ export function queuedOutlineChanges(rows, queue, serverRows = new Map()) {
         ? { ...row, parentId: base.parentId, sortOrder: base.sortOrder } : row;
     }),
     gone: [...queue.pending.values()]
-      .filter((op) => op.kind === "delete" && !present.has(op.id)).map((op) => op.id),
+      .filter((op) => op.kind === "delete" && !op.blocked && !present.has(op.id)).map((op) => op.id),
   };
 }
 
