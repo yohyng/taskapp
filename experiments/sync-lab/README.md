@@ -4,6 +4,8 @@
 比較の範囲、合格条件、次の工程は [EXPERIMENT.md](EXPERIMENT.md) にまとめる。
 日本語入力の比較画面は `/?doc=demo&input=bound`。接続方法と試験の限界は [INPUT.md](INPUT.md) を参照。
 枝の操作は `&tree=1` を加える。木としての未解決点も含めて [TREE.md](TREE.md) に記録する。
+0.5.0からLoroの木・Undo・保存バイナリの意味も単体で比較する（[LORO.md](LORO.md)）。
+Loroはまだ画面と同期サーバーへ接続していない。
 
 ## 起動
 

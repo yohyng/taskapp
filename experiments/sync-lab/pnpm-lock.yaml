@@ -26,6 +26,9 @@ importers:
       '@powersync/web':
         specifier: 2.5.0
         version: 2.5.0(@powersync/common@2.4.0)(@powersync/shared-internals@1.4.0(@powersync/common@2.4.0))
+      loro-crdt:
+        specifier: 1.17.1
+        version: 1.17.1
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -348,6 +351,9 @@ packages:
   lightningcss@1.33.0:
     resolution: {integrity: sha512-WkUDrojuJs0xkgGf2udWxa3yGBRxPtxUkB79i6aCZLRgc7PM8fZe9TosfPDcvEpQZbuFASnHYmRLBLUbmLOIIA==}
     engines: {node: '>= 12.0.0'}
+
+  loro-crdt@1.17.1:
+    resolution: {integrity: sha512-83hWRYG6eMMpPezm+yXWlOqCuUsC0BYY1MVCPW9x2zlikgkHhL7GC7Q6JFH+Hjvauyn287Q1MiwTuRW0lUOUag==}
 
   nanoid@3.3.20:
     resolution: {integrity: sha512-uKdg2G3GNCKQn9byYOpxbGqrT2fGO5KRt5J/8b3pok8rT6qxGWF6hxMyJiEYtAf+FVyYuD9hRaDqX5uPFYJ4ZQ==}
@@ -748,6 +754,8 @@ snapshots:
       lightningcss-linux-x64-musl: 1.33.0
       lightningcss-win32-arm64-msvc: 1.33.0
       lightningcss-win32-x64-msvc: 1.33.0
+
+  loro-crdt@1.17.1: {}
 
   nanoid@3.3.20: {}
 
