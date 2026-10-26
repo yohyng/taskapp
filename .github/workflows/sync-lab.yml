@@ -54,3 +54,52 @@ jobs:
       - name: 使い捨てのDBを終了
         if: always()
         run: docker compose -f infra/compose.yaml down -v
+  performance:
+    # 通常の比較が作る多数の文書を、全体配信する一万行の計測へ混ぜない。
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    env:
+      LAB_POWERSYNC: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 検証用の依存関係を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+          pnpm prepare:assets
+      - name: ChromiumとWebKitを準備
+        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: 負荷測定専用の空のDBを起動
+        run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 150
+      - name: 合成一万行を測定し全行を照合
+        run: pnpm test:performance --max-failures=1 --reporter=line,json > performance-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: performance-results.json
+      - name: 測定値とログを出力
+        if: always()
+        run: |
+          cat performance-output.log 2>/dev/null || true
+          node scripts/performance-summary.mjs
+      - name: 測定記録と失敗時のトレースを残す
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-performance
+          path: |
+            experiments/sync-lab/.bench-results/
+            experiments/sync-lab/performance-results.json
+            experiments/sync-lab/test-results/
+          include-hidden-files: true
+          retention-days: 7
+      - name: 実サーバーのログを出力
+        if: always()
+        run: docker compose -f infra/compose.yaml logs --no-color --tail=100
+      - name: 使い捨てのDBを終了
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v

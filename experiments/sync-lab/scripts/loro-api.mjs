@@ -3,8 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { VersionVector } from 'loro-crdt';
 import { fixtureLoroDocument, loroCheckpoint, restoreLoroCheckpoint, loroViewRows } from '../src/loro-model.js';
 import { replaceFile } from './replace-file.mjs';
+import { fixtureSize } from './fixture-size.mjs';
 
-// 30行の比較用HTTP交換。製品の認証・配信・障害対応を備えた同期サービスではない。
+// 比較用HTTP交換。製品の認証・配信・障害対応を備えた同期サービスではない。
 export async function loroApi(directory) {
   await mkdir(directory, { recursive: true });
   const queues = new Map(), metrics = new Map();
@@ -26,7 +27,7 @@ export async function loroApi(directory) {
     try { return restoreLoroCheckpoint(decode(await readFile(fileFor(id), 'utf8'))); }
     catch (error) {
       if (error.code !== 'ENOENT') throw error;
-      const doc = fixtureLoroDocument();
+      const doc = fixtureLoroDocument(fixtureSize(id));
       try { await store(id, doc); return doc; } catch (error) { doc.free(); throw error; }
     }
   }

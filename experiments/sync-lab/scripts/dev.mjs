@@ -9,9 +9,10 @@ import { fixtureDocument, snapshot } from '../src/model.js';
 import { powerSyncApi } from './powersync-api.mjs';
 import { replaceFile } from './replace-file.mjs';
 import { loroApi } from './loro-api.mjs';
+import { fixtureSize } from './fixture-size.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
-const dataPath = fileURLToPath(new URL('../.data/', import.meta.url));
+const dataPath = fileURLToPath(new URL(process.env.LAB_BENCHMARK === '1' ? '../.data/benchmark/' : '../.data/', import.meta.url));
 await mkdir(dataPath, { recursive: true });
 const names = new Map();
 function storageFile(name) {
@@ -34,7 +35,7 @@ const sync = new Server({
       try { return await readFile(storageFile(documentName)); }
       catch (error) {
         if (error.code !== 'ENOENT') throw error;
-        const doc = fixtureDocument(), update = Y.encodeStateAsUpdate(doc);
+        const doc = fixtureDocument(fixtureSize(documentName)), update = Y.encodeStateAsUpdate(doc);
         await store(documentName, update);
         doc.destroy();
         return update;
@@ -65,6 +66,19 @@ const loro = await loroApi(`${dataPath}/loro`);
 const app = await createServer({
   root, server: { host: '127.0.0.1', port: 4180, strictPort: true },
   plugins: [{ name: 'lab-state', configureServer(server) {
+    if (process.env.LAB_BENCHMARK === '1') server.middlewares.use('/lab/benchmark/seed', async (request, response) => {
+      // 初期データの生成時間と、端末が既存文書を開く時間を分ける。既存の文書は上書きしない。
+      const name = 'benchmark-10000';
+      try {
+        try { await readFile(storageFile(name)); }
+        catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          const doc = fixtureDocument(fixtureSize(name));
+          try { await store(name, Y.encodeStateAsUpdate(doc)); } finally { doc.destroy(); }
+        }
+        response.end('{}');
+      } catch { response.statusCode = 500; response.end('{}'); }
+    });
     server.middlewares.use('/lab/server-state', serverState);
     if (powersync) server.middlewares.use(powersync.middleware);
     server.middlewares.use(loro.middleware);

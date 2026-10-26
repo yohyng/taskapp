@@ -4,3 +4,6 @@ test-results/
 playwright-report/
 public/@powersync/
 comparison-results.json
+.bench-results/
+performance-output.log
+performance-results.json

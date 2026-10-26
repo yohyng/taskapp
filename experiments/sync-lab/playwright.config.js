@@ -1,7 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 import process from 'node:process';
 export default defineConfig({
-  testDir: './tests', workers: 1, retries: 0, timeout: 90000,
+  testDir: './tests', testIgnore: '**/performance.spec.js', workers: 1, retries: 0, timeout: 90000,
   expect: { timeout: 15000 },
   use: { baseURL: 'http://127.0.0.1:4180', serviceWorkers: 'block', trace: 'retain-on-failure' },
   projects: [

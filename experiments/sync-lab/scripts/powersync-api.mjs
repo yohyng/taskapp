@@ -2,6 +2,7 @@ import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import pg from 'pg';
 import { mergeObservedFields } from './field-merge.mjs';
 import { mergeTreeCommand } from '../src/tree-model.js';
+import { fixtureSize } from './fixture-size.mjs';
 
 const validDoc = (value) => /^[a-zA-Z0-9_-]{1,120}$/.test(value);
 export async function powerSyncApi() {
@@ -21,16 +22,19 @@ export async function powerSyncApi() {
   }
   async function seed(doc) {
     if (!validDoc(doc)) throw new Error('文書IDが不正です');
+    const count = fixtureSize(doc);
     const client = await pool.connect();
     try {
       await client.query('begin');
       await client.query('select pg_advisory_xact_lock(hashtext($1))', [doc]);
       const inserted = await client.query('insert into lab_documents(id) values($1) on conflict do nothing returning id', [doc]);
       if (inserted.rowCount) {
-        for (let i = 0; i < 30; i++) await client.query(
-          'insert into lab_rows(id,doc_id,node_id,text,parent_id,sort_order,favorite,completed) values($1,$2,$3,$4,$5,$6,0,0)',
-          [`${doc}:row-${i}`, doc, `row-${i}`, i === 0 ? '最初のメモ' : `検証用の行 ${i}`, i > 2 && i < 10 ? 'row-1' : null, i],
-        );
+        // 初期データ生成の往復を行数分増やさない。通常の30行も同じSQLを通す。
+        await client.query(`insert into lab_rows(id,doc_id,node_id,text,parent_id,sort_order,favorite,completed)
+          select $1 || ':row-' || i, $1, 'row-' || i,
+            case when i=0 then '最初のメモ' else '検証用の行 ' || i end,
+            case when i>2 and i<10 then 'row-1' else null end, i, 0, 0
+          from generate_series(0,$2::integer-1) as i`, [doc, count]);
       }
       await client.query('commit');
     } catch (error) { await client.query('rollback'); throw error; } finally { client.release(); }
