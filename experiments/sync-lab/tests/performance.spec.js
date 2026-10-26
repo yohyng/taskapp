@@ -19,14 +19,16 @@ async function confirmed(page) {
   await expect.poll(() => page.evaluate(() => window.bench.engine.queued()), { timeout: 60000 }).toBe(false);
 }
 const digest = (rows) => createHash('sha256').update(JSON.stringify([...rows].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0))).digest('hex');
-function intact(rows) {
+function intact(rows, engine) {
   assert.equal(rows.length, 10000);
   assert.equal(new Set(rows.map((row) => row.id)).size, 10000);
   for (const row of rows) {
     const i = Number(row.id.slice(4));
     assert.ok(Number.isInteger(i) && i >= 0 && i < 10000, row.id);
     assert.equal(row.parentId, i > 2 && i < 10 ? 'row-1' : null, row.id);
+    assert.equal(row.order, engine === 'loro' ? i >= 10 ? i - 7 : i >= 3 ? i - 3 : i : i, row.id);
     if (i !== 0) assert.equal(row.text, `検証用の行 ${i}`, row.id);
+    if (i !== 1) assert.equal(row.favorite, false, row.id);
     assert.equal(row.deleted, false, row.id); assert.equal(row.completed, false, row.id);
   }
 }
@@ -40,7 +42,7 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
   const preparation = await browser.newContext();
   try { const page = await preparation.newPage(); await page.goto(pathFor(engine)); await ready(page); await confirmed(page); await page.evaluate(() => window.bench.engine.dispose()); }
   finally { await preparation.close(); }
-  const result = { engine, browser: info.project.name, version: browser.version(), platform: os.platform(), cpu: os.cpus()[0]?.model, samples: [] };
+  const result = { engine, browser: info.project.name, version: browser.version(), platform: os.platform(), release: os.release(), cpu: os.cpus()[0]?.model, cpuCount: os.cpus().length, memoryBytes: os.totalmem(), node: process.version, revision: process.env.GITHUB_SHA || 'local', samples: [] };
   for (let trial = 0; trial < 3; trial++) {
     const contexts = await Promise.all([browser.newContext(), browser.newContext()]);
     const [a, b] = await Promise.all(contexts.map((context) => context.newPage()));
@@ -50,7 +52,8 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       await a.goto(pathFor(engine)); await ready(a); await confirmed(a);
       const coldA = await a.evaluate(() => window.bench.metrics);
       const before = await a.evaluate(() => window.bench.engine.serverState());
-      intact(before.rows);
+      intact(before.rows, engine);
+      const beforeFavorite = before.rows.find((row) => row.id === 'row-1').favorite;
       await b.goto(pathFor(engine)); await ready(b); await confirmed(b);
       const coldB = await b.evaluate(() => window.bench.metrics);
       expect(digest(await snapshot(a))).toBe(digest(before.rows));
@@ -90,7 +93,8 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       const final = await a.evaluate(() => window.bench.engine.serverState());
       await expect.poll(async () => digest(await snapshot(a)), { timeout: 60000 }).toBe(digest(final.rows));
       await expect.poll(async () => digest(await snapshot(b)), { timeout: 60000 }).toBe(digest(final.rows));
-      intact(final.rows);
+      intact(final.rows, engine);
+      expect(final.rows.find((row) => row.id === 'row-1').favorite).toBe(!beforeFavorite);
       await expect(a.locator('[data-error]')).toBeEmpty(); await expect(b.locator('[data-error]')).toBeEmpty();
       expect(errors).toEqual([]);
       result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes });
