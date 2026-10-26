@@ -38,6 +38,8 @@ export function loroRows(doc, { withNativeDeleted = false } = {}) {
   })).sort(compareRows);
 }
 
+export const loroViewRows = (doc) => loroRows(doc).map(({ nativeId, nativeDeleted, ...row }) => row);
+
 // 因果上の先行更新を待つ受信内容は通常のsnapshotに入らない。両方を同じ世代として保持する。
 // ここは同期的なバイナリ作成だけ。IndexedDBへの取引・通信の完了を保証するAPIではない。
 export function loroCheckpoint(doc) {

@@ -6,7 +6,7 @@ body{font-family:system-ui,sans-serif;margin:0;background:#111827;color:#e5e7eb}
 </style>
 <main>
 <h1>Task Space 同期の検証室</h1>
-<div class="notice">Yjs / PowerSync案の試作・合成データ30行。本番とは独立しています。<br>URLのengine=powersyncで方式を切り替えます。同じ文書IDを別ブラウザーで開くと共有します。下の接続状態は、サーバーへの保存完了を示しません。</div>
+<div class="notice">Yjs / PowerSync / Loro案の試作・合成データ30行。本番とは独立しています。<br>URLのengine=powersync、engine=loroで方式を切り替えます。Loroの入力比較はinput=boundも付けます。同じ文書IDを別ブラウザーで開くと共有します。下の接続状態は、サーバーへの保存完了を示しません。</div>
 <div id="status" data-status>手元のデータを読み込んでいます</div><div id="error" data-error role="alert"></div>
 <nav><button data-disconnect>圏外にする</button><button data-connect>再接続</button><button data-undo>Undo</button><button data-redo>Redo</button><button data-check>サーバーの保存内容を確認</button></nav>
 <small id="receipt"></small><div data-conflicts></div><section id="rows"></section>

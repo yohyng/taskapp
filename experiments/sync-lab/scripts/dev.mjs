@@ -8,6 +8,7 @@ import * as Y from 'yjs';
 import { fixtureDocument, snapshot } from '../src/model.js';
 import { powerSyncApi } from './powersync-api.mjs';
 import { replaceFile } from './replace-file.mjs';
+import { loroApi } from './loro-api.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const dataPath = fileURLToPath(new URL('../.data/', import.meta.url));
@@ -60,11 +61,13 @@ const serverState = async (request, response) => {
   } catch (error) { response.statusCode = error.code === 'ENOENT' ? 404 : 500; response.end(JSON.stringify({ error: '検証文書を読めません' })); }
 };
 const powersync = await powerSyncApi();
+const loro = await loroApi(`${dataPath}/loro`);
 const app = await createServer({
   root, server: { host: '127.0.0.1', port: 4180, strictPort: true },
   plugins: [{ name: 'lab-state', configureServer(server) {
     server.middlewares.use('/lab/server-state', serverState);
     if (powersync) server.middlewares.use(powersync.middleware);
+    server.middlewares.use(loro.middleware);
   } }],
 });
 await app.listen();
@@ -76,6 +79,7 @@ async function close() {
   await sync.destroy();
   await app.close();
   await powersync?.close();
+  await loro.close();
 }
 process.once('SIGINT', () => close().finally(() => process.exit()));
 process.once('SIGTERM', () => close().finally(() => process.exit()));

@@ -32,7 +32,7 @@ async function move(page, id, parent) {
   await page.locator(`[data-row="${id}"] [data-tree-parent]`).selectOption(parent || '');
   await page.locator(`[data-row="${id}"] [data-tree-move]`).click();
 }
-for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] : ['yjs'])) test.describe(`木・${engine}`, () => {
+for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync', 'loro'] : ['yjs', 'loro'])) test.describe(`木・${engine}`, () => {
   test('枝を移しても本文と子のIDを保ち、Undoで別端末の編集を消さない', async ({ browser }) => {
     await fixture(browser, engine, async (pages) => {
       await move(pages[0], 'row-1', 'row-2');
@@ -133,11 +133,15 @@ for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] :
         await pages[2].locator('[data-unplaced-row="row-1"] [data-recover-root]').click();
         await expect(shown(pages[0])).toHaveCount(30);
         await settled(pages);
-      } else {
+      } else if (engine === 'powersync') {
         expect(analyzeTree(server.rows).issues.cycles).toEqual([]);
         expect(server.conflicts).toHaveLength(1);
         expect(JSON.parse(server.conflicts[0].theirs).reason).toBe('cycle');
         await expect(shown(pages[2])).toHaveCount(30);
+      } else {
+        expect(analyzeTree(server.rows).issues.cycles).toEqual([]);
+        await expect(shown(pages[2])).toHaveCount(30);
+        await expect(pages[2].locator('[data-unplaced-row]')).toHaveCount(0);
       }
     });
   });
@@ -150,7 +154,7 @@ for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] :
       await Promise.all(pages.slice(0, 2).map((page) => page.evaluate(() => window.lab.connect())));
       await settled(pages);
       const row = (await getRows(pages[2])).find((item) => item.id === 'row-1');
-      expect([{ parentId: 'row-2', order: 100 }, { parentId: 'row-10', order: 200 }]).toContainEqual({ parentId: row.parentId, order: row.order });
+      expect(engine === 'loro' ? [{ parentId: 'row-2', order: 0 }, { parentId: 'row-10', order: 0 }] : [{ parentId: 'row-2', order: 100 }, { parentId: 'row-10', order: 200 }]).toContainEqual({ parentId: row.parentId, order: row.order });
       expect((await getRows(pages[2])).find((item) => item.id === 'row-3').parentId).toBe('row-1');
       if (engine === 'powersync') expect(await pages[2].evaluate(() => window.lab.conflicts().length)).toBe(1);
     });
@@ -165,7 +169,7 @@ for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] :
       await pages[1].evaluate(() => window.lab.localBarrier()); await pages[1].evaluate(() => window.lab.connect());
       await settled(pages);
       expect((await getRows(pages[2])).find((row) => row.id === 'row-3').text).toBe('古い端末からの枝の追記');
-      if (engine === 'yjs') {
+      if (engine !== 'powersync') {
         await expect(pages[2].locator('[data-trash-row="row-3"]')).toContainText('古い端末からの枝の追記');
         await pages[2].locator('[data-trash-row="row-1"] [data-trash-rehome]').click();
         await expect(shown(pages[2])).toHaveCount(29);

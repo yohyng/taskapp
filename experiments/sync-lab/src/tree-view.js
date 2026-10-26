@@ -5,7 +5,7 @@ export function createTreeUI({ container, engine, onError }) {
   const trash = document.createElement('section'), detached = document.createElement('section');
   trash.dataset.treeTrash = ''; detached.dataset.treeDetached = '';
   panels.append(trash, detached); container.after(panels);
-  let latest = [];
+  let latest = [], rendered;
   const run = (operation) => { Promise.resolve().then(operation).catch(onError); };
   function button(title, attribute, operation) {
     const element = document.createElement('button'); element.textContent = title;
@@ -24,6 +24,10 @@ export function createTreeUI({ container, engine, onError }) {
     element.append(controls); elements.set(row.id, { element, select });
   }
   function update(rows) {
+    // 通信状態だけの通知でボタンを作り直さない。WebKitでクリック直前に対象が外れるのを避ける。
+    const key = JSON.stringify(rows);
+    if (key === rendered) return;
+    rendered = key;
     latest = rows;
     const state = analyzeTree(rows), visible = new Map(state.visible.map((row) => [row.id, row]));
     for (const row of rows) {

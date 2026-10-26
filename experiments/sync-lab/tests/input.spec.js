@@ -70,7 +70,7 @@ async function compose(page, browserName) {
   } };
 }
 
-for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] : ['yjs'])) test.describe(`入力・${engine}`, () => {
+for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync', 'loro'] : ['yjs', 'loro'])) test.describe(`入力・${engine}`, () => {
   test('変換中に別端末が追記しても、確定した日本語と受信内容を両方残す', async ({ browser, browserName }) => {
     await fixture(browser, engine, async (pages) => {
       const composition = await compose(pages[0], browserName);
@@ -80,7 +80,7 @@ for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] :
       await expect.poll(() => rowText(pages[2])).toContain('別端末：');
       await expect.poll(() => rowText(pages[0])).toContain('別端末：');
       await composition.finish();
-      if (engine === 'yjs') {
+      if (engine !== 'powersync') {
         await expect.poll(() => rowText(pages[2])).toContain('日本語');
         await settled(pages);
         expect(await rowText(pages[2])).toBe('別端末：最初のメモ日本語');
@@ -169,7 +169,7 @@ for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] :
     });
   });
 
-  if (engine === 'yjs') test('入力欄のUndoは別端末の追記を消さず、自分の入力だけ戻す', async ({ browser }) => {
+  if (engine !== 'powersync') test('入力欄のUndoは別端末の追記を消さず、自分の入力だけ戻す', async ({ browser }) => {
     await fixture(browser, engine, async (pages) => {
       await input(pages[0]).focus();
       await input(pages[0]).press('ControlOrMeta+End');

@@ -1,5 +1,8 @@
 # Loroの木を小さく比較する
 
+以下は0.5.0時点のモデルの比較記録。0.6.0の画面・保存・通信の接続は
+[LORO-INTEGRATION.md](LORO-INTEGRATION.md) と [RESULTS.md](RESULTS.md) を参照。
+
 2026-10-26、検証パッケージ0.5.0。ユーザーの承認を受け、検証専用に
 `loro-crdt@1.17.1`（MIT）だけを固定して追加した。
 今回はNode.jsでLoroの実際のWASMを動かす意味の試験。

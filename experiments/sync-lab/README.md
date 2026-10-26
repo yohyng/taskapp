@@ -1,11 +1,12 @@
 # Task Space 同期の検証室
 
-本番とは独立したYjs / PowerSync案の小さい試作。
+本番とは独立したYjs / PowerSync / Loro案の小さい試作。
 比較の範囲、合格条件、次の工程は [EXPERIMENT.md](EXPERIMENT.md) にまとめる。
 日本語入力の比較画面は `/?doc=demo&input=bound`。接続方法と試験の限界は [INPUT.md](INPUT.md) を参照。
 枝の操作は `&tree=1` を加える。木としての未解決点も含めて [TREE.md](TREE.md) に記録する。
 0.5.0からLoroの木・Undo・保存バイナリの意味も単体で比較する（[LORO.md](LORO.md)）。
-Loroはまだ画面と同期サーバーへ接続していない。
+0.6.0では `/?engine=loro&doc=demo&input=bound&tree=1` で入力・端末保存・通信も比較する。
+経路と限界は [LORO-INTEGRATION.md](LORO-INTEGRATION.md) を参照。
 
 ## 起動
 
@@ -66,6 +67,8 @@ OSの日本語候補選択、1万行の全体負荷、サーバー障害はま�
 
 - ブラウザー：`taskspace-lab-yjs-<文書ID>` という専用IndexedDB。
 - PowerSyncのブラウザー：専用名のSQLite（IDBBatchAtomicVFS、今回は複数タブ無効）。
+- Loroのブラウザー：`taskspace-lab-loro-<文書ID>` の専用IndexedDB。一取引にsnapshot・待機中の受信・送信待ちを保存する。
+- Loroのサーバー：`.data/loro/` のバイナリを含む専用ファイル。30行のHTTP交換用で製品の同期サービスではない。
 - PowerSyncのサーバー：ローカルDocker内の `lab_source` / `lab_storage`。
 - サーバー：このフォルダーの `.data/` にYjsバイナリ。
 - 本番のSupabase・Drive・taskappの保存キーは使わない。

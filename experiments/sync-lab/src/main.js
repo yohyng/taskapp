@@ -1,8 +1,9 @@
 const params = new URLSearchParams(location.search);
-const engineName = params.get('engine') === 'powersync' ? 'powersync' : 'yjs';
+const engineName = ['powersync', 'loro'].includes(params.get('engine')) ? params.get('engine') : 'yjs';
 const { createEngine } = await import(`./${engineName}-engine.js`);
 const bound = params.get('input') === 'bound';
 const { createBoundEditor } = bound ? await import('./bound-editor.js') : {};
+const { createLoroEditor } = bound && engineName === 'loro' ? await import('./loro-editor.js') : {};
 const tree = params.get('tree') === '1';
 const { createTreeUI } = tree ? await import('./tree-view.js') : {};
 const id = params.get('doc') || 'demo';
@@ -19,7 +20,7 @@ function render(state) {
     if (!el) {
       el = document.createElement('article');
       el.dataset.row = row.id;
-      if (bound) editors.set(row.id, createBoundEditor({ parent: el, id: row.id, engine, onError: (error) => { document.querySelector('#error').textContent = error.message; } }));
+      if (bound) editors.set(row.id, (createLoroEditor || createBoundEditor)({ parent: el, id: row.id, engine, onError: (error) => { document.querySelector('#error').textContent = error.message; } }));
       else {
       const text = document.createElement('textarea');
       text.setAttribute('aria-label', `${row.id}の本文`);

@@ -33,7 +33,7 @@ async function converged(pages) {
   }).toBe(true);
 }
 
-for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync'] : ['yjs'])) test.describe(engine, () => {
+for (const engine of (process.env.LAB_POWERSYNC === '1' ? ['yjs', 'powersync', 'loro'] : ['yjs', 'loro'])) test.describe(engine, () => {
 test('三端末で続きを書き、開いただけの端末は内容を書き戻さない', async ({ browser }) => {
   await devices(browser, engine, async (pages, doc) => {
     await text(pages[0]).fill('PCで書いた続き');
@@ -96,7 +96,7 @@ test('圏外の編集を再読み込み後も残し、接続後に最新へ合�
     await pages[1].locator('[data-row="row-1"] textarea').fill('別の行も更新');
     await pages[0].evaluate(() => window.lab.connect());
     await converged(pages);
-    expect((await rows(pages[0]))[1].text).toBe('別の行も更新');
+    expect((await rows(pages[0])).find((row) => row.id === 'row-1').text).toBe('別の行も更新');
   });
 });
 
@@ -113,7 +113,7 @@ test('自分の本文をUndoしても、別端末のお気に入りは戻さな�
   });
 });
 
-if (engine === 'yjs') test('同じ本文への別々の追加を残し、Undoは自分の追加だけを戻す', async ({ browser }) => {
+if (engine !== 'powersync') test('同じ本文への別々の追加を残し、Undoは自分の追加だけを戻す', async ({ browser }) => {
   await devices(browser, engine, async (pages) => {
     await pages[0].evaluate(() => window.lab.disconnect());
     await pages[1].evaluate(() => window.lab.disconnect());

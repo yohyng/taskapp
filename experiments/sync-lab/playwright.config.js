@@ -9,6 +9,6 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
-    command: `"${process.execPath}" scripts/dev.mjs`, url: 'http://127.0.0.1:4180', reuseExistingServer: false, timeout: 30000,
+    command: `"${process.execPath}" scripts/dev.mjs`, url: 'http://127.0.0.1:4180', reuseExistingServer: false, timeout: 120000,
   },
 });
