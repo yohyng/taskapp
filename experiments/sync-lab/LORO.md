@@ -33,6 +33,8 @@
 | 本文の先頭と末尾への別々の追記 | 自動統合し、自分の追記だけUndoする。IMEの試験ではない |
 
 単純な親IDのYjs案にあった循環について、Loroの専用の木は有望な結果を示した。
+同じ枝の両立しない移動は一方の配置へまとまる。全行と本文が残ることを確認した段階であり、
+採用されなかった移動の意図を利用者が見比べるUIまでは実装していない。
 ただし次の二つは未解決または採用しない操作として区別する。
 
 ### 素のTree削除とUndoは今回の復元仕様に合わない
@@ -76,6 +78,7 @@ pnpm test:unit
 ```
 
 新しいLoro試験は22件。以前の21件と合わせた結果とCIは [RESULTS.md](RESULTS.md) を正とする。
+コード `d92a608` の[Linuxの実行](https://github.com/yohyng/taskapp/actions/runs/40257312680)で単体43件が成功した。
 ブラウザー84件は既存のYjs/PowerSyncの比較であり、Loroのブラウザー合格数に数えない。
 
 次はこの候補を、まず30行の入力画面・端末保存・実際の更新交換へ縦に接続する。
@@ -83,9 +86,24 @@ pnpm test:unit
 既存二案と同じ条件で比較する。これが通ってから1万行の全体負荷と方式の推薦へ進む。
 実機PWA、認証、運用・費用、旧データ移行も本番移行前の条件として残る。
 
+入力接続の前に公式CodeMirror接続のソースも確認した。枝ごとの本文を選ぶ関数は渡せる。
+ただし複数のイベントを処理する箇所の早期returnと、Undoの単一コールバックの扱いがあるため、
+次のケースを先に再現して、複数の入力欄でそのまま使えるかを判断する。
+現時点ではパッケージを導入・実行した結果ではなく、ソースから試験条件を立てた段階。
+
+- 一度の受信に木の移動・属性・二行の本文が混ざっても、両方の入力欄が更新されること。
+- 複数の入力欄で一つのUndo履歴を共有しても、編集した行と選択範囲へ戻ること。
+- 別の行を操作した後でも、日本語変換中の行へ受信内容が正しく届くこと。
+
+`loroNode()` は今回の30行の試験用に全ノードを走査する。1万行の入力経路にこの探索を
+毎回持ち込まず、実際の接続では行IDとネイティブIDの索引も必要になる。
+
 ## 一次資料
 
 - [LoroTree](https://www.loro.dev/docs/tutorial/tree)：移動可能な木と兄弟の順序。
 - [ローカルUndo](https://www.loro.dev/docs/advanced/undo)：自分の操作を対象とするUndo。
 - [保存と未適用更新](https://www.loro.dev/docs/tutorial/persistence)：snapshotだけでは待機中の受信を保持しない。
+- 公式CodeMirror接続の[行別の本文の選択](https://github.com/loro-dev/loro-codemirror/blob/main/src/index.ts)、
+  [受信処理](https://github.com/loro-dev/loro-codemirror/blob/main/src/sync.ts)、
+  [Undo接続](https://github.com/loro-dev/loro-codemirror/blob/main/src/undo.ts)：次の試験条件の根拠。
 - APIとMIT表記は、今回固定したnpmパッケージの型定義・package.jsonとも照合した。
