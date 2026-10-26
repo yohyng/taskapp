@@ -7,6 +7,8 @@
 0.5.0からLoroの木・Undo・保存バイナリの意味も単体で比較する（[LORO.md](LORO.md)）。
 0.6.0では `/?engine=loro&doc=demo&input=bound&tree=1` で入力・端末保存・通信も比較する。
 経路と限界は [LORO-INTEGRATION.md](LORO-INTEGRATION.md) を参照。
+1万行の独立した測定は [PERFORMANCE.md](PERFORMANCE.md)、保守の分担は [OPERATIONS.md](OPERATIONS.md)、
+次の実装を絞る判断は [DIRECTION.md](DIRECTION.md) にまとめる。
 
 ## 起動
 
