@@ -62,6 +62,16 @@ SDKだけで木の意味が統合されるわけではない。
 LoroのネイティブなTreeは候補だが、未導入・未実行。既存バインディング、Undo、保存との接続も
 確かめてから判断する。追加依存が必要なら事前に相談する。
 
+次の小さい比較は、まず30行の木で相互移動・削除と編集・自分のUndoを、
+異なる順序と重複を含む更新交換で試す。独自の循環修復なしで全行がアクセスできることを条件にする。
+この段階が通ってからエディターと保存・通信を接続し、既存の入力試験と持ち替えの試験を使う。
+木だけ改善して入力や復帰が後退した候補は採用しない。
+
+Loro公式資料にはCodeMirror接続とローカルUndoがあるが、Task Spaceの枝ごとの入力へ
+そのまま使えるかはソース確認と試験が必要。保存もsnapshotを書くだけで完了とはしない。
+因果上の先行更新を待っている受信内容は通常のsnapshotに含まれないため、
+未適用の元データも失わず保存・再起動できるかを試験条件に入れる。
+
 ## 一次資料
 
 - [Yjsの共有型の制限](https://docs.yjs.dev/getting-started/working-with-shared-types)：
@@ -69,3 +79,6 @@ LoroのネイティブなTreeは候補だが、未導入・未実行。既存バ
 - [LoroのTree](https://www.loro.dev/docs/tutorial/tree)と
   [移動可能な木の説明](https://www.loro.dev/blog/movable-tree)：
   親IDの同期だけでは足りない論点と、専用の木の型の候補。Task Spaceでの動作確認とは区別する。
+- [CodeMirror接続](https://www.loro.dev/docs/tutorial/text#codemirror-binding)、
+  [ローカルUndo](https://www.loro.dev/docs/advanced/undo)、
+  [保存と未適用更新](https://www.loro.dev/docs/tutorial/persistence)：候補の接続点と保存試験の条件。

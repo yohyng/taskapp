@@ -40,7 +40,7 @@
 共通の表示データ：
 
 ```js
-{ id, parentId, order, text, favorite, completed }
+{ id, parentId, order, text, favorite, completed, deleted }
 ```
 
 共通の操作：
@@ -50,6 +50,9 @@ snapshot() → 表示用の行
 replaceText(id, value) → 通常入力の変更範囲を反映
 insertText(id, index, value) → 意図を固定した文字追加の試験
 setAttribute(id, key, value)
+moveBranch(id, parentId, order)
+setBranchDeleted(id, deleted)
+treeState() → 通常表示・削除済み・配置の診断（0.4.0から）
 undo() / redo()
 disconnect() / connect()
 localBarrier() → 今行ったローカル保存の確定を試験から待つ
