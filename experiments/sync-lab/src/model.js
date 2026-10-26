@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+import { compareRows } from './tree-model.js';
 
 // 初期データはサーバーで一度だけ作る。各端末で別々に作ると同じ内容が重複する。
 export function fixtureDocument(count = 30) {
@@ -9,8 +10,9 @@ export function fixtureDocument(count = 30) {
       const row = new Y.Map();
       rows.set(`row-${i}`, row);
       row.set('text', new Y.Text(i === 0 ? '最初のメモ' : `検証用の行 ${i}`));
-      row.set('parentId', i > 2 && i < 10 ? 'row-1' : null);
-      row.set('order', i);
+      // 移動先と順番はひとつの値にし、並行した移動で別々の操作の半分ずつを採らない。
+      row.set('placement', { parentId: i > 2 && i < 10 ? 'row-1' : null, order: i });
+      row.set('deleted', false);
       row.set('favorite', false);
       row.set('completed', false);
     }
@@ -19,10 +21,10 @@ export function fixtureDocument(count = 30) {
 }
 
 export function snapshot(doc) {
-  return [...doc.getMap('rows')].map(([id, row]) => ({
-    id, text: row.get('text').toString(), parentId: row.get('parentId'), order: row.get('order'),
-    favorite: row.get('favorite'), completed: row.get('completed'),
-  })).sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return [...doc.getMap('rows')].map(([id, row]) => {
+    const position = row.get('placement') || { parentId: row.get('parentId'), order: row.get('order') };
+    return { id, text: row.get('text').toString(), ...position, favorite: row.get('favorite'), completed: row.get('completed'), deleted: !!row.get('deleted') };
+  }).sort(compareRows);
 }
 
 // 全文を削除・再挿入すると文字の意図を失うので、変わった一続きの範囲だけを操作する。

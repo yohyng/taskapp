@@ -2,6 +2,7 @@ import * as Y from 'yjs';
 import { IndexeddbPersistence } from 'y-indexeddb';
 import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider';
 import { replaceText, snapshot } from './model.js';
+import { analyzeTree, movePlacement } from './tree-model.js';
 
 export async function createEngine({ docId, offline, onChange }) {
   const doc = new Y.Doc();
@@ -36,6 +37,18 @@ export async function createEngine({ docId, offline, onChange }) {
     textBinding: (id) => ({ text: doc.getMap('rows').get(id).get('text'), undoManager: undo }),
     inputState: (id) => ({ text: doc.getMap('rows').get(id).get('text').toString(), draft: false }),
     queued: () => provider.hasUnsyncedChanges,
+    treeState: () => analyzeTree(snapshot(doc)),
+    moveBranch(id, parentId, order) {
+      const target = movePlacement(snapshot(doc), id, parentId, order);
+      const row = doc.getMap('rows').get(id), before = row.get('placement');
+      if (before?.parentId === target.parentId && before?.order === target.order) return;
+      doc.transact(() => row.set('placement', target), origin);
+    },
+    setBranchDeleted(id, deleted) {
+      const row = doc.getMap('rows').get(id);
+      if (!row || typeof deleted !== 'boolean') throw new Error('枝の削除指定が不正です');
+      if (!!row.get('deleted') !== deleted) doc.transact(() => row.set('deleted', deleted), origin);
+    },
     replaceText: (id, value) => replaceText(doc, id, value, origin),
     insertText(id, index, value) { doc.transact(() => doc.getMap('rows').get(id).get('text').insert(index, value), origin); },
     setAttribute(id, key, value) {

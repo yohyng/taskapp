@@ -1,9 +1,10 @@
 import { PowerSyncDatabase, Schema, Table, column, WASQLiteVFS } from '@powersync/web';
+import { analyzeTree, movePlacement, placement } from './tree-model.js';
 
 const schema = new Schema({
   lab_rows: new Table({
     doc_id: column.text, node_id: column.text, text: column.text, parent_id: column.text,
-    sort_order: column.integer, favorite: column.integer, completed: column.integer,
+    sort_order: column.integer, favorite: column.integer, completed: column.integer, deleted: column.integer,
   }, { trackPrevious: { onlyWhenChanged: true }, trackMetadata: true, ignoreEmptyUpdates: true }),
   lab_input_drafts: new Table({ doc_id: column.text, node_id: column.text, base: column.text, text: column.text }, { localOnly: true }),
   lab_conflicts: new Table({
@@ -22,7 +23,7 @@ export async function createEngine({ docId, offline, onChange }) {
   const undoStack = [], redoStack = [], abort = new AbortController();
   async function refresh() {
     const data = await db.getAll('select * from lab_rows where doc_id=? order by sort_order,node_id', [docId]);
-    cache = data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed }));
+    cache = data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed, deleted: !!row.deleted }));
     conflicts = await db.getAll('select * from lab_conflicts where doc_id=? order by id', [docId]);
     drafts = await db.getAll('select * from lab_input_drafts where doc_id=?', [docId]);
     const queue = await db.getUploadQueueStats();
@@ -80,10 +81,32 @@ export async function createEngine({ docId, offline, onChange }) {
   async function undoOrRedo(from, to, undo) {
     const entry = from.at(-1);
     if (!entry) return;
+    if (entry.tree) {
+      const row = await db.get('select * from lab_rows where id=?', [`${docId}:${entry.id}`]);
+      const expected = undo ? entry.after : entry.before, target = undo ? entry.before : entry.after;
+      const now = entry.kind === 'tree-move' ? { parentId: row.parent_id, order: row.sort_order } : !!row.deleted;
+      if (JSON.stringify(now) !== JSON.stringify(expected)) throw new Error('別端末が変えた枝のUndoは未対応です');
+      await commitTree(entry.id, { kind: entry.kind, before: expected, after: target }, false);
+      from.pop(); to.push(entry); return;
+    }
     const row = await db.get('select * from lab_rows where id=?', [`${docId}:${entry.id}`]);
     if (row[entry.key] !== (undo ? entry.after : entry.before)) throw new Error('別端末が変更した本文のUndoには独自の統合処理が必要です');
     await change(entry.id, entry.key, undo ? entry.before : entry.after, false);
     from.pop(); to.push(entry);
+  }
+  async function commitTree(id, command, record = true) {
+    let changed = false;
+    await db.writeTransaction(async (tx) => {
+      const row = await tx.get('select * from lab_rows where id=?', [`${docId}:${id}`]);
+      // 受信が先に同じ結果へ進んでいれば、metadataだけの空の更新を送信待ちに作らない。
+      if (command.kind === 'tree-move' ? row.parent_id === command.after.parentId && row.sort_order === command.after.order : !!row.deleted === command.after) return;
+      if (command.kind === 'tree-move') {
+        await tx.execute('update lab_rows set parent_id=?,sort_order=?,_metadata=? where id=?', [command.after.parentId, command.after.order, JSON.stringify(command), `${docId}:${id}`]);
+      } else await tx.execute('update lab_rows set deleted=?,_metadata=? where id=?', [Number(command.after), JSON.stringify(command), `${docId}:${id}`]);
+      changed = true;
+    });
+    if (changed && record) { undoStack.push({ tree: true, id, ...command }); redoStack.length = 0; }
+    await refresh();
   }
   await refresh();
   if (!offline) await db.connect(connector);
@@ -91,6 +114,19 @@ export async function createEngine({ docId, offline, onChange }) {
     snapshot: () => cache,
     queued: async () => (await db.getUploadQueueStats()).count > 0,
     conflicts: () => conflicts,
+    treeState: () => analyzeTree(cache),
+    moveBranch(id, parentId, order, observedBefore) {
+      const row = cache.find((item) => item.id === id);
+      const after = movePlacement(cache, id, parentId, order), before = observedBefore || placement(row);
+      if (JSON.stringify(before) === JSON.stringify(after)) return Promise.resolve();
+      return enqueue(() => commitTree(id, { kind: 'tree-move', before, after }));
+    },
+    setBranchDeleted(id, deleted) {
+      const row = cache.find((item) => item.id === id);
+      if (!row || typeof deleted !== 'boolean') throw new Error('枝の削除指定が不正です');
+      if (row.deleted === deleted) return Promise.resolve();
+      return enqueue(() => commitTree(id, { kind: 'tree-delete', before: row.deleted, after: deleted }));
+    },
     inputState: (id) => {
       const draft = drafts.find((row) => row.node_id === id);
       return draft ? { text: draft.text, base: draft.base, draft: true } : { text: cache.find((row) => row.id === id)?.text, draft: false };

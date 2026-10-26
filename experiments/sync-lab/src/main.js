@@ -3,10 +3,12 @@ const engineName = params.get('engine') === 'powersync' ? 'powersync' : 'yjs';
 const { createEngine } = await import(`./${engineName}-engine.js`);
 const bound = params.get('input') === 'bound';
 const { createBoundEditor } = bound ? await import('./bound-editor.js') : {};
+const tree = params.get('tree') === '1';
+const { createTreeUI } = tree ? await import('./tree-view.js') : {};
 const id = params.get('doc') || 'demo';
 const elements = new Map();
 const editors = new Map();
-let engine, initial;
+let engine, initial, treeUI;
 function render(state) {
   if (!engine) { initial = state; return; }
   const { rows, connected, queued, conflicts = [] } = state;
@@ -36,6 +38,7 @@ function render(state) {
       }
       elements.set(row.id, el);
       document.querySelector('#rows').append(el);
+      treeUI?.mount(el, row);
     }
     const input = el.querySelector('textarea');
     if (bound) editors.get(row.id).update();
@@ -46,11 +49,13 @@ function render(state) {
     }
     for (const key of ['favorite', 'completed']) el.querySelector(`[data-attribute="${key}"]`).checked = row[key];
   }
+  treeUI?.update(rows);
 }
 try {
   engine = await createEngine({ docId: id, offline: params.get('offline') === '1', onChange: render });
   window.lab = engine;
   window.labInput = { text: (id) => editors.get(id)?.text() };
+  if (tree) treeUI = createTreeUI({ container: document.querySelector('#rows'), engine, onError: (error) => { document.querySelector('#error').textContent = error.message; } });
   render(initial);
   document.querySelector('[data-disconnect]').onclick = () => engine.disconnect();
   document.querySelector('[data-connect]').onclick = () => engine.connect();

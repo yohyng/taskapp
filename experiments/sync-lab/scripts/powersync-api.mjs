@@ -1,6 +1,7 @@
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import pg from 'pg';
 import { mergeObservedFields } from './field-merge.mjs';
+import { mergeTreeCommand } from '../src/tree-model.js';
 
 const validDoc = (value) => /^[a-zA-Z0-9_-]{1,120}$/.test(value);
 export async function powerSyncApi() {
@@ -42,20 +43,30 @@ export async function powerSyncApi() {
     const client = await pool.connect();
     try {
       await client.query('begin');
-      await client.query('select pg_advisory_xact_lock(hashtext($1))', [operationId]);
+      await client.query('select pg_advisory_xact_lock(731001,hashtext($1))', [operationId]);
       const old = (await client.query('select request_hash,result from lab_operations where id=$1', [operationId])).rows[0];
       if (old) {
         if (old.request_hash !== hash) throw new Error('同じ操作IDの内容が違います');
         await client.query('commit'); return old.result;
       }
-      let conflictCount = 0, operationDoc = null;
+      const first = (await client.query('select doc_id from lab_rows where id=$1', [entries[0].id])).rows[0];
+      if (!first) throw new Error('行がありません');
+      // 別々の行を動かす要求も同じ木として直列化し、循環の検査と反映を同じ取引に置く。
+      await client.query('select pg_advisory_xact_lock(731002,hashtext($1))', [first.doc_id]);
+      let conflictCount = 0, operationDoc = first.doc_id;
       for (const [index, entry] of entries.entries()) {
         if (entry.table !== 'lab_rows' || entry.op !== 'PATCH' || !entry.opData || !entry.previousValues) throw new Error('実験では既存行の列更新だけを受け付けます');
         const current = (await client.query('select * from lab_rows where id=$1 for update', [entry.id])).rows[0];
         if (!current) throw new Error('行がありません');
         if (operationDoc !== null && operationDoc !== current.doc_id) throw new Error('実験では複数文書を一括更新できません');
         operationDoc = current.doc_id;
-        const { changes, conflicts } = mergeObservedFields(current, entry.opData, entry.previousValues, entry.metadata);
+        const command = entry.metadata == null ? null : JSON.parse(entry.metadata);
+        let result;
+        if (command?.kind === 'tree-move' || command?.kind === 'tree-delete') {
+          const treeRows = (await client.query('select node_id,parent_id,sort_order,deleted from lab_rows where doc_id=$1', [operationDoc])).rows.map((row) => ({ id: row.node_id, parentId: row.parent_id, order: row.sort_order, deleted: !!row.deleted }));
+          result = mergeTreeCommand(treeRows, current.node_id, command, entry.opData);
+        } else result = mergeObservedFields(current, entry.opData, entry.previousValues, entry.metadata);
+        const { changes, conflicts } = result;
         const keys = Object.keys(changes);
         if (keys.length) await client.query(`update lab_rows set ${keys.map((key, i) => `${key}=$${i + 2}`).join(',')} where id=$1`, [entry.id, ...keys.map((key) => changes[key])]);
         for (const conflict of conflicts) {
@@ -87,7 +98,7 @@ export async function powerSyncApi() {
           const data = (await pool.query('select * from lab_rows where doc_id=$1 order by sort_order,node_id', [doc])).rows;
           const conflicts = (await pool.query('select * from lab_conflicts where doc_id=$1 order by id', [doc])).rows;
           const changes = Number((await pool.query('select count(*) as n from lab_operations where doc_id=$1', [doc])).rows[0].n);
-          result = { rows: data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed })), conflicts, changes, bytes: Buffer.byteLength(JSON.stringify(data)) };
+          result = { rows: data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed, deleted: !!row.deleted })), conflicts, changes, bytes: Buffer.byteLength(JSON.stringify(data)) };
         } else if (url.pathname.endsWith('/upload') && request.method === 'POST') {
           const chunks = []; let size = 0;
           for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) throw new Error('送信量が大きすぎます'); chunks.push(chunk); }

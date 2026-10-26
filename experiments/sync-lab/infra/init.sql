@@ -3,7 +3,7 @@ CREATE TABLE lab_documents(id text PRIMARY KEY);
 CREATE TABLE lab_rows (
   id text PRIMARY KEY, doc_id text NOT NULL, node_id text NOT NULL,
   text text NOT NULL, parent_id text, sort_order integer NOT NULL,
-  favorite integer NOT NULL, completed integer NOT NULL
+  favorite integer NOT NULL, completed integer NOT NULL, deleted integer NOT NULL DEFAULT 0
 );
 CREATE TABLE lab_conflicts (
   id text PRIMARY KEY, doc_id text NOT NULL, node_id text NOT NULL,
