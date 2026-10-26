@@ -13,3 +13,11 @@ export function mergeFields(current, data, previous) {
   }
   return { changes, conflicts };
 }
+
+// SQLiteが先に受信していても、編集画面が見ていた基準へ勝手に進めない。
+export function mergeObservedFields(current, data, previous, metadata) {
+  if (metadata == null) return mergeFields(current, data, previous);
+  const observed = JSON.parse(metadata);
+  if (observed.kind !== 'text-input' || typeof observed.base !== 'string' || !Object.hasOwn(data, 'text')) throw new Error('本文入力の基準が不正です');
+  return mergeFields(current, data, { ...previous, text: observed.base });
+}

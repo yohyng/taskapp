@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - 'experiments/sync-lab/**'
+      - '!experiments/sync-lab/**/*.md'
       - '.github/workflows/sync-lab.yml'
 permissions:
   contents: read
@@ -32,7 +33,7 @@ jobs:
       - name: 列の統合と三端末の動作を比較
         run: |
           pnpm test:unit
-          pnpm test --reporter=line,json > test-output.log 2>&1
+          pnpm test --max-failures=2 --reporter=line,json > test-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: comparison-results.json
       - name: 試験結果を出力

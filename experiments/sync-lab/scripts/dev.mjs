@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
@@ -7,6 +7,7 @@ import { Database } from '@hocuspocus/extension-database';
 import * as Y from 'yjs';
 import { fixtureDocument, snapshot } from '../src/model.js';
 import { powerSyncApi } from './powersync-api.mjs';
+import { replaceFile } from './replace-file.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const dataPath = fileURLToPath(new URL('../.data/', import.meta.url));
@@ -19,7 +20,7 @@ function storageFile(name) {
 async function store(name, data) {
   const file = storageFile(name), temporary = `${file}.${randomUUID()}.tmp`;
   await writeFile(temporary, data);
-  await rename(temporary, file);
+  await replaceFile(temporary, file);
 }
 const metrics = (name) => {
   if (!names.has(name)) names.set(name, { changes: 0, stores: 0 });

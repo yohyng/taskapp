@@ -4,7 +4,8 @@ const schema = new Schema({
   lab_rows: new Table({
     doc_id: column.text, node_id: column.text, text: column.text, parent_id: column.text,
     sort_order: column.integer, favorite: column.integer, completed: column.integer,
-  }, { trackPrevious: { onlyWhenChanged: true }, ignoreEmptyUpdates: true }),
+  }, { trackPrevious: { onlyWhenChanged: true }, trackMetadata: true, ignoreEmptyUpdates: true }),
+  lab_input_drafts: new Table({ doc_id: column.text, node_id: column.text, base: column.text, text: column.text }, { localOnly: true }),
   lab_conflicts: new Table({
     doc_id: column.text, node_id: column.text, field: column.text,
     mine: column.text, theirs: column.text, operation_id: column.text,
@@ -17,12 +18,13 @@ export async function createEngine({ docId, offline, onChange }) {
     vfs: WASQLiteVFS.IDBBatchAtomicVFS, enableMultiTabs: false,
   } });
   await db.init();
-  let cache = [], conflicts = [], pending = Promise.resolve();
+  let cache = [], conflicts = [], drafts = [], pending = Promise.resolve();
   const undoStack = [], redoStack = [], abort = new AbortController();
   async function refresh() {
     const data = await db.getAll('select * from lab_rows where doc_id=? order by sort_order,node_id', [docId]);
     cache = data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed }));
     conflicts = await db.getAll('select * from lab_conflicts where doc_id=? order by id', [docId]);
+    drafts = await db.getAll('select * from lab_input_drafts where doc_id=?', [docId]);
     const queue = await db.getUploadQueueStats();
     onChange?.({ rows: cache, conflicts, connected: db.currentStatus.connected, queued: queue.count > 0 });
   }
@@ -37,7 +39,7 @@ export async function createEngine({ docId, offline, onChange }) {
       if (!transaction) return;
       const entries = transaction.crud.map((entry) => ({
         id: entry.id, clientId: entry.clientId, table: entry.table, op: entry.op,
-        opData: entry.opData, previousValues: entry.previousValues,
+        opData: entry.opData, previousValues: entry.previousValues, metadata: entry.metadata,
       }));
       const response = await fetch('/lab/powersync/upload', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -51,7 +53,7 @@ export async function createEngine({ docId, offline, onChange }) {
   };
   const listener = db.registerListener({ statusChanged: () => { refresh().catch(showError); } });
   function showError(error) { document.querySelector('#error').textContent = `検証エラー：${error.message}`; }
-  for (const table of ['lab_rows', 'lab_conflicts']) {
+  for (const table of ['lab_rows', 'lab_conflicts', 'lab_input_drafts']) {
     db.watch(`select * from ${table} where doc_id=?`, [docId], { onResult: () => { refresh().catch(showError); }, onError: showError }, { signal: abort.signal });
   }
   function enqueue(operation) {
@@ -59,15 +61,18 @@ export async function createEngine({ docId, offline, onChange }) {
     pending = task.catch(showError);
     return task;
   }
-  async function change(id, key, value, record = true) {
+  async function change(id, key, value, record = true, observedBase, clearDraft = false) {
     if (!['text', 'favorite', 'completed'].includes(key)) throw new Error('検証対象外の属性です');
     const stored = key === 'text' ? value : Number(value);
     let entry;
     await db.writeTransaction(async (tx) => {
       const row = await tx.get('select * from lab_rows where id=?', [`${docId}:${id}`]);
+      if (clearDraft) await tx.execute('delete from lab_input_drafts where id=?', [`${docId}:${id}`]);
       if (row[key] === stored) return;
       entry = { id, key, before: row[key], after: stored };
-      await tx.execute(`update lab_rows set ${key}=? where id=?`, [stored, `${docId}:${id}`]);
+      if (key === 'text' && observedBase !== undefined) {
+        await tx.execute('update lab_rows set text=?,_metadata=? where id=?', [stored, JSON.stringify({ kind: 'text-input', base: observedBase }), `${docId}:${id}`]);
+      } else await tx.execute(`update lab_rows set ${key}=?,_metadata=null where id=?`, [stored, `${docId}:${id}`]);
     });
     if (entry && record) { undoStack.push(entry); redoStack.length = 0; }
     await refresh();
@@ -86,6 +91,19 @@ export async function createEngine({ docId, offline, onChange }) {
     snapshot: () => cache,
     queued: async () => (await db.getUploadQueueStats()).count > 0,
     conflicts: () => conflicts,
+    inputState: (id) => {
+      const draft = drafts.find((row) => row.node_id === id);
+      return draft ? { text: draft.text, base: draft.base, draft: true } : { text: cache.find((row) => row.id === id)?.text, draft: false };
+    },
+    replaceObservedText: (id, base, value) => enqueue(() => change(id, 'text', value, true, base, true)),
+    saveInputDraft: (id, base, value) => enqueue(async () => {
+      await db.execute('insert or replace into lab_input_drafts(id,doc_id,node_id,base,text) values(?,?,?,?,?)', [`${docId}:${id}`, docId, id, base, value]);
+      await refresh();
+    }),
+    clearInputDraft: (id) => enqueue(async () => {
+      await db.execute('delete from lab_input_drafts where id=?', [`${docId}:${id}`]);
+      await refresh();
+    }),
     replaceText: (id, value) => enqueue(() => change(id, 'text', value)),
     insertText: (id, index, value) => enqueue(async () => {
       const row = await db.get('select text from lab_rows where id=?', [`${docId}:${id}`]);

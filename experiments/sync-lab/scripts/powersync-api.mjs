@@ -1,6 +1,6 @@
 import { generateKeyPairSync, createHash, sign } from 'node:crypto';
 import pg from 'pg';
-import { mergeFields } from './field-merge.mjs';
+import { mergeObservedFields } from './field-merge.mjs';
 
 const validDoc = (value) => /^[a-zA-Z0-9_-]{1,120}$/.test(value);
 export async function powerSyncApi() {
@@ -55,7 +55,7 @@ export async function powerSyncApi() {
         if (!current) throw new Error('行がありません');
         if (operationDoc !== null && operationDoc !== current.doc_id) throw new Error('実験では複数文書を一括更新できません');
         operationDoc = current.doc_id;
-        const { changes, conflicts } = mergeFields(current, entry.opData, entry.previousValues);
+        const { changes, conflicts } = mergeObservedFields(current, entry.opData, entry.previousValues, entry.metadata);
         const keys = Object.keys(changes);
         if (keys.length) await client.query(`update lab_rows set ${keys.map((key, i) => `${key}=$${i + 2}`).join(',')} where id=$1`, [entry.id, ...keys.map((key) => changes[key])]);
         for (const conflict of conflicts) {

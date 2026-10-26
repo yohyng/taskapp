@@ -33,6 +33,8 @@ export async function createEngine({ docId, offline, onChange }) {
   changed();
   return {
     snapshot: () => snapshot(doc), localBarrier,
+    textBinding: (id) => ({ text: doc.getMap('rows').get(id).get('text'), undoManager: undo }),
+    inputState: (id) => ({ text: doc.getMap('rows').get(id).get('text').toString(), draft: false }),
     queued: () => provider.hasUnsyncedChanges,
     replaceText: (id, value) => replaceText(doc, id, value, origin),
     insertText(id, index, value) { doc.transact(() => doc.getMap('rows').get(id).get('text').insert(index, value), origin); },

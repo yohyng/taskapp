@@ -1,10 +1,15 @@
 const params = new URLSearchParams(location.search);
 const engineName = params.get('engine') === 'powersync' ? 'powersync' : 'yjs';
 const { createEngine } = await import(`./${engineName}-engine.js`);
+const bound = params.get('input') === 'bound';
+const { createBoundEditor } = bound ? await import('./bound-editor.js') : {};
 const id = params.get('doc') || 'demo';
 const elements = new Map();
-let engine;
-function render({ rows, connected, queued, conflicts = [] }) {
+const editors = new Map();
+let engine, initial;
+function render(state) {
+  if (!engine) { initial = state; return; }
+  const { rows, connected, queued, conflicts = [] } = state;
   document.querySelector('[data-status]').textContent = `${connected ? '接続中' : '圏外・再接続待ち'} / ${rows.length}行 / ${queued ? '送信確認待ち' : '通信上の未確認なし'}（文書：${id}）`;
   document.querySelector('[data-conflicts]').textContent = conflicts.length ? `両方を保全した変更：${JSON.stringify(conflicts.map(({ node_id, field, mine, theirs }) => ({ node_id, field, mine, theirs })))}` : '';
   for (const row of rows) {
@@ -12,6 +17,8 @@ function render({ rows, connected, queued, conflicts = [] }) {
     if (!el) {
       el = document.createElement('article');
       el.dataset.row = row.id;
+      if (bound) editors.set(row.id, createBoundEditor({ parent: el, id: row.id, engine, onError: (error) => { document.querySelector('#error').textContent = error.message; } }));
+      else {
       const text = document.createElement('textarea');
       text.setAttribute('aria-label', `${row.id}の本文`);
       text.rows = 2;
@@ -20,6 +27,7 @@ function render({ rows, connected, queued, conflicts = [] }) {
       text.addEventListener('compositionend', () => { delete text.dataset.composing; engine.replaceText(row.id, text.value); });
       text.addEventListener('input', () => { if (!text.dataset.composing) engine.replaceText(row.id, text.value); });
       el.append(text);
+      }
       for (const [key, title] of [['favorite', '★'], ['completed', '完了']]) {
         const label = document.createElement('label'), input = document.createElement('input');
         input.type = 'checkbox'; input.dataset.attribute = key;
@@ -30,7 +38,8 @@ function render({ rows, connected, queued, conflicts = [] }) {
       document.querySelector('#rows').append(el);
     }
     const input = el.querySelector('textarea');
-    if (!input.dataset.composing && input.value !== row.text) {
+    if (bound) editors.get(row.id).update();
+    else if (!input.dataset.composing && input.value !== row.text) {
       const start = input.selectionStart, end = input.selectionEnd;
       input.value = row.text;
       if (document.activeElement === input) input.setSelectionRange(Math.min(start, row.text.length), Math.min(end, row.text.length));
@@ -41,6 +50,8 @@ function render({ rows, connected, queued, conflicts = [] }) {
 try {
   engine = await createEngine({ docId: id, offline: params.get('offline') === '1', onChange: render });
   window.lab = engine;
+  window.labInput = { text: (id) => editors.get(id)?.text() };
+  render(initial);
   document.querySelector('[data-disconnect]').onclick = () => engine.disconnect();
   document.querySelector('[data-connect]').onclick = () => engine.connect();
   document.querySelector('[data-undo]').onclick = () => engine.undo();
