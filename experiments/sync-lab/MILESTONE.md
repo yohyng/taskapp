@@ -48,6 +48,10 @@ Loroの実験用HTTP交換を、そのまま製品の同期サーバーとして
 まとめ直しは保存済みの番号と世代に限る（[PERSISTENCE.md](PERSISTENCE.md)）。
 試験結果は [RESULTS.md](RESULTS.md) を正とし、次は初回snapshot配信へ進む。本番へはまだ移さない。
 
+0.10.0では空の端末の初回をsnapshot配信へ変え、既存端末は差分交換を続ける。
+前提待ちの受信を含む端末保存と、まとめ直し前の圏外起動も確認する（[BOOTSTRAP.md](BOOTSTRAP.md)）。
+結果を確認した後、既存Protocolの永続化保証・複数窓・PWAを含む製品向け経路へ進む。本番へはまだ移さない。
+
 ## 次の区切り：本番へ安全に移せること
 
 - PC Chrome PWA / iPad PWA / Android PWAで、休止から復帰・圏外起動・日本語入力・持ち替え。

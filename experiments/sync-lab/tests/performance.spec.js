@@ -51,11 +51,14 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
     try {
       await a.goto(pathFor(engine)); await ready(a); await confirmed(a);
       const coldA = await a.evaluate(() => window.bench.metrics);
+      const transferA = await a.evaluate(() => window.bench.engine.transferStats?.());
       const before = await a.evaluate(() => window.bench.engine.serverState());
       intact(before.rows, engine);
       const beforeFavorite = before.rows.find((row) => row.id === 'row-1').favorite;
       await b.goto(pathFor(engine)); await ready(b); await confirmed(b);
       const coldB = await b.evaluate(() => window.bench.metrics);
+      const transferB = await b.evaluate(() => window.bench.engine.transferStats?.());
+      if (engine === 'loro') { expect(transferA.snapshots).toBe(1); expect(transferB.snapshots).toBe(1); }
       expect(digest(await snapshot(a))).toBe(digest(before.rows));
       expect(digest(await snapshot(b))).toBe(digest(before.rows));
       expect((await a.evaluate(() => window.bench.engine.serverState())).changes).toBe(before.changes);
@@ -81,10 +84,18 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
         expect(projectionAfter.incrementalRowReads - projectionBefore.incrementalRowReads).toBe(3);
         expect(persistenceAfter.appendedUpdates - persistenceBefore.appendedUpdates).toBe(3);
         expect(persistenceAfter.appendedBytes - persistenceBefore.appendedBytes).toBeLessThan(3 * 1024);
-        // 全体へのまとめ直しと、残った差分からの再起動も一万行で確認する。
-        await a.evaluate(async () => { await window.bench.engine.compactLocal(); window.bench.savedPersistence = window.bench.engine.persistenceStats(); });
       }
-      const persistenceCompacted = await a.evaluate(() => window.bench.savedPersistence);
+      let warmUncompacted, persistenceCompacted;
+      if (engine === 'loro') {
+        // 先にまとめ直して起動の遅さを隠さない。受信snapshotと差分だけからの自然な再起動も測る。
+        await a.evaluate(() => window.bench.engine.disconnect());
+        await a.goto(pathFor(engine, true)); await ready(a);
+        warmUncompacted = await a.evaluate(() => window.bench.metrics);
+        expect(digest(await snapshot(a))).toBe(digest(await snapshot(b)));
+        expect(await a.evaluate(() => window.bench.engine.transferStats().snapshots)).toBe(0);
+        await a.evaluate(() => window.bench.engine.compactLocal());
+        persistenceCompacted = await a.evaluate(() => window.bench.engine.persistenceStats());
+      }
       await a.evaluate(() => window.bench.engine.disconnect());
       await a.goto(pathFor(engine, true)); await ready(a);
       const warm = await a.evaluate(() => window.bench.metrics);
@@ -110,7 +121,7 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       expect(final.rows.find((row) => row.id === 'row-1').favorite).toBe(!beforeFavorite);
       await expect(a.locator('[data-error]')).toBeEmpty(); await expect(b.locator('[data-error]')).toBeEmpty();
       expect(errors).toEqual([]);
-      result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes, projectionBefore, projectionAfter, persistenceBefore, persistenceAfter, persistenceCompacted });
+      result.samples.push({ trial, coldA, coldB, transferA, transferB, warmUncompacted, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes, projectionBefore, projectionAfter, persistenceBefore, persistenceAfter, persistenceCompacted });
       console.log(`BENCH_TRIAL ${engine}/${info.project.name}/${trial} 全行一致 ${JSON.stringify(result.samples.at(-1))}`);
       if (engine === 'loro' && trial === 2) {
         await a.evaluate(() => window.bench.engine.disconnect()); await b.evaluate(() => window.bench.engine.disconnect());

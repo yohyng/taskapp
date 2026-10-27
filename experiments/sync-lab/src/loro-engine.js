@@ -4,6 +4,7 @@ import { createLoroProjection } from './loro-projection.js';
 import { openLoroStorage } from './loro-storage.js';
 import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
+import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
 
 export async function createEngine({ docId, offline, onChange }) {
   const storage = await openLoroStorage(docId);
@@ -14,6 +15,7 @@ export async function createEngine({ docId, offline, onChange }) {
   let journalCount = saved.updates.length, journalBytes = saved.updates.reduce((total, entry) => total + entry.bytes.length, 0);
   let compacting, compactTimer, closing = false, compactionFailures = 0;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false;
+  const transfers = { snapshots: 0, updates: 0, receivedBytes: 0 };
   const projection = createLoroProjection(doc), selections = new Map();
   const node = projection.node, snapshot = projection.snapshot;
   const notify = () => {
@@ -77,19 +79,24 @@ export async function createEngine({ docId, offline, onChange }) {
       await barrier();
       if (!enabled || fatal) return;
       const batch = outbox.slice();
+      const request = loroSyncRequest(doc, batch);
       controller = new AbortController();
       const response = await fetch(`/lab/loro/sync?doc=${encodeURIComponent(docId)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ version: [...doc.oplogVersion().encode()], updates: batch.map((entry) => [...entry.bytes]) }),
+        body: JSON.stringify(request),
       });
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json();
       if (!enabled) return;
+      const received = decodeLoroTransfer(result, request.bootstrap);
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
-      const received = Uint8Array.from(result.update); doc.import(received);
+      // 単独snapshotのimportを使い、空の文書へ全履歴を一操作ずつ再生する経路を避ける。
+      for (const bytes of received.updates) doc.import(bytes);
       outbox.splice(0, batch.length);
       const changed = JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting;
-      if (batch.length || changed) await persist({ updates: changed ? [received] : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
+      if (batch.length || changed) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
+      transfers[received.mode === 'snapshot' ? 'snapshots' : 'updates']++;
+      transfers.receivedBytes += received.updates.reduce((total, bytes) => total + bytes.length, 0);
       connected = true; notify();
     } catch (error) { connected = false; notify(); }
   }
@@ -116,6 +123,7 @@ export async function createEngine({ docId, offline, onChange }) {
     nativeIds: projection.nativeIds,
     projectionStats: projection.stats,
     persistenceStats: () => ({ ...storage.stats(), journalCount, journalBytes, compactionFailures }),
+    transferStats: () => ({ ...transfers }),
     compactLocal,
     loroBinding(id) {
       const text = node(id).data.get('text'), origin = `入力:${id}:${crypto.randomUUID()}`;

@@ -4,6 +4,7 @@ import { VersionVector } from 'loro-crdt';
 import { fixtureLoroDocument, loroCheckpoint, restoreLoroCheckpoint, loroViewRows } from '../src/loro-model.js';
 import { replaceFile } from './replace-file.mjs';
 import { fixtureSize } from './fixture-size.mjs';
+import { exportLoroTransfer } from '../src/loro-transfer.js';
 
 // 比較用HTTP交換。製品の認証・配信・障害対応を備えた同期サービスではない。
 export async function loroApi(directory) {
@@ -47,6 +48,7 @@ export async function loroApi(directory) {
           for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) throw new Error('検証の送信上限を超えました'); chunks.push(chunk); }
           body = JSON.parse(Buffer.concat(chunks).toString());
           if (!Array.isArray(body.version) || !Array.isArray(body.updates) || body.updates.length > 1000) throw new Error('更新が不正です');
+          if (body.bootstrap !== undefined && typeof body.bootstrap !== 'boolean') throw new Error('初回文書の要求が不正です');
         } else if (!url.pathname.endsWith('/server-state') || request.method !== 'GET') { response.statusCode = 404; response.end('{}'); return; }
         const result = await exclusive(id, async () => {
           // 毎回永続ストアから候補を作る。保存失敗後のメモリーを、再送時に保存済みと誤認しない。
@@ -56,11 +58,12 @@ export async function loroApi(directory) {
             if (body) {
               const from = VersionVector.decode(Uint8Array.from(body.version));
               try {
+                if (body.bootstrap && (from.length() !== 0 || body.updates.length !== 0)) throw new Error('既存の編集を初回文書の要求へ混ぜられません');
                 const before = version(doc), waiting = pending(doc);
                 for (const bytes of body.updates) doc.import(Uint8Array.from(bytes));
-                const update = [...doc.export({ mode: 'update', from })];
+                const transfer = exportLoroTransfer(doc, from, body.bootstrap === true);
                 if (version(doc) !== before || pending(doc) !== waiting) { await store(id, doc); count.changes++; }
-                return { update };
+                return transfer;
               } finally { from.free(); }
             }
             const saved = loroCheckpoint(doc);
