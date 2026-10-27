@@ -145,6 +145,27 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
           return measurements;
         });
         expect(result.encodingImport.every((sample) => sample.allRowsMatch)).toBe(true);
+        result.initialImportComparison = await a.evaluate(async () => {
+          const { LoroDoc, UndoManager } = await import('/src/loro-runtime.js');
+          const { loroViewRows } = await import('/src/loro-model.js');
+          const { createLoroProjection } = await import('/src/loro-projection.js');
+          const bytes = window.bench.engine.loroBinding('row-0').rawSource.export({ mode: 'snapshot' });
+          const expected = JSON.stringify(window.bench.engine.snapshot()), measurements = [];
+          // 同じsnapshotの取り込みを分離する。監視を先に付けると全ノードの差分通知が必要になる。
+          for (const mode of ['plain', 'handle', 'observe', 'undo', 'projection']) {
+            const doc = new LoroDoc(); let stop, undo, projection;
+            if (mode === 'handle' || mode === 'projection') projection = createLoroProjection(doc);
+            if (mode === 'observe') stop = doc.subscribe(() => {});
+            if (mode === 'undo') undo = new UndoManager(doc);
+            if (mode === 'projection') stop = doc.subscribe(projection.apply);
+            try {
+              const begin = performance.now(); doc.import(bytes); const importMs = performance.now() - begin;
+              measurements.push({ mode, importMs, allRowsMatch: JSON.stringify(loroViewRows(doc)) === expected });
+            } finally { stop?.(); undo?.free(); doc.free(); }
+          }
+          return measurements;
+        });
+        expect(result.initialImportComparison.every((sample) => sample.allRowsMatch)).toBe(true);
         result.projectionComparison = await a.evaluate(async () => {
           const { LoroDoc } = await import('/src/loro-runtime.js');
           const { loroNode, loroViewRows } = await import('/src/loro-model.js');

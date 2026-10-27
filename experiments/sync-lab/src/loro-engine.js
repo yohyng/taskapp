@@ -16,9 +16,10 @@ export async function createEngine({ docId, offline, onChange }) {
   let compacting, compactTimer, closing = false, compactionFailures = 0;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false;
   const transfers = { snapshots: 0, updates: 0, receivedBytes: 0 };
-  const projection = createLoroProjection(doc), selections = new Map();
-  const node = projection.node, snapshot = projection.snapshot;
+  let projection, undo, stopLocal, stop;
+  const selections = new Map(), node = (id) => projection.node(id), snapshot = () => projection.snapshot();
   const notify = () => {
+    if (!projection) return;
     const state = { rows: snapshot(), connected, queued: !!fatal || saves > 0 || outbox.length > 0 };
     // 通信・保存の状態だけが変わる通知は同じ行配列を使い、全文JSONを毎回作らない。
     if (lastNotification?.rows === state.rows && lastNotification.connected === state.connected && lastNotification.queued === state.queued) return;
@@ -55,18 +56,22 @@ export async function createEngine({ docId, offline, onChange }) {
     saving.catch(() => {});
     return saving;
   }
-  const undo = new UndoManager(doc, {
-    mergeInterval: 0,
-    onPush: () => ({ value: selectionForHistory ? { id: selectionForHistory.id } : null, cursors: selectionForHistory?.cursors || [] }),
-    onPop: (_isUndo, entry) => {
-      if (entry.value?.id) queueMicrotask(() => selections.get(entry.value.id)?.restore(entry.cursors));
-    },
-  });
-  const stopLocal = doc.subscribeLocalUpdates((bytes) => {
-    const entry = { id: crypto.randomUUID(), bytes: bytes.slice() };
-    outbox.push(entry); persist({ updates: [entry.bytes], outgoing: [entry], acknowledged: [] });
-  });
-  const stop = doc.subscribe((event) => { projection.apply(event); notify(); });
+  function observe() {
+    projection = createLoroProjection(doc);
+    undo = new UndoManager(doc, {
+      mergeInterval: 0,
+      onPush: () => ({ value: selectionForHistory ? { id: selectionForHistory.id } : null, cursors: selectionForHistory?.cursors || [] }),
+      onPop: (_isUndo, entry) => {
+        if (entry.value?.id) queueMicrotask(() => selections.get(entry.value.id)?.restore(entry.cursors));
+      },
+    });
+    stopLocal = doc.subscribeLocalUpdates((bytes) => {
+      const entry = { id: crypto.randomUUID(), bytes: bytes.slice() };
+      outbox.push(entry); persist({ updates: [entry.bytes], outgoing: [entry], acknowledged: [] });
+    });
+    stop = doc.subscribe((event) => { projection.apply(event); notify(); });
+  }
+  function unobserve() { stop?.(); stopLocal?.(); undo?.free(); }
   function local(action) { if (fatal) throw fatal; selectionForHistory = null; action(); doc.commit({ origin: '操作' }); }
   async function barrier() {
     // 待機中に次の保存が追加された場合も確定を待つ。最初のPromiseだけでは後の編集を先に送ってしまう。
@@ -91,7 +96,10 @@ export async function createEngine({ docId, offline, onChange }) {
       const received = decodeLoroTransfer(result, request.bootstrap);
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
       // 単独snapshotのimportを使い、空の文書へ全履歴を一操作ずつ再生する経路を避ける。
-      for (const bytes of received.updates) doc.import(bytes);
+      // 初回失敗後の再取得も、空の原本に限り購読を外す。既存の編集やUndoがあれば保持する。
+      const restart = projection && received.mode === 'snapshot' && loroSyncRequest(doc, outbox).bootstrap;
+      if (restart) unobserve();
+      try { for (const bytes of received.updates) doc.import(bytes); } finally { if (restart) observe(); }
       outbox.splice(0, batch.length);
       const changed = JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting;
       if (batch.length || changed) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
@@ -115,13 +123,18 @@ export async function createEngine({ docId, offline, onChange }) {
     selectionForHistory = current?.capture() || null;
     return redo ? undo.redo() : undo.undo();
   }
-  notify(); scheduleCompaction(); if (!offline) await connect();
+  // 空の文書を先に購読すると、snapshotでも全ノードの差分通知を作ってしまう。
+  // 初回は保存まで終えてから表示とUndoを接続し、履歴のある端末は従来どおり先に表示する。
+  const cold = !offline && loroSyncRequest(doc, outbox).bootstrap;
+  if (!cold) { observe(); notify(); }
+  scheduleCompaction(); if (!offline) await connect();
+  if (cold) observe(); notify();
   return {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),
-    nativeIds: projection.nativeIds,
-    projectionStats: projection.stats,
+    nativeIds: () => projection.nativeIds(),
+    projectionStats: () => projection.stats(),
     persistenceStats: () => ({ ...storage.stats(), journalCount, journalBytes, compactionFailures }),
     transferStats: () => ({ ...transfers }),
     compactLocal,
@@ -170,6 +183,6 @@ export async function createEngine({ docId, offline, onChange }) {
       if (!response.ok) throw new Error('検証用の保存内容を確認できません');
       return response.json();
     },
-    async dispose() { closing = true; clearTimeout(compactTimer); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); stop(); stopLocal(); undo.free(); doc.free(); storage.close(); },
+    async dispose() { closing = true; clearTimeout(compactTimer); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); unobserve(); doc.free(); storage.close(); },
   };
 }

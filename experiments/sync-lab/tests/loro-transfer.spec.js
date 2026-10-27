@@ -21,6 +21,7 @@ test('Loro初回配信：開くだけでは書き戻さず、snapshotをまと�
   const expected = await page.evaluate(() => window.lab.snapshot()), native = await page.evaluate(() => window.lab.nativeIds());
   expect(await page.evaluate(() => window.lab.transferStats().snapshots)).toBe(1);
   expect(await page.evaluate(() => window.lab.persistenceStats().checkpointExports)).toBe(0);
+  expect(await page.evaluate(() => window.lab.projectionStats().fullRebuilds)).toBe(1);
   await page.evaluate(() => window.lab.disconnect()); await page.goto(path(id, true)); await ready(page);
   expect(await page.evaluate(() => window.lab.snapshot())).toEqual(expected); expect(await page.evaluate(() => window.lab.nativeIds())).toEqual(native);
   expect(await page.evaluate(() => window.lab.queued())).toBe(false);
@@ -91,6 +92,9 @@ test('Loro初回配信：壊れた後半を受けても前半だけ保存せず�
   }, id);
   expect(stored).toEqual({ base: null, updates: 0, outgoing: 0 });
   await page.unroute('**/lab/loro/sync?*'); await page.evaluate(() => window.lab.connect()); await ready(page); await settled(page);
+  expect(await page.evaluate(() => window.lab.projectionStats().fullRebuilds)).toBe(1);
+  await input(page).fill('再取得後も入力できる'); await settled(page);
+  await page.evaluate(() => window.lab.undo()); await expect(input(page)).toHaveText('最初のメモ'); await settled(page);
 });
 
 test('Loro初回配信：既存履歴や送信を混ぜた初回要求を部分適用せず、旧要求には差分を返す', async ({ page, request }) => {

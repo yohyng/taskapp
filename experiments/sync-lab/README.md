@@ -11,7 +11,7 @@
 次の実装を絞る判断は [DIRECTION.md](DIRECTION.md) にまとめる。
 0.8.0ではLoroの本文・属性の変更行だけを読む表示データを追加する。境界と確認方法は [PROJECTION.md](PROJECTION.md) を参照。
 0.9.0では編集差分と送信待ちを一体で追記し、保存済みの世代を安全にsnapshotへまとめる（[PERSISTENCE.md](PERSISTENCE.md)）。
-0.10.0では空の端末へsnapshotと未適用受信を配り、既存端末は差分交換を続ける（[BOOTSTRAP.md](BOOTSTRAP.md)）。
+0.10.1では空の端末へsnapshotと未適用受信を配り、保存後に表示とUndoを接続する。既存端末は差分交換を続ける（[BOOTSTRAP.md](BOOTSTRAP.md)）。
 
 ## 起動
 
