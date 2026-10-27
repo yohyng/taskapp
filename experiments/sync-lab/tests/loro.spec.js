@@ -32,6 +32,24 @@ test('Loro：初期化した入力欄では一回目から保存し、別端末�
   });
 });
 
+test('Loro：本文と属性の受信は変更行だけを更新し、空の通信では同じ表示世代を保つ', async ({ browser }) => {
+  await fixture(browser, async (pages) => {
+    await settled(pages);
+    const before = await pages[2].evaluate(() => window.lab.projectionStats());
+    await input(pages[0]).focus(); await input(pages[0]).press('ControlOrMeta+End'); await pages[0].keyboard.insertText('・変更行だけ');
+    await expect(input(pages[2])).toHaveText('最初のメモ・変更行だけ');
+    await pages[0].locator('[data-row="row-3"] [data-attribute="favorite"]').check();
+    await expect(pages[2].locator('[data-row="row-3"] [data-attribute="favorite"]')).toBeChecked();
+    await settled(pages);
+    const after = await pages[2].evaluate(() => { window.observedRows = window.lab.snapshot(); return window.lab.projectionStats(); });
+    expect(after.fullRebuilds).toBe(before.fullRebuilds);
+    expect(after.incrementalRowReads - before.incrementalRowReads).toBe(2);
+    for (let i = 0; i < 2; i++) await pages[2].waitForResponse((response) => response.url().includes('/lab/loro/sync?') && response.status() === 200);
+    expect(await pages[2].evaluate(() => window.lab.projectionStats())).toEqual(after);
+    expect(await pages[2].evaluate(() => window.observedRows === window.lab.snapshot())).toBe(true);
+  });
+});
+
 test('Loro：保存完了待ちの間に次の編集が増えた場合も、両方の端末確定まで送らない', async ({ browser }) => {
   await fixture(browser, async (pages) => {
     const a = pages[0]; await settled(pages); await a.evaluate(() => window.lab.disconnect());

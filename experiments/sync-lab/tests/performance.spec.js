@@ -60,6 +60,7 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       expect(digest(await snapshot(b))).toBe(digest(before.rows));
       expect((await a.evaluate(() => window.bench.engine.serverState())).changes).toBe(before.changes);
       const edits = [];
+      const projectionBefore = await a.evaluate(() => window.bench.engine.projectionStats?.());
       for (let input = 0; input < 3; input++) {
         const value = `${await text(a).inputValue()}・${info.project.name}-${trial}-${input}`;
         const started = performance.now();
@@ -71,6 +72,11 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
         await confirmed(a);
         await expect.poll(async () => (await a.evaluate(() => window.bench.engine.serverState())).rows.find((row) => row.id === 'row-0')?.text, { timeout: 60000 }).toBe(value);
         edits.push({ localMs: sample.localMs, frameMs: sample.frameMs, remoteObservedMs: remoteMs, serverConfirmedMs: performance.now() - started });
+      }
+      const projectionAfter = await a.evaluate(() => window.bench.engine.projectionStats?.());
+      if (engine === 'loro') {
+        expect(projectionAfter.fullRebuilds).toBe(projectionBefore.fullRebuilds);
+        expect(projectionAfter.incrementalRowReads - projectionBefore.incrementalRowReads).toBe(3);
       }
       await a.evaluate(() => window.bench.engine.disconnect());
       await a.goto(pathFor(engine, true)); await ready(a);
@@ -97,8 +103,8 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       expect(final.rows.find((row) => row.id === 'row-1').favorite).toBe(!beforeFavorite);
       await expect(a.locator('[data-error]')).toBeEmpty(); await expect(b.locator('[data-error]')).toBeEmpty();
       expect(errors).toEqual([]);
-      result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes });
-      console.log(`BENCH_TRIAL ${engine}/${info.project.name}/${trial} 全行一致`);
+      result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes, projectionBefore, projectionAfter });
+      console.log(`BENCH_TRIAL ${engine}/${info.project.name}/${trial} 全行一致 ${JSON.stringify(result.samples.at(-1))}`);
       if (engine === 'loro' && trial === 2) {
         await a.evaluate(() => window.bench.engine.disconnect()); await b.evaluate(() => window.bench.engine.disconnect());
         result.encodingImport = await a.evaluate(async () => {
@@ -121,6 +127,39 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
           return measurements;
         });
         expect(result.encodingImport.every((sample) => sample.allRowsMatch)).toBe(true);
+        result.projectionComparison = await a.evaluate(async () => {
+          const { LoroDoc } = await import('/src/loro-runtime.js');
+          const { loroNode, loroViewRows } = await import('/src/loro-model.js');
+          const { createLoroProjection } = await import('/src/loro-projection.js');
+          const bytes = window.bench.engine.loroBinding('row-0').rawSource.export({ mode: 'snapshot' });
+          const results = [];
+          for (const mode of ['full', 'incremental']) {
+            const doc = new LoroDoc(); doc.import(bytes);
+            const projection = mode === 'incremental' ? createLoroProjection(doc) : null;
+            let rows = loroViewRows(doc), indexed = new Map(), lastNotification;
+            const stop = doc.subscribe((event) => {
+              if (projection) { projection.apply(event); rows = projection.snapshot(); }
+              else {
+                // 0.7.1の索引・全行変換・全文比較の経路。保存や通信の費用は両方の測定から外す。
+                for (const node of doc.getTree('outline').getNodes({ withDeleted: false })) indexed.set(node.data.get('id'), node);
+                rows = loroViewRows(doc);
+                const key = JSON.stringify({ rows, connected: true, queued: true });
+                if (key !== lastNotification) lastNotification = key;
+              }
+            });
+            try {
+              const text = loroNode(doc, 'row-0').data.get('text');
+              for (let repeat = -1; repeat < 5; repeat++) {
+                const begin = performance.now(); text.insert(0, `測定${repeat}：`); doc.commit();
+                const editAndProjectionMs = performance.now() - begin;
+                const allRowsMatch = JSON.stringify(rows) === JSON.stringify(loroViewRows(doc));
+                if (repeat >= 0) results.push({ mode, repeat, editAndProjectionMs, allRowsMatch, indexedRows: projection ? undefined : indexed.size, projection: projection?.stats() });
+              }
+            } finally { stop(); doc.free(); }
+          }
+          return results;
+        });
+        expect(result.projectionComparison.every((sample) => sample.allRowsMatch)).toBe(true);
       }
     } finally {
       for (const page of [a, b]) await page.evaluate(async () => { await window.bench?.engine.dispose(); }).catch(() => {});

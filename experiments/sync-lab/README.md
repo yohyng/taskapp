@@ -9,6 +9,7 @@
 経路と限界は [LORO-INTEGRATION.md](LORO-INTEGRATION.md) を参照。
 1万行の独立した測定は [PERFORMANCE.md](PERFORMANCE.md)、保守の分担は [OPERATIONS.md](OPERATIONS.md)、
 次の実装を絞る判断は [DIRECTION.md](DIRECTION.md) にまとめる。
+0.8.0ではLoroの本文・属性の変更行だけを読む表示データを追加する。境界と確認方法は [PROJECTION.md](PROJECTION.md) を参照。
 
 ## 起動
 

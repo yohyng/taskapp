@@ -1,5 +1,6 @@
 import { LoroDoc, UndoManager } from 'loro-crdt';
-import { loroCheckpoint, restoreLoroCheckpoint, loroViewRows } from './loro-model.js';
+import { loroCheckpoint, restoreLoroCheckpoint } from './loro-model.js';
+import { createLoroProjection } from './loro-projection.js';
 import { openLoroStorage } from './loro-storage.js';
 import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
@@ -9,16 +10,13 @@ export async function createEngine({ docId, offline, onChange }) {
   const doc = saved ? restoreLoroCheckpoint(saved) : new LoroDoc();
   let outbox = saved?.outbox || [], saving = Promise.resolve(), saves = 0, fatal, enabled = false;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false;
-  const nodes = new Map(), selections = new Map();
-  function index() { for (const node of doc.getTree('outline').getNodes({ withDeleted: false })) nodes.set(node.data.get('id'), node); }
-  index();
-  const node = (id) => { const value = nodes.get(id); if (!value) throw new Error('行がありません'); return value; };
-  const snapshot = () => loroViewRows(doc);
+  const projection = createLoroProjection(doc), selections = new Map();
+  const node = projection.node, snapshot = projection.snapshot;
   const notify = () => {
     const state = { rows: snapshot(), connected, queued: !!fatal || saves > 0 || outbox.length > 0 };
-    const key = JSON.stringify(state);
-    if (key === lastNotification) return;
-    lastNotification = key; onChange?.(state);
+    // 通信・保存の状態だけが変わる通知は同じ行配列を使い、全文JSONを毎回作らない。
+    if (lastNotification?.rows === state.rows && lastNotification.connected === state.connected && lastNotification.queued === state.queued) return;
+    lastNotification = state; onChange?.(state);
   };
   function persist() {
     const value = { ...loroCheckpoint(doc), outbox: outbox.slice() };
@@ -41,7 +39,7 @@ export async function createEngine({ docId, offline, onChange }) {
   const stopLocal = doc.subscribeLocalUpdates((bytes) => {
     outbox.push(bytes); persist();
   });
-  const stop = doc.subscribe(() => { index(); notify(); });
+  const stop = doc.subscribe((event) => { projection.apply(event); notify(); });
   function local(action) { if (fatal) throw fatal; selectionForHistory = null; action(); doc.commit({ origin: '操作' }); }
   async function barrier() {
     // 待機中に次の保存が追加された場合も確定を待つ。最初のPromiseだけでは後の編集を先に送ってしまう。
@@ -89,7 +87,8 @@ export async function createEngine({ docId, offline, onChange }) {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),
-    nativeIds: () => [...nodes].map(([id, value]) => [id, value.id]).sort(),
+    nativeIds: projection.nativeIds,
+    projectionStats: projection.stats,
     loroBinding(id) {
       const text = node(id).data.get('text'), origin = `入力:${id}:${crypto.randomUUID()}`;
       const source = scopedLoroSource(doc, text, origin, () => { if (fatal) throw fatal; });
