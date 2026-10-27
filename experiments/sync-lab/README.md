@@ -10,6 +10,7 @@
 1万行の独立した測定は [PERFORMANCE.md](PERFORMANCE.md)、保守の分担は [OPERATIONS.md](OPERATIONS.md)、
 次の実装を絞る判断は [DIRECTION.md](DIRECTION.md) にまとめる。
 0.8.0ではLoroの本文・属性の変更行だけを読む表示データを追加する。境界と確認方法は [PROJECTION.md](PROJECTION.md) を参照。
+0.9.0では編集差分と送信待ちを一体で追記し、保存済みの世代を安全にsnapshotへまとめる（[PERSISTENCE.md](PERSISTENCE.md)）。
 
 ## 起動
 
@@ -70,7 +71,7 @@ OSの日本語候補選択、1万行の全体負荷、サーバー障害はま�
 
 - ブラウザー：`taskspace-lab-yjs-<文書ID>` という専用IndexedDB。
 - PowerSyncのブラウザー：専用名のSQLite（IDBBatchAtomicVFS、今回は複数タブ無効）。
-- Loroのブラウザー：`taskspace-lab-loro-<文書ID>` の専用IndexedDB。一取引にsnapshot・待機中の受信・送信待ちを保存する。
+- Loroのブラウザー：`taskspace-lab-loro-<文書ID>` の専用IndexedDB。差分と送信待ちを一取引で追記し、snapshotと未適用受信を世代付きでまとめ直す。
 - Loroのサーバー：`.data/loro/` のバイナリを含む専用ファイル。30行のHTTP交換用で製品の同期サービスではない。
 - PowerSyncのサーバー：ローカルDocker内の `lab_source` / `lab_storage`。
 - サーバー：このフォルダーの `.data/` にYjsバイナリ。

@@ -44,6 +44,10 @@ Loroの実験用HTTP交換を、そのまま製品の同期サーバーとして
 待ち時間と読出し行数は [PROJECTION.md](PROJECTION.md) に記録する。
 表示データ更新の区切りを終え、次は端末の差分保存とまとめ直し、初回snapshot配信を別工程で進める。
 
+0.9.0では差分保存とまとめ直しを実装する。編集差分・送信待ちの追記と、受信・ACKの確定をそれぞれ一取引に保ち、
+まとめ直しは保存済みの番号と世代に限る（[PERSISTENCE.md](PERSISTENCE.md)）。
+試験結果は [RESULTS.md](RESULTS.md) を正とし、次は初回snapshot配信へ進む。本番へはまだ移さない。
+
 ## 次の区切り：本番へ安全に移せること
 
 - PC Chrome PWA / iPad PWA / Android PWAで、休止から復帰・圏外起動・日本語入力・持ち替え。

@@ -61,6 +61,7 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       expect((await a.evaluate(() => window.bench.engine.serverState())).changes).toBe(before.changes);
       const edits = [];
       const projectionBefore = await a.evaluate(() => window.bench.engine.projectionStats?.());
+      const persistenceBefore = await a.evaluate(() => window.bench.engine.persistenceStats?.());
       for (let input = 0; input < 3; input++) {
         const value = `${await text(a).inputValue()}・${info.project.name}-${trial}-${input}`;
         const started = performance.now();
@@ -74,10 +75,16 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
         edits.push({ localMs: sample.localMs, frameMs: sample.frameMs, remoteObservedMs: remoteMs, serverConfirmedMs: performance.now() - started });
       }
       const projectionAfter = await a.evaluate(() => window.bench.engine.projectionStats?.());
+      const persistenceAfter = await a.evaluate(() => window.bench.engine.persistenceStats?.());
       if (engine === 'loro') {
         expect(projectionAfter.fullRebuilds).toBe(projectionBefore.fullRebuilds);
         expect(projectionAfter.incrementalRowReads - projectionBefore.incrementalRowReads).toBe(3);
+        expect(persistenceAfter.appendedUpdates - persistenceBefore.appendedUpdates).toBe(3);
+        expect(persistenceAfter.appendedBytes - persistenceBefore.appendedBytes).toBeLessThan(3 * 1024);
+        // 全体へのまとめ直しと、残った差分からの再起動も一万行で確認する。
+        await a.evaluate(async () => { await window.bench.engine.compactLocal(); window.bench.savedPersistence = window.bench.engine.persistenceStats(); });
       }
+      const persistenceCompacted = await a.evaluate(() => window.bench.savedPersistence);
       await a.evaluate(() => window.bench.engine.disconnect());
       await a.goto(pathFor(engine, true)); await ready(a);
       const warm = await a.evaluate(() => window.bench.metrics);
@@ -103,7 +110,7 @@ for (const engine of engines) test(`${engine}：一万行の起動・保存・�
       expect(final.rows.find((row) => row.id === 'row-1').favorite).toBe(!beforeFavorite);
       await expect(a.locator('[data-error]')).toBeEmpty(); await expect(b.locator('[data-error]')).toBeEmpty();
       expect(errors).toEqual([]);
-      result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes, projectionBefore, projectionAfter });
+      result.samples.push({ trial, coldA, coldB, warmOffline: warm, edits, rows: final.rows.length, storageRepresentationBytes: final.bytes, projectionBefore, projectionAfter, persistenceBefore, persistenceAfter, persistenceCompacted });
       console.log(`BENCH_TRIAL ${engine}/${info.project.name}/${trial} 全行一致 ${JSON.stringify(result.samples.at(-1))}`);
       if (engine === 'loro' && trial === 2) {
         await a.evaluate(() => window.bench.engine.disconnect()); await b.evaluate(() => window.bench.engine.disconnect());

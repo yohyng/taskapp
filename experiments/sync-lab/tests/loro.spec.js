@@ -54,12 +54,12 @@ test('Loro：保存完了待ちの間に次の編集が増えた場合も、両�
   await fixture(browser, async (pages) => {
     const a = pages[0]; await settled(pages); await a.evaluate(() => window.lab.disconnect());
     await a.evaluate(() => {
-      window.confirmations = []; window.originalPut = IDBObjectStore.prototype.put;
-      IDBObjectStore.prototype.put = function (...args) {
-        if (this.transaction.db.name.startsWith('taskspace-lab-loro-')) Object.defineProperty(this.transaction, 'oncomplete', {
+      window.confirmations = []; window.originalAdd = IDBObjectStore.prototype.add;
+      IDBObjectStore.prototype.add = function (...args) {
+        if (this.name === 'updates' && this.transaction.db.name.startsWith('taskspace-lab-loro-')) Object.defineProperty(this.transaction, 'oncomplete', {
           set(callback) { this.addEventListener('complete', (event) => window.confirmations.push(() => callback(event))); },
         });
-        return window.originalPut.apply(this, args);
+        return window.originalAdd.apply(this, args);
       };
     });
     try {
@@ -71,9 +71,9 @@ test('Loro：保存完了待ちの間に次の編集が増えた場合も、両�
       await expect.poll(() => a.evaluate(() => window.confirmations.length)).toBe(2);
       const sentEarly = await a.waitForRequest((request) => request.url().includes('/lab/loro/sync?') && request.postDataJSON().updates.length > 0, { timeout: 500 }).then(() => true, () => false);
       expect(sentEarly).toBe(false);
-      await a.evaluate(() => { IDBObjectStore.prototype.put = window.originalPut; window.confirmations[1](); });
+      await a.evaluate(() => { IDBObjectStore.prototype.add = window.originalAdd; window.confirmations[1](); });
       await expect(input(pages[2])).toHaveText('保存待ち2'); await settled(pages);
-    } finally { await a.evaluate(() => { IDBObjectStore.prototype.put = window.originalPut; for (const complete of window.confirmations) complete(); }); }
+    } finally { await a.evaluate(() => { IDBObjectStore.prototype.add = window.originalAdd; for (const complete of window.confirmations) complete(); }); }
   });
 });
 
@@ -196,19 +196,48 @@ test('Loro：相互移動後の木とネイティブIDを、圏外再読み込�
   });
 });
 
-test('Loro：端末の取引が失敗しても、以前のsnapshot・待機中の受信・送信待ちを部分更新しない', async ({ page }) => {
-  await page.goto('/?engine=loro&doc=storage-probe&offline=1'); await page.waitForFunction(() => !!window.lab);
-  const result = await page.evaluate(async (id) => {
-    const { openLoroStorage } = await import('/src/loro-storage.js');
-    const storage = await openLoroStorage(id), old = { snapshot: new Uint8Array([1]), pending: new Uint8Array([2]), outbox: [new Uint8Array([3])] };
-    await storage.write(old);
-    const put = IDBObjectStore.prototype.put;
-    IDBObjectStore.prototype.put = function (...args) { const request = put.apply(this, args); this.transaction.abort(); return request; };
-    let failed = false;
-    try { await storage.write({ snapshot: new Uint8Array([9]), pending: null, outbox: [] }); }
-    catch { failed = true; } finally { IDBObjectStore.prototype.put = put; }
-    const saved = await storage.read(); storage.close();
-    return { failed, snapshot: [...saved.snapshot], pending: [...saved.pending], outbox: saved.outbox.map((bytes) => [...bytes]) };
-  }, `storage-${randomUUID()}`);
-  expect(result).toEqual({ failed: true, snapshot: [1], pending: [2], outbox: [[3]] });
+test('Loro：差分を自動でまとめ直しても圏外の本文と送信待ちを保ち、再接続で全端末へ届ける', async ({ browser }) => {
+  await fixture(browser, async (pages, url) => {
+    const a = pages[0]; await settled(pages); await a.evaluate(() => window.lab.disconnect());
+    const before = await a.evaluate(() => window.lab.persistenceStats());
+    await a.evaluate(async () => {
+      for (let i = 0; i < 140; i++) window.lab.insertText('row-0', 0, 'あ');
+      await window.lab.localBarrier();
+    });
+    await expect.poll(() => a.evaluate(() => window.lab.persistenceStats().compactions)).toBeGreaterThan(before.compactions);
+    const expected = await a.evaluate(() => window.lab.snapshot());
+    const after = await a.evaluate(() => window.lab.persistenceStats());
+    expect(after.checkpointExports - before.checkpointExports).toBe(1);
+    expect(after.appendedUpdates - before.appendedUpdates).toBe(140);
+    expect(after.appendedBytes - before.appendedBytes).toBeLessThan(140 * 1024);
+    await a.goto(`${url}&offline=1`); await a.waitForFunction(() => !!window.lab);
+    expect(await a.evaluate(() => window.lab.snapshot())).toEqual(expected);
+    expect(await a.evaluate(() => window.lab.queued())).toBe(true);
+    await a.evaluate(() => window.lab.connect()); await settled(pages);
+  });
+});
+
+test('Loro：任意のまとめ直しが中止されても追記を続けられ、再試行と再読み込みで内容を保つ', async ({ browser }) => {
+  await fixture(browser, async (pages, url) => {
+    const a = pages[0]; await settled(pages); await a.evaluate(() => window.lab.disconnect());
+    await a.evaluate(() => {
+      window.originalCheckpointPut = IDBObjectStore.prototype.put;
+      IDBObjectStore.prototype.put = function (...args) {
+        const request = window.originalCheckpointPut.apply(this, args);
+        if (this.name === 'state' && this.transaction.db.name.startsWith('taskspace-lab-loro-')) this.transaction.abort();
+        return request;
+      };
+    });
+    try {
+      await a.evaluate(async () => { for (let i = 0; i < 130; i++) window.lab.insertText('row-0', 0, 'あ'); await window.lab.localBarrier(); });
+      await expect.poll(() => a.evaluate(() => window.lab.persistenceStats().compactionFailures)).toBe(1);
+    } finally { await a.evaluate(() => { IDBObjectStore.prototype.put = window.originalCheckpointPut; }); }
+    await input(a).press('ControlOrMeta+End'); await a.keyboard.insertText('・続けられる');
+    await a.evaluate(() => window.lab.localBarrier());
+    const expected = await a.evaluate(() => window.lab.snapshot());
+    await a.evaluate(() => window.lab.compactLocal());
+    await a.goto(`${url}&offline=1`); await a.waitForFunction(() => !!window.lab);
+    expect(await a.evaluate(() => window.lab.snapshot())).toEqual(expected);
+    await a.evaluate(() => window.lab.connect()); await settled(pages);
+  });
 });

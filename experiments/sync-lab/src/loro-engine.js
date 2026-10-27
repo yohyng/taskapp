@@ -1,14 +1,18 @@
-import { LoroDoc, UndoManager } from 'loro-crdt';
-import { loroCheckpoint, restoreLoroCheckpoint } from './loro-model.js';
+import { UndoManager } from 'loro-crdt';
+import { checkpointLoroJournal, restoreLoroJournal } from './loro-journal.js';
 import { createLoroProjection } from './loro-projection.js';
 import { openLoroStorage } from './loro-storage.js';
 import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
 
 export async function createEngine({ docId, offline, onChange }) {
-  const storage = await openLoroStorage(docId), saved = await storage.read();
-  const doc = saved ? restoreLoroCheckpoint(saved) : new LoroDoc();
-  let outbox = saved?.outbox || [], saving = Promise.resolve(), saves = 0, fatal, enabled = false;
+  const storage = await openLoroStorage(docId);
+  let saved, doc;
+  try { saved = await storage.read(); doc = restoreLoroJournal(saved); }
+  catch (error) { storage.close(); throw error; }
+  let outbox = saved.outbox, saving = Promise.resolve(), saves = 0, fatal, enabled = false;
+  let journalCount = saved.updates.length, journalBytes = saved.updates.reduce((total, entry) => total + entry.bytes.length, 0);
+  let compacting, compactTimer, closing = false, compactionFailures = 0;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false;
   const projection = createLoroProjection(doc), selections = new Map();
   const node = projection.node, snapshot = projection.snapshot;
@@ -18,10 +22,30 @@ export async function createEngine({ docId, offline, onChange }) {
     if (lastNotification?.rows === state.rows && lastNotification.connected === state.connected && lastNotification.queued === state.queued) return;
     lastNotification = state; onChange?.(state);
   };
-  function persist() {
-    const value = { ...loroCheckpoint(doc), outbox: outbox.slice() };
+  function scheduleCompaction() {
+    if (closing || compacting || compactTimer || (journalCount < 128 && journalBytes < 1024 * 1024)) return;
+    compactTimer = setTimeout(() => { compactTimer = null; compactLocal().catch(() => {}); }, 1000);
+  }
+  function compactLocal() {
+    if (compacting) return compacting;
+    clearTimeout(compactTimer); compactTimer = null;
+    let completed = false;
+    compacting = storage.compact(checkpointLoroJournal).then((result) => {
+      journalCount = Math.max(0, journalCount - result.count); journalBytes = Math.max(0, journalBytes - result.bytes);
+      completed = true;
+      return result;
+    }).catch((error) => {
+      // まとめ直しは追記の確定とは別。失敗しても元のログは残るため、入力を止めない。
+      compactionFailures++; throw error;
+    }).finally(() => { compacting = null; if (completed) scheduleCompaction(); });
+    return compacting;
+  }
+  function persist(value) {
     saves++;
-    saving = saving.then(() => storage.write(value)).catch((error) => {
+    saving = saving.then(() => storage.append(value)).then(() => {
+      journalCount += value.updates.length; journalBytes += value.updates.reduce((total, bytes) => total + bytes.length, 0);
+      scheduleCompaction();
+    }).catch((error) => {
       fatal = error; enabled = false;
       document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`;
       throw error;
@@ -37,7 +61,8 @@ export async function createEngine({ docId, offline, onChange }) {
     },
   });
   const stopLocal = doc.subscribeLocalUpdates((bytes) => {
-    outbox.push(bytes); persist();
+    const entry = { id: crypto.randomUUID(), bytes: bytes.slice() };
+    outbox.push(entry); persist({ updates: [entry.bytes], outgoing: [entry], acknowledged: [] });
   });
   const stop = doc.subscribe((event) => { projection.apply(event); notify(); });
   function local(action) { if (fatal) throw fatal; selectionForHistory = null; action(); doc.commit({ origin: '操作' }); }
@@ -55,15 +80,16 @@ export async function createEngine({ docId, offline, onChange }) {
       controller = new AbortController();
       const response = await fetch(`/lab/loro/sync?doc=${encodeURIComponent(docId)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify({ version: [...doc.oplogVersion().encode()], updates: batch.map((bytes) => [...bytes]) }),
+        body: JSON.stringify({ version: [...doc.oplogVersion().encode()], updates: batch.map((entry) => [...entry.bytes]) }),
       });
       if (!response.ok) throw new Error(await response.text());
       const result = await response.json();
       if (!enabled) return;
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
-      doc.import(Uint8Array.from(result.update));
+      const received = Uint8Array.from(result.update); doc.import(received);
       outbox.splice(0, batch.length);
-      if (batch.length || JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting) await persist();
+      const changed = JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting;
+      if (batch.length || changed) await persist({ updates: changed ? [received] : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
       connected = true; notify();
     } catch (error) { connected = false; notify(); }
   }
@@ -82,13 +108,15 @@ export async function createEngine({ docId, offline, onChange }) {
     selectionForHistory = current?.capture() || null;
     return redo ? undo.redo() : undo.undo();
   }
-  notify(); if (!offline) await connect();
+  notify(); scheduleCompaction(); if (!offline) await connect();
   return {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),
     nativeIds: projection.nativeIds,
     projectionStats: projection.stats,
+    persistenceStats: () => ({ ...storage.stats(), journalCount, journalBytes, compactionFailures }),
+    compactLocal,
     loroBinding(id) {
       const text = node(id).data.get('text'), origin = `入力:${id}:${crypto.randomUUID()}`;
       const source = scopedLoroSource(doc, text, origin, () => { if (fatal) throw fatal; });
@@ -134,6 +162,6 @@ export async function createEngine({ docId, offline, onChange }) {
       if (!response.ok) throw new Error('検証用の保存内容を確認できません');
       return response.json();
     },
-    async dispose() { window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; stop(); stopLocal(); undo.free(); doc.free(); storage.close(); },
+    async dispose() { closing = true; clearTimeout(compactTimer); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); stop(); stopLocal(); undo.free(); doc.free(); storage.close(); },
   };
 }
