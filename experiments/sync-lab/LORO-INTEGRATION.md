@@ -2,6 +2,7 @@
 
 以下は0.6.0時点の構成の記録。0.8.0の変更行更新は [PROJECTION.md](PROJECTION.md)、
 0.9.0の差分保存・まとめ直し・検証専用DBの版移行は [PERSISTENCE.md](PERSISTENCE.md) を参照。
+0.10.1の初回snapshot配信と購読の開始順は [BOOTSTRAP.md](BOOTSTRAP.md) を参照。
 
 0.6.0の独立した30行の試作。`/?engine=loro&doc=demo&input=bound&tree=1` で開く。
 `loro-crdt@1.17.1` に加え、公開済みの `loro-codemirror@0.3.3` を固定した。
