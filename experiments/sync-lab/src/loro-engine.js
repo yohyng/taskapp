@@ -7,7 +7,7 @@ import { scopedLoroSource } from './loro-binding.js';
 import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
 import { loroTransport } from './loro-transport.js';
 
-export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId }) {
+export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId, signal, onError = (error) => { document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`; } }) {
   const storage = await openLoroStorage(storageId);
   let saved, doc;
   try { saved = await storage.read(); doc = restoreLoroJournal(saved); }
@@ -51,7 +51,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
       scheduleCompaction();
     }).catch((error) => {
       fatal = error; enabled = false;
-      document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`;
+      onError(error);
       throw error;
     }).finally(() => { saves--; notify(); });
     saving.catch(() => {});
@@ -115,10 +115,11 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     return flight;
   }
   async function disconnect() { enabled = false; resumeAfterHide = false; clearTimeout(timer); controller?.abort(); await flight; connected = false; notify(); }
-  async function connect() { if (fatal) throw fatal; enabled = true; clearTimeout(timer); await tick(); }
+  async function connect() { if (fatal) throw fatal; if (closing || signal?.aborted) return; enabled = true; clearTimeout(timer); await tick(); }
   const hide = () => { if (enabled) resumeAfterHide = true; enabled = false; clearTimeout(timer); controller?.abort(); };
   const show = (event) => { if (event.persisted && resumeAfterHide) connect().catch(() => {}); };
   window.addEventListener('beforeunload', hide); window.addEventListener('pagehide', hide); window.addEventListener('pageshow', show);
+  signal?.addEventListener('abort', hide);
   function history(redo) {
     const current = [...selections.values()].find((item) => item.focused());
     selectionForHistory = current?.capture() || null;
@@ -180,6 +181,6 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     undo: () => history(false), redo: () => history(true), connect, disconnect,
     localBarrier: barrier,
     serverState: () => transport.serverState(docId),
-    async dispose() { closing = true; clearTimeout(compactTimer); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); unobserve(); doc.free(); storage.close(); },
+    async dispose() { closing = true; clearTimeout(compactTimer); signal?.removeEventListener('abort', hide); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); unobserve(); doc.free(); storage.close(); },
   };
 }

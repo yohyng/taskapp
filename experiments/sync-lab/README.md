@@ -18,6 +18,8 @@
 Node.js 24とpnpmを使用する。
 
 ```sh
+# 本体の既存AuthGate・SDKを使うため、ルートのlockfileからも取得する
+npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
 pnpm install --frozen-lockfile
 pnpm prepare:assets
 pnpm dev
@@ -88,3 +90,8 @@ OSの日本語候補選択、1万行の全体負荷、サーバー障害はま�
 認証とサーバー強制終了の独立試験は`pnpm test tests/loro-owner.spec.js`。
 本番の認証・データには接続せず、使い捨てのAuth応答サービスと実HTTP子プロセスを使う。
 保存確定の条件と公式Protocol調査は[AUTH-DURABILITY.md](AUTH-DURABILITY.md)を参照。
+
+0.12.0から既存AuthGateと本体のSDKを使うため、最初にリポジトリのルートで
+`npm ci --ignore-scripts --no-audit --no-fund`も実行する（既存package-lockを使用、依存追加なし）。
+ログインからの連携試験は`pnpm test tests/loro-session.spec.js`。
+試験用の`session.html`は本番接続設定を読まない。[接続範囲と次の通信案](SESSION-INTEGRATION.md)を参照。

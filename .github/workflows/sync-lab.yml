@@ -5,6 +5,9 @@ on:
       - 'experiments/sync-lab/**'
       - '!experiments/sync-lab/**/*.md'
       - '.github/workflows/sync-lab.yml'
+      - 'src/AuthGate.jsx'
+      - 'package.json'
+      - 'package-lock.json'
 permissions:
   contents: read
 jobs:
@@ -23,6 +26,7 @@ jobs:
           node-version: '24'
       - name: 検証用の依存関係を取得
         run: |
+          npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
           npm install -g pnpm@11.25.0
           pnpm install --frozen-lockfile
           pnpm prepare:assets
@@ -74,6 +78,7 @@ jobs:
           node-version: '24'
       - name: 検証用の依存関係を取得
         run: |
+          npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
           npm install -g pnpm@11.25.0
           pnpm install --frozen-lockfile
           pnpm prepare:assets
