@@ -84,3 +84,7 @@ OSの日本語候補選択、1万行の全体負荷、サーバー障害はま�
 - 「接続中」は保存完了を意味しない。画面のボタンでサーバー保存ファイルとの一致を別に確認する。
 
 実行結果は [RESULTS.md](RESULTS.md) に記録する。
+
+認証とサーバー強制終了の独立試験は`pnpm test tests/loro-owner.spec.js`。
+本番の認証・データには接続せず、使い捨てのAuth応答サービスと実HTTP子プロセスを使う。
+保存確定の条件と公式Protocol調査は[AUTH-DURABILITY.md](AUTH-DURABILITY.md)を参照。

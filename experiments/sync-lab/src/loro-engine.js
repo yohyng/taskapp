@@ -5,16 +5,17 @@ import { openLoroStorage } from './loro-storage.js';
 import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
 import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
+import { loroTransport } from './loro-transport.js';
 
-export async function createEngine({ docId, offline, onChange }) {
-  const storage = await openLoroStorage(docId);
+export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId }) {
+  const storage = await openLoroStorage(storageId);
   let saved, doc;
   try { saved = await storage.read(); doc = restoreLoroJournal(saved); }
   catch (error) { storage.close(); throw error; }
   let outbox = saved.outbox, saving = Promise.resolve(), saves = 0, fatal, enabled = false;
   let journalCount = saved.updates.length, journalBytes = saved.updates.reduce((total, entry) => total + entry.bytes.length, 0);
   let compacting, compactTimer, closing = false, compactionFailures = 0;
-  let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false;
+  let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false, failures = 0;
   const transfers = { snapshots: 0, updates: 0, receivedBytes: 0 };
   let projection, undo, stopLocal, stop;
   const selections = new Map(), node = (id) => projection.node(id), snapshot = () => projection.snapshot();
@@ -86,12 +87,7 @@ export async function createEngine({ docId, offline, onChange }) {
       const batch = outbox.slice();
       const request = loroSyncRequest(doc, batch);
       controller = new AbortController();
-      const response = await fetch(`/lab/loro/sync?doc=${encodeURIComponent(docId)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
-        body: JSON.stringify(request),
-      });
-      if (!response.ok) throw new Error(await response.text());
-      const result = await response.json();
+      const result = await transport.sync(docId, request, controller.signal);
       if (!enabled) return;
       const received = decodeLoroTransfer(result, request.bootstrap);
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
@@ -105,12 +101,17 @@ export async function createEngine({ docId, offline, onChange }) {
       if (batch.length || changed) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
       transfers[received.mode === 'snapshot' ? 'snapshots' : 'updates']++;
       transfers.receivedBytes += received.updates.reduce((total, bytes) => total + bytes.length, 0);
-      connected = true; notify();
-    } catch (error) { connected = false; notify(); }
+      failures = 0; connected = true; notify();
+    } catch (error) {
+      failures++; connected = false;
+      // 認証切れや権限拒否を100msごとに繰り返さない。ログイン状態が戻ったらconnectで再開する。
+      if ([401, 403].includes(error.status)) enabled = false;
+      notify();
+    }
   }
   function tick() {
     if (!enabled || flight || fatal) return flight;
-    flight = sync().finally(() => { flight = null; if (enabled && !fatal) timer = setTimeout(tick, 100); });
+    flight = sync().finally(() => { flight = null; if (enabled && !fatal) timer = setTimeout(tick, failures ? Math.min(15000, 250 * 2 ** Math.min(failures, 6)) : 100); });
     return flight;
   }
   async function disconnect() { enabled = false; resumeAfterHide = false; clearTimeout(timer); controller?.abort(); await flight; connected = false; notify(); }
@@ -178,11 +179,7 @@ export async function createEngine({ docId, offline, onChange }) {
     }); },
     undo: () => history(false), redo: () => history(true), connect, disconnect,
     localBarrier: barrier,
-    async serverState() {
-      const response = await fetch(`/lab/loro/server-state?doc=${encodeURIComponent(docId)}`, { cache: 'no-store' });
-      if (!response.ok) throw new Error('検証用の保存内容を確認できません');
-      return response.json();
-    },
+    serverState: () => transport.serverState(docId),
     async dispose() { closing = true; clearTimeout(compactTimer); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); unobserve(); doc.free(); storage.close(); },
   };
 }

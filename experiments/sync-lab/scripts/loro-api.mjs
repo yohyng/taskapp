@@ -1,13 +1,14 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { mkdir, readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { VersionVector } from 'loro-crdt';
 import { fixtureLoroDocument, loroCheckpoint, restoreLoroCheckpoint, loroViewRows } from '../src/loro-model.js';
-import { replaceFile } from './replace-file.mjs';
+import { durableFile } from './durable-file.mjs';
 import { fixtureSize } from './fixture-size.mjs';
 import { exportLoroTransfer } from '../src/loro-transfer.js';
 
 // 比較用HTTP交換。製品の認証・配信・障害対応を備えた同期サービスではない。
-export async function loroApi(directory) {
+export async function loroApi(directory, { prefix = '/lab/loro', authorize, save = durableFile } = {}) {
+  if (prefix !== '/lab/loro' && typeof authorize !== 'function') throw new Error('認証付きの検証経路には権限検査が必要です');
   await mkdir(directory, { recursive: true });
   const queues = new Map(), metrics = new Map();
   const fileFor = (id) => `${directory}/${createHash('sha256').update(id).digest('hex')}.json`;
@@ -20,9 +21,7 @@ export async function loroApi(directory) {
     return task;
   }
   async function store(id, doc) {
-    const file = fileFor(id), temporary = `${file}.${randomUUID()}.tmp`;
-    await writeFile(temporary, encode(loroCheckpoint(doc)));
-    await replaceFile(temporary, file);
+    await save(fileFor(id), encode(loroCheckpoint(doc)));
   }
   async function load(id) {
     try { return restoreLoroCheckpoint(decode(await readFile(fileFor(id), 'utf8'))); }
@@ -37,19 +36,24 @@ export async function loroApi(directory) {
   return {
     async middleware(request, response, next) {
       const url = new URL(request.url, 'http://127.0.0.1');
-      if (!url.pathname.startsWith('/lab/loro/')) return next();
+      if (!url.pathname.startsWith(`${prefix}/`)) return next();
       response.setHeader('Content-Type', 'application/json'); response.setHeader('Cache-Control', 'no-store');
       try {
         const id = url.searchParams.get('doc');
         if (!/^[a-zA-Z0-9_-]{1,120}$/.test(id || '')) throw new Error('検証文書IDが不正です');
+        // 拒否した要求は文書を生成せず、本文も読み取らない。
+        if (authorize) {
+          const status = await authorize(request, id);
+          if (status !== 200) { response.statusCode = status; response.end('{}'); return; }
+        }
         let body;
-        if (url.pathname.endsWith('/sync') && request.method === 'POST') {
+        if (url.pathname === `${prefix}/sync` && request.method === 'POST') {
           const chunks = []; let size = 0;
           for await (const chunk of request) { size += chunk.length; if (size > 1024 * 1024) throw new Error('検証の送信上限を超えました'); chunks.push(chunk); }
           body = JSON.parse(Buffer.concat(chunks).toString());
           if (!Array.isArray(body.version) || !Array.isArray(body.updates) || body.updates.length > 1000) throw new Error('更新が不正です');
           if (body.bootstrap !== undefined && typeof body.bootstrap !== 'boolean') throw new Error('初回文書の要求が不正です');
-        } else if (!url.pathname.endsWith('/server-state') || request.method !== 'GET') { response.statusCode = 404; response.end('{}'); return; }
+        } else if (url.pathname !== `${prefix}/server-state` || request.method !== 'GET') { response.statusCode = 404; response.end('{}'); return; }
         const result = await exclusive(id, async () => {
           // 毎回永続ストアから候補を作る。保存失敗後のメモリーを、再送時に保存済みと誤認しない。
           const doc = await load(id);
@@ -62,7 +66,10 @@ export async function loroApi(directory) {
                 const before = version(doc), waiting = pending(doc);
                 for (const bytes of body.updates) doc.import(Uint8Array.from(bytes));
                 const transfer = exportLoroTransfer(doc, from, body.bootstrap === true);
-                if (version(doc) !== before || pending(doc) !== waiting) { await store(id, doc); count.changes++; }
+                const changed = version(doc) !== before || pending(doc) !== waiting;
+                // 置換後のfsyncが失敗した再送でも保存をやり直す。読めることだけを確定の証拠にしない。
+                if (changed || body.updates.length > 0) await store(id, doc);
+                if (changed) count.changes++;
                 return transfer;
               } finally { from.free(); }
             }

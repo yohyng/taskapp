@@ -1,13 +1,13 @@
 {
   "name": "taskspace-sync-lab",
   "private": true,
-  "version": "0.10.1",
+  "version": "0.11.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "test": "playwright test",
     "test:performance": "playwright test --config playwright.performance.config.js",
-    "test:unit": "node --test scripts/field-merge.test.mjs scripts/replace-file.test.mjs scripts/tree.test.mjs scripts/loro-tree.test.mjs scripts/loro-binding.test.mjs scripts/fixture-size.test.mjs scripts/loro-projection.test.mjs scripts/loro-journal.test.mjs scripts/loro-transfer.test.mjs",
+    "test:unit": "node --test scripts/field-merge.test.mjs scripts/replace-file.test.mjs scripts/tree.test.mjs scripts/loro-tree.test.mjs scripts/loro-binding.test.mjs scripts/fixture-size.test.mjs scripts/loro-projection.test.mjs scripts/loro-journal.test.mjs scripts/loro-transfer.test.mjs scripts/owner-authorization.test.mjs scripts/durable-file.test.mjs scripts/loro-transport.test.mjs scripts/loro-api.test.mjs",
     "prepare:assets": "powersync-web copy-assets"
   },
   "dependencies": {

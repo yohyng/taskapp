@@ -53,7 +53,11 @@ function render(state) {
   treeUI?.update(rows);
 }
 try {
-  engine = await createEngine({ docId: id, offline: params.get('offline') === '1', onChange: render });
+  // 認証経路の合成試験だけで使う。トークンをURLや保存文書へ混ぜず、利用者ごとに端末保存も分ける。
+  const connection = engineName === 'loro' && window.labConnection;
+  const transport = connection ? (await import('./loro-transport.js')).loroTransport(connection) : undefined;
+  engine = await createEngine({ docId: id, offline: params.get('offline') === '1', onChange: render, transport,
+    storageId: connection ? `owner:${connection.ownerId}:${id}` : undefined });
   window.lab = engine;
   window.labInput = { text: (id) => editors.get(id)?.text() };
   if (tree) treeUI = createTreeUI({ container: document.querySelector('#rows'), engine, onError: (error) => { document.querySelector('#error').textContent = error.message; } });
