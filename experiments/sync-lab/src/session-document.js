@@ -26,7 +26,7 @@ export function sessionDocument({ sessions, ownerId, docId, endpoint, onChange, 
   events.addEventListener('offline', offline); events.addEventListener('online', connected);
   visibility.addEventListener('visibilitychange', visible);
   // 同じ利用者がすぐ戻っても、前の画面の保存・終了より先に古い写しを読まない。
-  const ready = Promise.resolve(retiring.get(storageId)).then(() => createDocument({ docId, offline: !online, storageId, signal: lifetime.signal,
+  const ready = Promise.resolve(retiring.get(storageId)).then(() => createDocument({ docId, offline: !online, background: true, storageId, signal: lifetime.signal,
     transport: loroTransport({ endpoint, getAccessToken: (options) => sessions.token(ownerId, options) }),
     onChange: (state) => { if (active()) onChange?.(state); },
     onError: (error) => { if (active()) onError?.(error); },

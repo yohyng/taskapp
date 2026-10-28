@@ -92,3 +92,17 @@ test('既存ログイン：最初の文書取得中にログアウトしても�
     await login(page, fixture.credentials); await expect(input(page)).toHaveText('最初のメモ'); await settled(page);
   } finally { await context.close(); await fixture.close(); }
 });
+
+test('既存ログイン：保存済みの文書は通信の返事を待たずに開き、その間の追記も後で同期する', async ({ browser }) => {
+  const id = `cached-${randomUUID()}`, fixture = await ownerFixture(id, { ownerId: randomUUID() }), context = await browser.newContext();
+  let release; const delayed = new Promise((resolve) => { release = resolve; });
+  try {
+    const page = await device(context, fixture, id); await login(page, fixture.credentials); await settled(page);
+    await page.route('**/lab/owner-loro/sync?*', async (route) => { await delayed; await route.fallback().catch(() => {}); });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(input(page)).toBeVisible({ timeout: 2000 });
+    await expect(input(page)).toHaveText('最初のメモ'); await input(page).press('ControlOrMeta+End'); await page.keyboard.insertText('・返事を待たずに書く');
+    await page.evaluate(() => window.lab.localBarrier()); expect(await page.evaluate(() => window.lab.queued())).toBe(true);
+    release(); await settled(page); await expect(input(page)).toHaveText('最初のメモ・返事を待たずに書く');
+  } finally { release(); await context.close(); await fixture.close(); }
+});

@@ -7,7 +7,7 @@ import { scopedLoroSource } from './loro-binding.js';
 import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
 import { loroTransport } from './loro-transport.js';
 
-export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId, signal, onError = (error) => { document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`; } }) {
+export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId, signal, background = false, onError = (error) => { document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`; } }) {
   const storage = await openLoroStorage(storageId);
   let saved, doc;
   try { saved = await storage.read(); doc = restoreLoroJournal(saved); }
@@ -129,7 +129,12 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   // 初回は保存まで終えてから表示とUndoを接続し、履歴のある端末は従来どおり先に表示する。
   const cold = !offline && loroSyncRequest(doc, outbox).bootstrap;
   if (!cold) { observe(); notify(); }
-  scheduleCompaction(); if (!offline) await connect();
+  scheduleCompaction();
+  if (!offline) {
+    // 保存済みの文書は通信待ちで隠さない。空の初回だけは購読前のsnapshot取得を保つ。
+    if (background && !cold) connect().catch(() => {});
+    else await connect();
+  }
   if (cold) observe(); notify();
   return {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
