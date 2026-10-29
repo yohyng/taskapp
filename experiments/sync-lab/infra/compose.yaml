@@ -1,0 +1,37 @@
+name: taskspace-sync-lab
+services:
+  postgres:
+    image: postgres:17.7
+    command: [postgres, -c, wal_level=logical]
+    environment:
+      POSTGRES_USER: lab
+      POSTGRES_PASSWORD: lab-only-password
+      POSTGRES_DB: lab_source
+    ports: ['127.0.0.1:5434:5432']
+    volumes: ['./init.sql:/docker-entrypoint-initdb.d/init.sql:ro']
+    healthcheck:
+      test: [CMD-SHELL, 'pg_isready -U lab -d lab_source']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  powersync:
+    image: journeyapps/powersync-service@sha256:d7a99817057a42dae9e6d8fe0c70b49d99105dcac8b8ab0e9ed3cf1ff0978b8b
+    command: [start, -r, unified]
+    network_mode: host
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      POWERSYNC_CONFIG_PATH: /config/service.yaml
+      PS_DATA_SOURCE_URI: postgresql://lab:lab-only-password@127.0.0.1:5434/lab_source
+      PS_STORAGE_SOURCE_URI: postgresql://lab:lab-only-password@127.0.0.1:5434/lab_storage
+      PS_JWKS_URL: http://127.0.0.1:4180/lab/powersync/jwks
+      PS_PORT: '4182'
+    volumes:
+      - './service.yaml:/config/service.yaml:ro'
+      - './sync-config.yaml:/config/sync-config.yaml:ro'
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4182/probes/liveness').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 3s
+      timeout: 3s
+      retries: 40

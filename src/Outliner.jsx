@@ -34,6 +34,12 @@ const OutlineContext = React.createContext(null);
 // ここは中身が変わらないので、木を書き換えても描き直しを誘わない。
 const OutlineApiContext = React.createContext(null);
 
+// 同じ編集画面を別の保存経路でも検査できるよう、表示の入口だけを公開する。
+// 旧Providerの起動・保存・Realtimeはここから実行しない。
+export function OutlineDataProvider({ value, children }) {
+  return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
+}
+
 const OUTLINE_VIEW_KEY = "taskspace-outline-view";
 const DEFAULT_VIEW = { fontSize: 14, align: "left", typewriter: false, anchor: 0.6, immersive: false };
 const readView = () => {

@@ -1,0 +1,160 @@
+import { PowerSyncDatabase, Schema, Table, column, WASQLiteVFS } from '@powersync/web';
+import { analyzeTree, movePlacement, placement } from './tree-model.js';
+
+const schema = new Schema({
+  lab_rows: new Table({
+    doc_id: column.text, node_id: column.text, text: column.text, parent_id: column.text,
+    sort_order: column.integer, favorite: column.integer, completed: column.integer, deleted: column.integer,
+  }, { trackPrevious: { onlyWhenChanged: true }, trackMetadata: true, ignoreEmptyUpdates: true }),
+  lab_input_drafts: new Table({ doc_id: column.text, node_id: column.text, base: column.text, text: column.text }, { localOnly: true }),
+  lab_conflicts: new Table({
+    doc_id: column.text, node_id: column.text, field: column.text,
+    mine: column.text, theirs: column.text, operation_id: column.text,
+  }),
+});
+
+export async function createEngine({ docId, offline, onChange }) {
+  const db = new PowerSyncDatabase({ schema, database: {
+    dbFilename: `taskspace-lab-powersync-${docId}.db`,
+    vfs: WASQLiteVFS.IDBBatchAtomicVFS, enableMultiTabs: false,
+  } });
+  await db.init();
+  let cache = [], conflicts = [], drafts = [], pending = Promise.resolve();
+  const undoStack = [], redoStack = [], abort = new AbortController();
+  async function refresh() {
+    const data = await db.getAll('select * from lab_rows where doc_id=? order by sort_order,node_id', [docId]);
+    cache = data.map((row) => ({ id: row.node_id, text: row.text, parentId: row.parent_id, order: row.sort_order, favorite: !!row.favorite, completed: !!row.completed, deleted: !!row.deleted }));
+    conflicts = await db.getAll('select * from lab_conflicts where doc_id=? order by id', [docId]);
+    drafts = await db.getAll('select * from lab_input_drafts where doc_id=?', [docId]);
+    const queue = await db.getUploadQueueStats();
+    onChange?.({ rows: cache, conflicts, connected: db.currentStatus.connected, queued: queue.count > 0 });
+  }
+  const connector = {
+    async fetchCredentials() {
+      const response = await fetch(`/lab/powersync/token?doc=${encodeURIComponent(docId)}`);
+      if (!response.ok) throw new Error('検証用の接続情報を取得できません');
+      return response.json();
+    },
+    async uploadData(database) {
+      const transaction = await database.getNextCrudTransaction();
+      if (!transaction) return;
+      const entries = transaction.crud.map((entry) => ({
+        id: entry.id, clientId: entry.clientId, table: entry.table, op: entry.op,
+        opData: entry.opData, previousValues: entry.previousValues, metadata: entry.metadata,
+      }));
+      const response = await fetch('/lab/powersync/upload', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ clientId: await database.getClientId(), entries }),
+      });
+      if (!response.ok) throw new Error(`検証用の保存APIが失敗しました：${await response.text()}`);
+      // 競合分も同じDB取引で別テーブルへ保全した後に、端末の送信待ちを完了する。
+      await transaction.complete();
+      await refresh();
+    },
+  };
+  const listener = db.registerListener({ statusChanged: () => { refresh().catch(showError); } });
+  function showError(error) { document.querySelector('#error').textContent = `検証エラー：${error.message}`; }
+  for (const table of ['lab_rows', 'lab_conflicts', 'lab_input_drafts']) {
+    db.watch(`select * from ${table} where doc_id=?`, [docId], { onResult: () => { refresh().catch(showError); }, onError: showError }, { signal: abort.signal });
+  }
+  function enqueue(operation) {
+    const task = pending.then(operation);
+    pending = task.catch(showError);
+    return task;
+  }
+  async function change(id, key, value, record = true, observedBase, clearDraft = false) {
+    if (!['text', 'favorite', 'completed'].includes(key)) throw new Error('検証対象外の属性です');
+    const stored = key === 'text' ? value : Number(value);
+    let entry;
+    await db.writeTransaction(async (tx) => {
+      const row = await tx.get('select * from lab_rows where id=?', [`${docId}:${id}`]);
+      if (clearDraft) await tx.execute('delete from lab_input_drafts where id=?', [`${docId}:${id}`]);
+      if (row[key] === stored) return;
+      entry = { id, key, before: row[key], after: stored };
+      if (key === 'text' && observedBase !== undefined) {
+        await tx.execute('update lab_rows set text=?,_metadata=? where id=?', [stored, JSON.stringify({ kind: 'text-input', base: observedBase }), `${docId}:${id}`]);
+      } else await tx.execute(`update lab_rows set ${key}=?,_metadata=null where id=?`, [stored, `${docId}:${id}`]);
+    });
+    if (entry && record) { undoStack.push(entry); redoStack.length = 0; }
+    await refresh();
+  }
+  async function undoOrRedo(from, to, undo) {
+    const entry = from.at(-1);
+    if (!entry) return;
+    if (entry.tree) {
+      const row = await db.get('select * from lab_rows where id=?', [`${docId}:${entry.id}`]);
+      const expected = undo ? entry.after : entry.before, target = undo ? entry.before : entry.after;
+      const now = entry.kind === 'tree-move' ? { parentId: row.parent_id, order: row.sort_order } : !!row.deleted;
+      if (JSON.stringify(now) !== JSON.stringify(expected)) throw new Error('別端末が変えた枝のUndoは未対応です');
+      await commitTree(entry.id, { kind: entry.kind, before: expected, after: target }, false);
+      from.pop(); to.push(entry); return;
+    }
+    const row = await db.get('select * from lab_rows where id=?', [`${docId}:${entry.id}`]);
+    if (row[entry.key] !== (undo ? entry.after : entry.before)) throw new Error('別端末が変更した本文のUndoには独自の統合処理が必要です');
+    await change(entry.id, entry.key, undo ? entry.before : entry.after, false);
+    from.pop(); to.push(entry);
+  }
+  async function commitTree(id, command, record = true) {
+    let changed = false;
+    await db.writeTransaction(async (tx) => {
+      const row = await tx.get('select * from lab_rows where id=?', [`${docId}:${id}`]);
+      // 受信が先に同じ結果へ進んでいれば、metadataだけの空の更新を送信待ちに作らない。
+      if (command.kind === 'tree-move' ? row.parent_id === command.after.parentId && row.sort_order === command.after.order : !!row.deleted === command.after) return;
+      if (command.kind === 'tree-move') {
+        await tx.execute('update lab_rows set parent_id=?,sort_order=?,_metadata=? where id=?', [command.after.parentId, command.after.order, JSON.stringify(command), `${docId}:${id}`]);
+      } else await tx.execute('update lab_rows set deleted=?,_metadata=? where id=?', [Number(command.after), JSON.stringify(command), `${docId}:${id}`]);
+      changed = true;
+    });
+    if (changed && record) { undoStack.push({ tree: true, id, ...command }); redoStack.length = 0; }
+    await refresh();
+  }
+  await refresh();
+  if (!offline) await db.connect(connector);
+  return {
+    snapshot: () => cache,
+    queued: async () => (await db.getUploadQueueStats()).count > 0,
+    conflicts: () => conflicts,
+    treeState: () => analyzeTree(cache),
+    moveBranch(id, parentId, order, observedBefore) {
+      const row = cache.find((item) => item.id === id);
+      const after = movePlacement(cache, id, parentId, order), before = observedBefore || placement(row);
+      if (JSON.stringify(before) === JSON.stringify(after)) return Promise.resolve();
+      return enqueue(() => commitTree(id, { kind: 'tree-move', before, after }));
+    },
+    setBranchDeleted(id, deleted) {
+      const row = cache.find((item) => item.id === id);
+      if (!row || typeof deleted !== 'boolean') throw new Error('枝の削除指定が不正です');
+      if (row.deleted === deleted) return Promise.resolve();
+      return enqueue(() => commitTree(id, { kind: 'tree-delete', before: row.deleted, after: deleted }));
+    },
+    inputState: (id) => {
+      const draft = drafts.find((row) => row.node_id === id);
+      return draft ? { text: draft.text, base: draft.base, draft: true } : { text: cache.find((row) => row.id === id)?.text, draft: false };
+    },
+    replaceObservedText: (id, base, value) => enqueue(() => change(id, 'text', value, true, base, true)),
+    saveInputDraft: (id, base, value) => enqueue(async () => {
+      await db.execute('insert or replace into lab_input_drafts(id,doc_id,node_id,base,text) values(?,?,?,?,?)', [`${docId}:${id}`, docId, id, base, value]);
+      await refresh();
+    }),
+    clearInputDraft: (id) => enqueue(async () => {
+      await db.execute('delete from lab_input_drafts where id=?', [`${docId}:${id}`]);
+      await refresh();
+    }),
+    replaceText: (id, value) => enqueue(() => change(id, 'text', value)),
+    insertText: (id, index, value) => enqueue(async () => {
+      const row = await db.get('select text from lab_rows where id=?', [`${docId}:${id}`]);
+      await change(id, 'text', row.text.slice(0, index) + value + row.text.slice(index));
+    }),
+    setAttribute: (id, key, value) => enqueue(() => change(id, key, value)),
+    undo: () => enqueue(() => undoOrRedo(undoStack, redoStack, true)),
+    redo: () => enqueue(() => undoOrRedo(redoStack, undoStack, false)),
+    async localBarrier() { await pending; await db.get('select count(*) as n from lab_rows'); await refresh(); },
+    disconnect: () => db.disconnect(), connect: () => db.connect(connector),
+    async serverState() {
+      const response = await fetch(`/lab/powersync/server-state?doc=${encodeURIComponent(docId)}`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('サーバーの保存を確認できません');
+      return response.json();
+    },
+    async dispose() { await pending; abort.abort(); listener(); await db.close(); },
+  };
+}
