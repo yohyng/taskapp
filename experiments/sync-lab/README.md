@@ -13,6 +13,8 @@
 0.9.0では編集差分と送信待ちを一体で追記し、保存済みの世代を安全にsnapshotへまとめる（[PERSISTENCE.md](PERSISTENCE.md)）。
 0.10.1では空の端末へsnapshotと未適用受信を配り、保存後に表示とUndoを接続する。既存端末は差分交換を続ける（[BOOTSTRAP.md](BOOTSTRAP.md)）。
 0.12.1では本体の既存ログイン・SDKを検証へつなぎ、保存済み本文は通信を待たずに開く（[SESSION-INTEGRATION.md](SESSION-INTEGRATION.md)）。
+0.13.0では実際のOutlinerと、Supabase用の追記ログRPCを接続する（[DATABASE-INTEGRATION.md](DATABASE-INTEGRATION.md)）。
+本番の切替は行わず、`outline.html`の合成Auth・使い捨てDBで試験する。
 
 ## 起動
 

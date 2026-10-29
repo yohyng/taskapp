@@ -1,4 +1,5 @@
 import { loroViewRows } from './loro-model.js';
+import { outlineFields } from './outline-model.js';
 
 // 本文と属性の変更では木の位置は変わらない。未変更の行をWASMから読み直さず、
 // 木・ID・コンテナーの変更や未知のイベントは正規の全体読出しへ戻して欠落を防ぐ。
@@ -27,7 +28,7 @@ export function createLoroProjection(doc) {
       const target = targets.get(event.target);
       const supported = target && (target.type === 'text' && event.diff.type === 'text'
         || target.type === 'map' && event.diff.type === 'map'
-          && Object.keys(event.diff.updated).every((key) => ['favorite', 'completed', 'deleted'].includes(key)));
+          && Object.keys(event.diff.updated).every((key) => ['favorite', 'completed', 'deleted', ...outlineFields].includes(key)));
       if (ambiguous || !supported) { rebuild(); return; }
       changed.add(target.id);
     }
@@ -36,7 +37,8 @@ export function createLoroProjection(doc) {
       const index = positions.get(id), before = rows[index], data = nodes.get(id)?.data;
       if (!before || !data) { rebuild(); return; }
       counters.incrementalRowReads++;
-      const values = { text: data.get('text')?.toString() ?? '', favorite: !!data.get('favorite'), completed: !!data.get('completed'), deleted: !!data.get('deleted') };
+      const values = { text: data.get('text')?.toString() ?? '', favorite: !!data.get('favorite'), completed: !!data.get('completed'), deleted: !!data.get('deleted'),
+        ...Object.fromEntries(outlineFields.filter((field) => data.get(field) !== undefined).map((field) => [field, data.get(field)])) };
       if (Object.keys(values).every((key) => before[key] === values[key])) continue;
       // 通知を受けた側が以前の世代を保持していても、後の編集でその内容を書き換えない。
       next ||= rows.slice(); next[index] = Object.freeze({ ...before, ...values });

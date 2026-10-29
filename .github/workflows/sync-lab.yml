@@ -6,6 +6,9 @@ on:
       - '!experiments/sync-lab/**/*.md'
       - '.github/workflows/sync-lab.yml'
       - 'src/AuthGate.jsx'
+      - 'src/Outliner.jsx'
+      - 'src/lib/**'
+      - 'src/index.css'
       - 'package.json'
       - 'package-lock.json'
 permissions:
@@ -41,6 +44,7 @@ jobs:
       - name: 列の統合と三端末の動作を比較
         run: |
           pnpm test:unit
+          pnpm test:log
           pnpm test --max-failures=2 --reporter=line,json > test-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: comparison-results.json

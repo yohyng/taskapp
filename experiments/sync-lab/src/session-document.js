@@ -4,7 +4,7 @@ import { loroTransport } from './loro-transport.js';
 const retiring = new Map();
 
 // 一つの編集画面を一人の所有者へ固定する。トークン更新だけで本文・Undo・選択位置を作り直さない。
-export function sessionDocument({ sessions, ownerId, docId, endpoint, onChange, onError, createDocument = createEngine, events = window, visibility = document }) {
+export function sessionDocument({ sessions, ownerId, docId, endpoint, transport, onChange, onError, createDocument = createEngine, events = window, visibility = document }) {
   if (!ownerId || sessions.snapshot()?.user?.id !== ownerId) throw new Error('ログインした利用者が必要です');
   const lifetime = new AbortController();
   const storageId = `owner:${ownerId}:${docId}`;
@@ -27,7 +27,7 @@ export function sessionDocument({ sessions, ownerId, docId, endpoint, onChange, 
   visibility.addEventListener('visibilitychange', visible);
   // 同じ利用者がすぐ戻っても、前の画面の保存・終了より先に古い写しを読まない。
   const ready = Promise.resolve(retiring.get(storageId)).then(() => createDocument({ docId, offline: !online, background: true, storageId, signal: lifetime.signal,
-    transport: loroTransport({ endpoint, getAccessToken: (options) => sessions.token(ownerId, options) }),
+    transport: transport || loroTransport({ endpoint, getAccessToken: (options) => sessions.token(ownerId, options) }),
     onChange: (state) => { if (active()) onChange?.(state); },
     onError: (error) => { if (active()) onError?.(error); },
   })).then(async (value) => {

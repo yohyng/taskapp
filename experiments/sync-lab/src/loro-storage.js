@@ -62,7 +62,8 @@ export async function openLoroStorage(docId) {
     const saved = await transaction(['state', 'updates', 'outbox'], 'readonly', (tx, done) => {
       const base = tx.objectStore('state').get('document');
       const updates = tx.objectStore('updates').getAll(), outbox = tx.objectStore('outbox').getAll();
-      done(() => ({ base: base.result, updates: updates.result, outbox: outbox.result }));
+      const cursor = tx.objectStore('state').get('remote-cursor');
+      done(() => ({ base: base.result, updates: updates.result, outbox: outbox.result, cursor: cursor.result ?? -1 }));
     });
     checkBase(saved.base);
     let previous = saved.base.cutoff;
@@ -71,9 +72,10 @@ export async function openLoroStorage(docId) {
       previous = entry.sequence;
     }
     saved.outbox.forEach(checkOutgoing);
+    if (!Number.isSafeInteger(saved.cursor) || saved.cursor < -1) throw new Error('端末の取得位置が不正です');
     return saved;
   }
-  async function append({ updates = [], outgoing = [], acknowledged = [] }) {
+  async function append({ updates = [], outgoing = [], acknowledged = [], cursor }) {
     if (!updates.every(binary) || !acknowledged.every((id) => typeof id === 'string' && id)) throw new Error('保存する差分が不正です');
     outgoing.forEach(checkOutgoing);
     await transaction(['state', 'updates', 'outbox'], 'readwrite', (tx, _done, fail) => {
@@ -83,6 +85,14 @@ export async function openLoroStorage(docId) {
       // 同じIDの上書きは認めない。ACKは番号の範囲でなく、実際に送った操作だけを除く。
       for (const entry of outgoing) tx.objectStore('outbox').add(entry);
       for (const id of acknowledged) tx.objectStore('outbox').delete(id);
+      if (cursor !== undefined) {
+        if (!Number.isSafeInteger(cursor) || cursor < 0) throw new Error('取得位置が不正です');
+        const state = tx.objectStore('state'), previous = state.get('remote-cursor');
+        previous.onsuccess = () => {
+          if ((previous.result ?? -1) > cursor) { fail(new Error('取得位置を巻き戻せません')); return; }
+          state.put(cursor, 'remote-cursor');
+        };
+      }
     });
     counts.appendTransactions++; counts.appendedUpdates += updates.length;
     counts.appendedBytes += updates.reduce((total, bytes) => total + bytes.length, 0);

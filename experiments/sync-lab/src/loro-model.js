@@ -1,5 +1,6 @@
 import { LoroDoc, LoroText } from 'loro-crdt';
 import { compareRows } from './tree-model.js';
+import { outlineFields } from './outline-model.js';
 
 // 共通の合成文書を一度だけ作り、端末はこのバイナリを受け取る。起動時のJSON再構築はしない。
 export function fixtureLoroDocument(count = 30) {
@@ -35,10 +36,13 @@ export function loroRows(doc, { withNativeDeleted = false } = {}) {
     text: node.data.get('text')?.toString() ?? '',
     favorite: !!node.data.get('favorite'), completed: !!node.data.get('completed'),
     deleted: !!node.data.get('deleted'), nativeDeleted: node.isDeleted(),
+    ...Object.fromEntries(outlineFields.filter((field) => node.data.get(field) !== undefined).map((field) => [field, node.data.get(field)])),
   })).sort(compareRows);
 }
 
-export const loroViewRows = (doc) => loroRows(doc).map(({ nativeId, nativeDeleted, ...row }) => row);
+export const loroViewRows = (doc) => loroRows(doc).map((row) => {
+  const view = { ...row }; delete view.nativeId; delete view.nativeDeleted; return view;
+});
 
 // 因果上の先行更新を待つ受信内容は通常のsnapshotに入らない。両方を同じ世代として保持する。
 // ここは同期的なバイナリ作成だけ。IndexedDBへの取引・通信の完了を保証するAPIではない。

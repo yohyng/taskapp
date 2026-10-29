@@ -71,6 +71,7 @@ export async function ownerFixture(docId, { ownerId = '検証の所有者' } = {
   await start();
   return {
     ownerId, directory, issue, credentials, account, apiKey,
+    identify: (authorization) => tokens.get(authorization),
     refreshes: () => refreshes,
     holdRefresh() {
       refreshGate = new Promise((resolve) => { releaseRefresh = resolve; });

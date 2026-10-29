@@ -6,13 +6,15 @@ import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
 import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
 import { loroTransport } from './loro-transport.js';
+import { applyOutlineIntent, outlineNodes } from './outline-model.js';
 
 export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId, signal, background = false, onError = (error) => { document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`; } }) {
   const storage = await openLoroStorage(storageId);
   let saved, doc;
   try { saved = await storage.read(); doc = restoreLoroJournal(saved); }
   catch (error) { storage.close(); throw error; }
-  let outbox = saved.outbox, saving = Promise.resolve(), saves = 0, fatal, enabled = false;
+  let outbox = saved.outbox, cursor = saved.cursor, saving = Promise.resolve(), saves = 0, fatal, enabled = false;
+  let urgent = false;
   let journalCount = saved.updates.length, journalBytes = saved.updates.reduce((total, entry) => total + entry.bytes.length, 0);
   let compacting, compactTimer, closing = false, compactionFailures = 0;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false, failures = 0;
@@ -69,6 +71,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     stopLocal = doc.subscribeLocalUpdates((bytes) => {
       const entry = { id: crypto.randomUUID(), bytes: bytes.slice() };
       outbox.push(entry); persist({ updates: [entry.bytes], outgoing: [entry], acknowledged: [] });
+      wake();
     });
     stop = doc.subscribe((event) => { projection.apply(event); notify(); });
   }
@@ -84,21 +87,24 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     try {
       await barrier();
       if (!enabled || fatal) return;
-      const batch = outbox.slice();
+      const batch = transport.batch ? transport.batch(outbox) : outbox.slice();
       const request = loroSyncRequest(doc, batch);
       controller = new AbortController();
-      const result = await transport.sync(docId, request, controller.signal);
+      const context = { cursor, batch };
+      const result = await transport.sync(docId, request, controller.signal, context);
       if (!enabled) return;
-      const received = decodeLoroTransfer(result, request.bootstrap);
+      const received = (transport.decode || decodeLoroTransfer)(result, request.bootstrap, context);
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
       // 単独snapshotのimportを使い、空の文書へ全履歴を一操作ずつ再生する経路を避ける。
       // 初回失敗後の再取得も、空の原本に限り購読を外す。既存の編集やUndoがあれば保持する。
       const restart = projection && received.mode === 'snapshot' && loroSyncRequest(doc, outbox).bootstrap;
       if (restart) unobserve();
       try { for (const bytes of received.updates) doc.import(bytes); } finally { if (restart) observe(); }
-      outbox.splice(0, batch.length);
       const changed = JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting;
-      if (batch.length || changed) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id) });
+      if (batch.length || changed || received.cursor !== undefined && received.cursor !== cursor) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id), cursor: received.cursor });
+      outbox.splice(0, batch.length);
+      if (received.cursor !== undefined) cursor = received.cursor;
+      if (received.more || outbox.length) urgent = true;
       transfers[received.mode === 'snapshot' ? 'snapshots' : 'updates']++;
       transfers.receivedBytes += received.updates.reduce((total, bytes) => total + bytes.length, 0);
       failures = 0; connected = true; notify();
@@ -111,9 +117,12 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   }
   function tick() {
     if (!enabled || flight || fatal) return flight;
-    flight = sync().finally(() => { flight = null; if (enabled && !fatal) timer = setTimeout(tick, failures ? Math.min(15000, 250 * 2 ** Math.min(failures, 6)) : 100); });
+    urgent = false;
+    flight = sync().finally(() => { flight = null; if (enabled && !fatal) timer = setTimeout(tick, failures ? Math.min(15000, 250 * 2 ** Math.min(failures, 6)) : urgent ? 0 : transport.interval ?? 100); });
     return flight;
   }
+  function wake() { urgent = true; if (enabled && !flight && !fatal) { clearTimeout(timer); timer = setTimeout(tick, 0); } }
+  const stopWatch = transport.watch?.(docId, wake);
   async function disconnect() { enabled = false; resumeAfterHide = false; clearTimeout(timer); controller?.abort(); await flight; connected = false; notify(); }
   async function connect() { if (fatal) throw fatal; if (closing || signal?.aborted) return; enabled = true; clearTimeout(timer); await tick(); }
   const hide = () => { if (enabled) resumeAfterHide = true; enabled = false; clearTimeout(timer); controller?.abort(); };
@@ -138,6 +147,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   if (cold) observe(); notify();
   return {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
+    connectionState: () => ({ connected, ready: !transport.decode || cursor >= 0 }),
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),
     nativeIds: () => projection.nativeIds(),
@@ -185,7 +195,10 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     }); },
     undo: () => history(false), redo: () => history(true), connect, disconnect,
     localBarrier: barrier,
+    outline: () => outlineNodes(snapshot()),
+    changeOutline(makeNext) { local(() => { const before = outlineNodes(snapshot()); applyOutlineIntent(doc, before, typeof makeNext === 'function' ? makeNext(before) : makeNext); }); },
+    canUndo: () => undo.canUndo(), canRedo: () => undo.canRedo(),
     serverState: () => transport.serverState(docId),
-    async dispose() { closing = true; clearTimeout(compactTimer); signal?.removeEventListener('abort', hide); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); await disconnect(); await saving; await compacting?.catch(() => {}); unobserve(); doc.free(); storage.close(); },
+    async dispose() { closing = true; stopWatch?.(); clearTimeout(compactTimer); signal?.removeEventListener('abort', hide); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); try { await disconnect(); await saving; await compacting?.catch(() => {}); } finally { unobserve(); doc.free(); storage.close(); } },
   };
 }
