@@ -1,9 +1,10 @@
 import { base64, decodeLogTransfer, logBatch } from './loro-log-transfer.js';
+import { prepareLogEntry } from './loro-update-parts.js';
 
 // Realtimeは再取得のきっかけ。通知を失っても定期取得と画面復帰で保存済みログへ追い付く。
 export function loroSupabaseTransport(client, { refreshSession } = {}) {
   return {
-    interval: 3000, batch: logBatch, decode: decodeLogTransfer,
+    interval: 3000, batch: logBatch, decode: decodeLogTransfer, prepareEntry: prepareLogEntry,
     async sync(docId, _request, signal, { cursor, batch }) {
       for (let attempt = 0; attempt < 2; attempt++) {
         signal.throwIfAborted();

@@ -87,6 +87,15 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     try {
       await barrier();
       if (!enabled || fatal) return;
+      const replacement = transport.prepareEntry?.(outbox[0], doc);
+      if (replacement) {
+        // 元の大きな差分は既に端末保存済み。分割先を全部保存し、元の送信待ちだけを
+        // 同じ取引で置き換えてから通信する。中断前後でIDや内容を作り直して再送しない。
+        await persist({ updates: [], outgoing: replacement, acknowledged: [outbox[0].id] });
+        outbox.splice(0, 1, ...replacement);
+        await barrier();
+        if (!enabled || fatal) return;
+      }
       const batch = transport.batch ? transport.batch(outbox) : outbox.slice();
       const request = loroSyncRequest(doc, batch);
       controller = new AbortController();

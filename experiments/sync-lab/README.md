@@ -15,6 +15,8 @@
 0.12.1では本体の既存ログイン・SDKを検証へつなぎ、保存済み本文は通信を待たずに開く（[SESSION-INTEGRATION.md](SESSION-INTEGRATION.md)）。
 0.13.0では実際のOutlinerと、Supabase用の追記ログRPCを接続する（[DATABASE-INTEGRATION.md](DATABASE-INTEGRATION.md)）。
 本番の切替は行わず、`outline.html`の合成Auth・使い捨てDBで試験する。
+0.13.1では大きな本文差分を同じ履歴のまま分割し、送信待ちを一取引で置換してから再送する。
+旧版で残った大きな未送信、分割後の再読込、応答喪失とUndoも検査する。
 
 ## 起動
 

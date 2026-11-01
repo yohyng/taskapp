@@ -16,7 +16,11 @@ function binary(text, kind) {
 export function logBatch(outbox) {
   const batch = []; let size = 0;
   for (const entry of outbox) {
-    if (entry.bytes.length > 65536) throw new Error('一つの編集が送信上限を超えています');
+    // 後続の大きな差分で先頭の送信まで止めない。次の回で先頭へ来てから分割する。
+    if (entry.bytes.length > 65536) {
+      if (batch.length) break;
+      throw new Error('一つの編集が送信上限を超えています');
+    }
     if (batch.length === 32 || size + entry.bytes.length > 262144) break;
     batch.push(entry); size += entry.bytes.length;
   }

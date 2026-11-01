@@ -1,10 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
+import process from 'node:process';
 import { postgresLog } from './support/loro-postgres.mjs';
 import { ownerFixture } from './support/owner-fixture.mjs';
 import { seedOutlineDocument } from '../src/outline-model.js';
 import { LoroDoc } from 'loro-crdt';
 import { loroViewRows } from '../src/loro-model.js';
+import { largeText } from './support/large-text.mjs';
 
 test.skip(process.env.LAB_POWERSYNC !== '1', '使い捨ての実PostgresがあるCIで実行する');
 const editor = (page, id) => page.locator(`[data-row="${id}"] textarea`);
@@ -94,5 +97,40 @@ test('本体画面と実DB：圏外の入力と別端末の編集を、応答喪
     expect(await a.evaluate(() => localStorage.getItem('taskspace-outline-v1'))).toBeNull();
     const rows = await db.pool.query('select count(*)::int as total, count(distinct update_id)::int as distinct_total from taskspace_loro.updates where doc_id=$1', [id]);
     expect(rows.rows[0].total).toBe(rows.rows[0].distinct_total);
+  } finally { await Promise.all(contexts.map((context) => context.close())); await fixture.close(); await db.close(); }
+});
+
+test('長文の実DB：1MiB超の未送信を分割し、一部の保存後に応答と画面を失っても再開する', async ({ browser }) => {
+  const db = await postgresLog(), owner = randomUUID(), seed = seedOutlineDocument([{ id: 'memo', text: 'メモ', children: [] }, { id: 'other', text: '別行', children: [] }]);
+  const id = await db.seed(owner, seed.export({ mode: 'snapshot' })); seed.free();
+  const fixture = await ownerFixture(id, { ownerId: owner }), contexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  const value = largeText(400000), seen = new Map(); let blocked = false, lost = false, savedFirst;
+  const firstStored = new Promise((resolve) => { savedFirst = resolve; });
+  try {
+    const a = await open(contexts[0], fixture, id, db), b = await open(contexts[1], fixture, id, db);
+    await a.evaluate(() => window.lab.disconnect());
+    // 本体textareaの入力・Undoは別のブラウザー試験で検査済み。ここでは大きなバイナリのDB確定へ絞る。
+    await a.evaluate((text) => window.lab.changeOutline((nodes) => nodes.map((node) => node.id === 'memo' ? { ...node, text } : node)), value);
+    await a.evaluate(() => window.lab.localBarrier());
+    await b.locator('[data-row="other"] [data-row-text]').click(); await editor(b, 'other').fill('スマホの別行'); await saved(b);
+    await a.route('**/rest/v1/rpc/taskspace_loro_exchange', async (route) => {
+      if (blocked) { await route.abort('failed'); return; }
+      const request = route.request(), body = request.postDataJSON();
+      let total = 0;
+      for (const entry of body.p_updates) {
+        const size = Buffer.from(entry.bytes, 'base64').length; total += size; expect(size).toBeLessThanOrEqual(65536);
+        if (seen.has(entry.id)) expect(seen.get(entry.id)).toBe(entry.bytes); else seen.set(entry.id, entry.bytes);
+      }
+      expect(total).toBeLessThanOrEqual(262144);
+      const result = await db.exchange(fixture.identify(request.headers().authorization), body.p_doc, body.p_cursor, body.p_updates);
+      if (!lost && body.p_updates.length) { blocked = true; lost = true; await route.abort('failed'); savedFirst(); }
+      else await route.fulfill({ json: result });
+    });
+    await a.evaluate(() => window.dispatchEvent(new Event('online'))); await firstStored;
+    await a.reload(); await expect(a.locator('[data-row="memo"]')).toBeVisible(); expect(await text(a, 'memo')).toBe(value);
+    blocked = false; await a.evaluate(() => window.dispatchEvent(new Event('online'))); await saved(a);
+    await expect.poll(() => text(b, 'memo')).toBe(value); await expect.poll(() => text(a, 'other')).toBe('スマホの別行');
+    const stored = await db.pool.query('select count(*)::int as entries, max(octet_length(bytes))::int as largest, sum(octet_length(bytes))::int as total from taskspace_loro.updates where doc_id=$1', [id]);
+    expect(stored.rows[0].entries).toBe(seen.size + 1); expect(stored.rows[0].largest).toBeLessThanOrEqual(65536); expect(stored.rows[0].total).toBeGreaterThan(1024 * 1024);
   } finally { await Promise.all(contexts.map((context) => context.close())); await fixture.close(); await db.close(); }
 });

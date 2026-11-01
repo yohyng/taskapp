@@ -1,8 +1,15 @@
 import { test, expect } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
+import { Buffer } from 'node:buffer';
 import { ownerFixture } from './support/owner-fixture.mjs';
 import { seedOutlineDocument } from '../src/outline-model.js';
 import { LoroDoc } from 'loro-crdt';
+
+async function storagePage(page) {
+  // IndexedDBだけの検査へ比較アプリの起動・通信・開発用の再読込を混ぜない。
+  await page.route('**/storage-test.html', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html lang="ja"><title>端末保存の検査</title></html>' }));
+  await page.goto('/storage-test.html');
+}
 
 test('本体画面：既存textareaの入力・Undo・再読込を新同期へ渡し、旧保存へ書き戻さない', async ({ browser }) => {
   const id = randomUUID(), fixture = await ownerFixture(id, { ownerId: randomUUID() }), context = await browser.newContext();
@@ -37,7 +44,7 @@ test('本体画面：既存textareaの入力・Undo・再読込を新同期へ�
 });
 
 test('端末の取得位置：受信保存に失敗した取引ではACKも取得位置も進めず、再送と再取得を残す', async ({ page }) => {
-  await page.goto('/');
+  await storagePage(page);
   const result = await page.evaluate(async (id) => {
     const { openLoroStorage } = await import('/src/loro-storage.js');
     const storage = await openLoroStorage(id), entry = { id: crypto.randomUUID(), bytes: new Uint8Array([1, 2, 3]) };
@@ -56,4 +63,24 @@ test('端末の取得位置：受信保存に失敗した取引ではACKも取�
     } finally { storage.close(); }
   }, `atomic-cursor-${randomUUID()}`);
   expect(result).toEqual({ failed: true, before: { cursor: -1, pending: 1, received: 1 }, after: { cursor: 7, pending: 0, received: 2 } });
+});
+
+test('長文の端末保存：分割保存が失敗したら元の送信待ちを残し、成功した取引だけ全パーツへ置き換える', async ({ page }) => {
+  await storagePage(page);
+  const result = await page.evaluate(async (id) => {
+    const { openLoroStorage } = await import('/src/loro-storage.js'), storage = await openLoroStorage(id);
+    const original = { id: crypto.randomUUID(), bytes: new Uint8Array(90000).fill(1) };
+    const part = { id: crypto.randomUUID(), bytes: original.bytes.slice(0, 45000) };
+    try {
+      await storage.append({ updates: [original.bytes], outgoing: [original] });
+      let failed = false;
+      try { await storage.append({ outgoing: [part, part], acknowledged: [original.id] }); } catch { failed = true; }
+      const before = await storage.read(), other = { ...part, id: crypto.randomUUID() };
+      await storage.append({ outgoing: [part, other], acknowledged: [original.id] });
+      const after = await storage.read();
+      return { failed, originalKept: before.outbox.length === 1 && before.outbox[0].id === original.id,
+        sizes: after.outbox.map((entry) => entry.bytes.length), journal: after.updates.length, cursor: after.cursor };
+    } finally { storage.close(); }
+  }, `replace-large-${randomUUID()}`);
+  expect(result).toEqual({ failed: true, originalKept: true, sizes: [45000, 45000], journal: 1, cursor: -1 });
 });
