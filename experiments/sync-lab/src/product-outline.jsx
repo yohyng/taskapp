@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import Outliner, { OutlineDataProvider } from '../../../src/Outliner.jsx';
-import { sessions, supabase } from './session-client.js';
+import { sessions, supabase, connection } from './session-client.js';
 import { sessionDocument } from './session-document.js';
 import { loroSupabaseTransport } from './loro-supabase-transport.js';
 import { exclusiveDocument } from './exclusive-document.js';
@@ -14,7 +14,7 @@ export function ProductOutline() {
     if (!ownerId) return;
     let live = true, engine;
     const publish = () => { if (live && engine) setCurrent({ ownerId, engine, nodes: engine.outline(), queued: engine.queued(), ...engine.connectionState() }); };
-    const record = sessionDocument({ sessions, ownerId, docId: window.labAuthConfig.docId,
+    const record = sessionDocument({ sessions, ownerId, docId: connection.docId,
       transport: loroSupabaseTransport(supabase, { refreshSession: () => sessions.token(ownerId, { refresh: true }) }),
       createDocument: exclusiveDocument,
       onChange: publish, onError: (value) => { if (live) setError(value.message); },

@@ -1,5 +1,5 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
-import { supabase, sessions } from './session-client.js';
+import { supabase, sessions, connection } from './session-client.js';
 import { sessionDocument } from './session-document.js';
 import { createLoroEditor } from './loro-editor.js';
 
@@ -11,7 +11,7 @@ export function SessionOutline() {
   useEffect(() => {
     if (!ownerId) return;
     let live = true, latest;
-    const record = sessionDocument({ sessions, ownerId, docId: window.labAuthConfig.docId, endpoint: '/lab/owner-loro',
+    const record = sessionDocument({ sessions, ownerId, docId: connection.docId, endpoint: '/lab/owner-loro',
       onChange: (state) => { latest = state; if (live) setView((before) => before?.ownerId === ownerId ? { ...before, state } : before); },
       onError: (error) => { if (live) setError(error.message); },
     });
