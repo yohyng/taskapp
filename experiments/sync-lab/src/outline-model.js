@@ -1,4 +1,5 @@
 import { LoroText, LoroDoc } from 'loro-crdt';
+import { updateOutlineText } from './loro-text-update.js';
 
 export const outlineFields = ['collapsed', 'date', 'headingLevel', 'textColor', 'bgColor', 'imageWidth', 'createdAt', 'updatedAt'];
 function flatten(nodes, parentId = null, out = new Map()) {
@@ -22,7 +23,7 @@ export function applyOutlineIntent(doc, before, after) {
       node = tree.createNode(); nodes.set(id, node); node.data.set('id', id);
       node.data.setContainer('text', new LoroText());
     }
-    if (!old || old.text !== row.text) node.data.get('text').update(row.text);
+    if (!old || old.text !== row.text) updateOutlineText(node.data.get('text'), row.text);
     for (const field of ['favorite', 'completed', ...outlineFields]) {
       const value = row[field] ?? null;
       if (!old || (old[field] ?? null) !== value) node.data.set(field, value);
