@@ -29,7 +29,24 @@ export function loroNode(doc, id) {
 export function loroRows(doc, { withNativeDeleted = false } = {}) {
   const nodes = doc.getTree('outline').getNodes({ withDeleted: true });
   const byNativeId = new Map(nodes.map((node) => [node.id, node]));
-  return nodes.filter((node) => withNativeDeleted || !node.isDeleted()).map((node) => ({
+  const ready = new Map();
+  function complete(node) {
+    const trail = []; let current = node;
+    // 一つのcommitも送信では複数の範囲になる。作成途中の行やその子を空の行・
+    // 別のルートとして表示せず、元の履歴に残したまま親と本文の到着を待つ。
+    while (current && !ready.has(current.id)) {
+      trail.push(current.id);
+      const data = current.data, id = data.get('id');
+      if (typeof id !== 'string' || !id || !(data.get('text') instanceof LoroText)) {
+        ready.set(current.id, false); break;
+      }
+      current = byNativeId.get(current.parent()?.id);
+    }
+    const value = current ? ready.get(current.id) : true;
+    for (const id of trail) ready.set(id, value);
+    return value;
+  }
+  return nodes.filter((node) => (withNativeDeleted || !node.isDeleted()) && complete(node)).map((node) => ({
     id: node.data.get('id'), nativeId: node.id,
     parentId: byNativeId.get(node.parent()?.id)?.data.get('id') ?? null,
     order: node.index() ?? -1,

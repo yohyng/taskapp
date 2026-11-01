@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { LoroDoc, UndoManager } from 'loro-crdt';
+import { LoroDoc, LoroText, UndoManager } from 'loro-crdt';
 import { fixtureLoroDocument, loroNode, loroViewRows, loroRows } from '../src/loro-model.js';
 import { prepareLogEntry, splitLoroUpdate, LOG_UPDATE_BYTES } from '../src/loro-update-parts.js';
 import { logBatch } from '../src/loro-log-transfer.js';
 import { largeText } from '../tests/support/large-text.mjs';
+import { createLoroProjection } from '../src/loro-projection.js';
 
 test('長文：元の操作IDを保って分割し、逆順の受信と重複からも全文・木・属性を復元する', () => {
   const doc = fixtureLoroDocument(), baseline = doc.export({ mode: 'snapshot' }), received = new LoroDoc(), text = largeText(400000);
@@ -31,6 +32,26 @@ test('長文：一操作自体が大きい非本文属性は、分割で消し�
     assert.throws(() => splitLoroUpdate(doc, original), /分割できない大きな属性/);
     assert.equal(doc.getMap('attributes').get('value'), value);
   } finally { stop(); doc.free(); }
+});
+
+test('長文：分割の境界が行の作成途中でも未完成の空行を表示せず、再読込後の続きで同じ行になる', () => {
+  const doc = fixtureLoroDocument(), received = new LoroDoc(); received.import(doc.export({ mode: 'snapshot' }));
+  const projection = createLoroProjection(received), stopProjection = received.subscribe(projection.apply);
+  let original; const stop = doc.subscribeLocalUpdates((bytes) => { original = bytes; });
+  try {
+    loroNode(doc, 'row-0').data.get('text').insert(0, '文'.repeat(16383));
+    const made = doc.getTree('outline').createNode(); made.data.set('id', 'pasted-row');
+    made.data.setContainer('text', new LoroText()).insert(0, '字'.repeat(30000)); doc.commit();
+    const parts = splitLoroUpdate(doc, original); received.import(parts[0]);
+    assert.equal(received.getTree('outline').getNodes().length, 31);
+    assert.equal(projection.snapshot().length, 30); assert.ok(projection.snapshot().every((row) => typeof row.id === 'string'));
+    const reopened = new LoroDoc();
+    try {
+      reopened.import(received.export({ mode: 'snapshot' }));
+      for (const bytes of parts.slice(1)) { received.import(bytes); reopened.import(bytes); }
+      assert.deepEqual(projection.snapshot(), loroViewRows(doc)); assert.deepEqual(loroRows(reopened), loroRows(doc));
+    } finally { reopened.free(); }
+  } finally { stop(); stopProjection(); received.free(); doc.free(); }
 });
 
 test('長文：分割を書き出しても貼り付けは一回のUndoで戻り、別端末の追記を消さない', () => {

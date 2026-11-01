@@ -4,6 +4,9 @@ import { Buffer } from 'node:buffer';
 import { ownerFixture } from './support/owner-fixture.mjs';
 import { seedOutlineDocument } from '../src/outline-model.js';
 import { largeText } from './support/large-text.mjs';
+import { LoroText } from 'loro-crdt';
+import { loroNode } from '../src/loro-model.js';
+import { splitLoroUpdate } from '../src/loro-update-parts.js';
 
 const rowText = (page) => page.evaluate(() => window.lab.snapshot().find((row) => row.id === 'memo')?.text);
 async function pending(page, owner, id) {
@@ -68,4 +71,34 @@ test('長文の本体画面：旧版の大きな未送信を分割し、二度�
     await expect.poll(() => a.evaluate(() => window.lab.queued())).toBe(false); await expect.poll(() => rowText(b)).toBe('短いメモ');
     await expect(a.locator('[data-error]')).toBeEmpty(); await expect(a.locator('[data-outline-sync-conflict]')).toHaveCount(0);
   } finally { seed.free(); await Promise.all(contexts.map((context) => context.close())); await fixture.close(); }
+});
+
+test('長文の本体画面：作成途中の行を空行として表示せず、受信途中の再読込から残りを取り込む', async ({ browser }) => {
+  const id = randomUUID(), owner = randomUUID(), fixture = await ownerFixture(id, { ownerId: owner }), context = await browser.newContext();
+  const source = seedOutlineDocument([{ id: 'memo', text: '基準', children: [] }]), snapshot = Buffer.from(source.export({ mode: 'snapshot' })).toString('base64');
+  let bytes; const stop = source.subscribeLocalUpdates((value) => { bytes = value; });
+  loroNode(source, 'memo').data.get('text').insert(0, '文'.repeat(16383));
+  const made = source.getTree('outline').createNode(); made.data.set('id', 'pasted-row');
+  made.data.setContainer('text', new LoroText()).insert(0, '字'.repeat(30000)); source.commit(); stop();
+  const parts = splitLoroUpdate(source, bytes).map((part) => Buffer.from(part).toString('base64')); let available = 1;
+  try {
+    const page = await context.newPage();
+    await page.addInitScript((config) => { window.labAuthConfig = config; }, { docId: id, key: fixture.apiKey });
+    await fixture.routeAuth(page); await page.routeWebSocket('**/realtime/v1/**', (socket) => socket.close());
+    await page.route('**/rest/v1/rpc/taskspace_loro_exchange', async (route) => {
+      const body = route.request().postDataJSON(), first = Math.max(0, body.p_cursor);
+      expect(body.p_updates).toEqual([]);
+      await route.fulfill({ json: { cursor: available, head: available, snapshot: body.p_cursor === -1 ? snapshot : null,
+        updates: parts.slice(first, available).map((part, index) => ({ sequence: first + index + 1, bytes: part })), acknowledged: [] } });
+    });
+    await page.goto('/outline.html');
+    await page.getByPlaceholder('メールアドレス').fill(fixture.credentials.email); await page.getByPlaceholder('パスワード').fill(fixture.credentials.password);
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click(); await expect(page.locator('[data-row="memo"]')).toBeVisible();
+    expect(await page.evaluate(() => window.lab.snapshot().map((row) => row.id))).toEqual(['memo']);
+    await page.evaluate(() => window.lab.localBarrier()); await page.reload(); await expect(page.locator('[data-row="memo"]')).toBeVisible();
+    await expect(page.locator('[data-row]')).toHaveCount(1);
+    available = parts.length; await page.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(page.locator('[data-row="pasted-row"] [data-row-text]')).toHaveText('字'.repeat(30000));
+    await expect(page.locator('[data-row]')).toHaveCount(2); await expect(page.locator('[data-error]')).toBeEmpty();
+  } finally { source.free(); await context.close(); await fixture.close(); }
 });
