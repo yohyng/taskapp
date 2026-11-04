@@ -5,8 +5,12 @@
 合成Auth・PostgREST・通知を止めた試験の成功を、実サービスの成功と読み替えない。
 
 2026-11-04に検証先URL `https://wtshrgsmqavcytjmqjft.supabase.co` をユーザーから受領した。
-本番の参照IDと異なることを確認した段階で、サービス疎通・SQL適用・実Auth/Realtimeの検査は未実施。
-次は公開鍵と、確認済みテストユーザー二人のUUID・非公開の認証設定を用意して合成原本を生成する。
+本番の参照IDと異なることを確認し、受領した公開鍵はgit対象外の`.env.staging.local`へ保存した。
+同日にAuth設定のGETが200、既存SDKによる同期表のSELECTが404/PGRST205で応答することを確認した。
+後者は未投入の表がschema cacheにないという内容で、SQL適用後の同期成功を意味しない。
+Data APIルートのOpenAPI取得は401/Secret API key requiredだが、SDKの表読取りは別の経路で応答するため、
+この確認のために管理鍵を要求しない。実ログイン・SQL適用・Realtime配信はまだ未検証。
+次は確認済みテストユーザー二人のUUID・非公開の認証設定を用意して合成原本を生成する。
 
 ## 接続先を用意する
 
