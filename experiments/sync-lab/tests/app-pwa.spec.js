@@ -4,7 +4,7 @@ import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { appFixture } from './support/app-fixture.mjs';
 
-test('通常入口のPWA：エンジン本体も圏外で読み、未送信の追記を再起動後も残して復帰する', async ({ browser }) => {
+test('通常入口のPWA：エンジン本体も圏外で読み、未送信の追記を再起動後も残して復帰する', async ({ browser }, info) => {
   test.skip(process.env.LAB_VERIFY_APP_PWA !== '1', '先にprepare:appでローカル専用の成果物を作る');
   const manifest = JSON.parse(await readFile(new URL('../.data/app-preview.json', import.meta.url), 'utf8'));
   const f = await appFixture(browser, manifest);
@@ -33,7 +33,13 @@ test('通常入口のPWA：エンジン本体も圏外で読み、未送信の�
     await f.stopHttp(false);
     await a.evaluate(() => window.dispatchEvent(new Event('online')));
     await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText(value);
-    await expect.poll(() => a.evaluate(() => window.lab.queued())).toBe(false);
+    try { await expect.poll(() => a.evaluate(() => window.lab.queued())).toBe(false); }
+    catch (error) {
+      const state = await a.evaluate(() => ({ delivery: window.lab.deliveryState(), persistence: window.lab.persistenceStats(),
+        online: navigator.onLine, visibility: document.visibilityState, focused: document.hasFocus() }));
+      await info.attach('本文を含まない送信確認の停止状態', { body: JSON.stringify(state), contentType: 'application/json' });
+      console.log('PWA_DELIVERY_STATE', JSON.stringify(state)); throw error;
+    }
     await expect(a.locator('[data-outline-sync-conflict],[data-outline-recovery]')).toHaveCount(0);
     expect(await f.legacyRequests()).toEqual([]); expect(f.errors).toEqual([]);
   } finally { await f.stopHttp(false); await f.close(); }

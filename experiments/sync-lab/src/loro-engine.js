@@ -18,6 +18,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   let journalCount = saved.updates.length, journalBytes = saved.updates.reduce((total, entry) => total + entry.bytes.length, 0);
   let compacting, compactTimer, closing = false, compactionFailures = 0;
   let connected = false, timer, flight, controller, selectionForHistory = null, lastNotification, resumeAfterHide = false, failures = 0;
+  let deliveryPhase = 'idle', lastDeliveryError = null;
   const transfers = { snapshots: 0, updates: 0, receivedBytes: 0 };
   let projection, undo, stopLocal, stop;
   const selections = new Map(), node = (id) => projection.node(id), snapshot = () => projection.snapshot();
@@ -85,6 +86,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   }
   async function sync() {
     try {
+      deliveryPhase = 'local-save';
       await barrier();
       if (!enabled || fatal) return;
       const replacement = transport.prepareEntry?.(outbox[0], doc);
@@ -100,8 +102,10 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
       const request = loroSyncRequest(doc, batch);
       controller = new AbortController();
       const context = { cursor, batch };
+      deliveryPhase = 'request';
       const result = await transport.sync(docId, request, controller.signal, context);
       if (!enabled) return;
+      deliveryPhase = 'receive';
       const received = (transport.decode || decodeLoroTransfer)(result, request.bootstrap, context);
       const before = JSON.stringify([...doc.oplogVersion().encode()]), waiting = JSON.stringify([...(doc.exportPendingUpdates() || [])]);
       // 単独snapshotのimportを使い、空の文書へ全履歴を一操作ずつ再生する経路を避ける。
@@ -110,15 +114,16 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
       if (restart) unobserve();
       try { for (const bytes of received.updates) doc.import(bytes); } finally { if (restart) observe(); }
       const changed = JSON.stringify([...doc.oplogVersion().encode()]) !== before || JSON.stringify([...(doc.exportPendingUpdates() || [])]) !== waiting;
+      deliveryPhase = 'ack-save';
       if (batch.length || changed || received.cursor !== undefined && received.cursor !== cursor) await persist({ updates: changed ? received.updates : [], outgoing: [], acknowledged: batch.map((entry) => entry.id), cursor: received.cursor });
       outbox.splice(0, batch.length);
       if (received.cursor !== undefined) cursor = received.cursor;
       if (received.more || outbox.length) urgent = true;
       transfers[received.mode === 'snapshot' ? 'snapshots' : 'updates']++;
       transfers.receivedBytes += received.updates.reduce((total, bytes) => total + bytes.length, 0);
-      failures = 0; connected = true; notify();
+      failures = 0; connected = true; deliveryPhase = 'confirmed'; lastDeliveryError = null; notify();
     } catch (error) {
-      failures++; connected = false;
+      failures++; connected = false; lastDeliveryError = { name: error.name, status: error.status ?? null };
       // 認証切れや権限拒否を100msごとに繰り返さない。ログイン状態が戻ったらconnectで再開する。
       if ([401, 403].includes(error.status)) enabled = false;
       notify();
@@ -157,6 +162,9 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   return {
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
     connectionState: () => ({ connected, ready: !transport.decode || cursor >= 0 }),
+    // 本文・差分・認証値を含めず、通信と端末確定のどちらで止まったかを試験から確認する。
+    deliveryState: () => ({ phase: deliveryPhase, enabled, connected, inFlight: !!flight, saving: saves,
+      pending: outbox.length, cursor, failures, fatal: fatal?.name ?? null, lastError: lastDeliveryError }),
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),
     nativeIds: () => projection.nativeIds(),
