@@ -39,9 +39,13 @@ jobs:
         run: pnpm test tests/app-screen.spec.js tests/app-pwa.spec.js --repeat-each=5 --max-failures=2 --reporter=line,json > app-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: app-results.json
+      - name: 失敗していたWebKitの通常復帰を20回反復する
+        run: pnpm test tests/app-pwa.spec.js --project=webkit -g '圏外再起動から未送信の追記を保って復帰する' --repeat-each=20 --max-failures=1 --reporter=line,json > pwa-repeat-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-repeat-results.json
       - name: 結果を表示
         if: always()
-        run: cat app-output.log 2>/dev/null || true
+        run: cat app-output.log pwa-repeat-output.log 2>/dev/null || true
       - name: 本文を含まない停止状態と合成試験のトレースを保管
         if: always()
         uses: actions/upload-artifact@v4
@@ -49,5 +53,6 @@ jobs:
           name: sync-app
           path: |
             experiments/sync-lab/app-results.json
+            experiments/sync-lab/pwa-repeat-results.json
             experiments/sync-lab/test-results/
           retention-days: 7
