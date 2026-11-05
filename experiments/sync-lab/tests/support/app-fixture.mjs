@@ -7,10 +7,24 @@ export async function appFixture(browser, manifest) {
   const auth = manifest ? { ...(await (await fetch(`${manifest.config.url}/__app-fixture/config`)).json()),
     apiKey: manifest.config.key, close: async () => {} } : await ownerFixture(docId, { ownerId });
   const state = appState(), { entries, legacy } = state;
-  const contexts = [], errors = [], offline = new Set();
+  const contexts = [], errors = [], nativeNetwork = [], offline = new Set();
   async function open({ pwa = false } = {}) {
     const context = await browser.newContext({ serviceWorkers: pwa ? 'allow' : 'block' }); contexts.push(context);
-    const page = await context.newPage(); page.on('pageerror', (error) => errors.push(error.message));
+    const page = await context.newPage(), failedRequests = new Set();
+    page.on('requestfailed', (request) => failedRequests.add(request.url()));
+    page.on('pageerror', (error) => {
+      // WebKitは、catch済みfetchの通信診断もpageerrorへ載せる。実際に失敗した合成APIと
+      // native fetchだけのスタックに限って分け、下のwindow側でも未処理例外を独立して拾う。
+      const match = /^Fetch API cannot load (http:\/\/127\.0\.0\.1:4183\/rest\/v1\/\S+) due to access control checks\.\n\s+at fetch \(\[native code\]:0:0\)$/.exec(error.stack || '');
+      if (pwa && match && error.name === 'Fetch API cannot load http') nativeNetwork.push({ url: match[1], message: error.message, failedRequests });
+      else errors.push(error.message);
+    });
+    await page.exposeFunction('__labScriptFailure', (message) => errors.push(message));
+    await page.addInitScript(() => {
+      const report = (value) => window.__labScriptFailure(String(value?.message || value)).catch(() => {});
+      window.addEventListener('error', (event) => { if (event.error) report(event.error); });
+      window.addEventListener('unhandledrejection', (event) => report(event.reason));
+    });
     await page.addInitScript(({ docId, key }) => {
       window.labAuthConfig = { docId, key };
       if (!localStorage.getItem('taskspace-panes-v1')) localStorage.setItem('taskspace-panes-v1', JSON.stringify([
@@ -32,7 +46,7 @@ export async function appFixture(browser, manifest) {
     await page.locator('[data-row="memo"]').waitFor({ timeout: 20000 });
     return page;
   }
-  return { open, entries, errors, legacy, offline,
+  return { open, entries, get errors() { return [...errors, ...nativeNetwork.filter((entry) => !entry.failedRequests.has(entry.url)).map((entry) => entry.message)]; }, legacy, offline,
     async legacyRequests() { return manifest ? (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()).legacy : legacy; },
     async remoteState() { return (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()); },
     async stopHttp(offline) { await fetch(`${manifest.config.url}/__app-fixture/offline`, { method: 'POST', body: JSON.stringify({ offline }) }); },
