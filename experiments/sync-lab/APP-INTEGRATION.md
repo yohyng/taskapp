@@ -74,6 +74,8 @@ profileはtmpdirへ新規作成する検証専用のもの。ログイン保存�
 0.20.5では、意図した圏外で失敗した合成APIのnative通信診断だけを試験から分ける。
 windowのerror/unhandledrejectionも別に拾い、同じ形の未処理Promiseを見逃さない回帰を通す。
 失敗要求は同じcontextで追い、SW経由でpageへ通知されない通信も照合する。
+最終の0.20.6では、ディスク保存の通常範囲40件とWebKitの通常復帰20件がLinuxの専用CIでも成功した。
+一時contextでの過去の失敗と、その区別はRESULTS.mdに残す。
 
 Windows WebKitの`setOffline(true)`ではナビゲーション時に内部エラーとなったため、
 最終試験は上記の全HTTP停止を両ブラウザーで共用する。

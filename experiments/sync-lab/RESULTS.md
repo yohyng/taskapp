@@ -17,7 +17,8 @@ native通信診断の照合もpageだけでなく同じcontextの失敗要求を
 window側の未処理例外の記録と、その検出回帰は維持する。
 新規PWAビルド・lintと、永続profileでの通常画面/PWA/例外検出8件が両ブラウザーで成功した。
 今回のローカル関連範囲は保存16件・編集/移行/控え/復元56件と合わせて80件。
-[同じ最終ソースの専用CI](https://github.com/yohyng/taskapp/actions/runs/42023912202)で通常範囲40件とWebKitの通常復帰20件を確認中。
+[同じ最終ソースの専用CI](https://github.com/yohyng/taskapp/actions/runs/42023912202)は通常範囲40件・WebKitの通常復帰20件の計60件が成功した。失敗・skipは0件。
+同じソースの[本体CI](https://github.com/yohyng/taskapp/actions/runs/42023912017)と[切替専用CI](https://github.com/yohyng/taskapp/actions/runs/42023912087)も成功した。
 最新の全体CIは別に実行中で、0.20.4の全体合格をそのまま最新ソースの合格とはしない。本番・DB・Driveは未変更。
 
 ## 0.20.5：全体試験の合格と圏外診断の区別
