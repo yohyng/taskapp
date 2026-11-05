@@ -109,16 +109,16 @@ export async function verifyStaging(env, report = console.log) {
     assert.equal(invalidJwt.status, 401, '署名に合わないJWTが認証層で拒否されていません');
     report('権限：未認証・不正JWT・他人の読書き・直接更新を拒否、RLSで他人の文書を非表示');
 
-    const subscribed = [latch(), latch(), latch()], received = [latch(), latch()]; let foreignLeaks = 0;
+    const ready = [latch(), latch(), latch()], received = [latch(), latch()]; let foreignLeaks = 0;
     const watch = (client, id, index, callback) => {
       cleanups.push(loroSupabaseTransport(client).watch(id, (event) => {
-        if (!event) subscribed[index].resolve(); else callback(event);
-      }));
+        if (event) callback(event);
+      }, { onReady: () => ready[index].resolve() }));
     };
     watch(b, config.docId, 0, (event) => received[0].resolve(event));
     watch(other, config.otherDocId, 1, (event) => received[1].resolve(event));
     watch(other, config.docId, 2, () => { foreignLeaks++; });
-    await within(Promise.all(subscribed.map((value) => value.promise)), 'Realtimeの購読成立');
+    await within(Promise.all(ready.map((value) => value.promise)), 'RealtimeのDB変更配信準備');
     const marker = `・実サービス検証${randomUUID()}`;
     async function append(client, id, current) {
       const version = current.doc.version();

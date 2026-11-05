@@ -1,8 +1,10 @@
-# 本体のアウトラインとDB追記ログ（0.14.0）
+# 本体のアウトラインとDB追記ログ（0.14.1）
 
 0.14.0で[独立した実Supabaseへの接続手順](SUPABASE-STAGING.md)を追加した。
 専用モードの公開設定、二人の合成原本のSQL生成、実Auth・RPC・Realtimeの試験コマンドを備える。
-実サービスの実行結果は検証先の準備後に記録する。既存の合成試験の成功とは区別する。
+0.14.1では実SupabaseでAuth・JWT・所有者権限・RPC保存・実際のRealtime通知を検査した。
+配信準備前の保存による通知の取りこぼしを再現し、配信準備完了時にもDBを再取得する。
+実行範囲と結果は[検証記録](RESULTS.md)へ分け、製品PWAや本番移行の完了とは扱わない。
 
 ## 接続する範囲
 
@@ -55,6 +57,9 @@ DBの履歴削除・snapshot圧縮はまだ行わないため、snapshot取得�
 既存SDKの[Postgres Changes](https://supabase.com/docs/guides/realtime/postgres-changes)でheadの更新を購読する。
 通知では完了扱いにせず、RPCから確定済みの続きを読む。起動・購読成立・画面復帰・接続復帰でも再取得する。
 通常は3秒ごとの再確認を残し、端末の入力時・通知時には待たずに再取得する。
+WebSocketのSUBSCRIBEDだけではDB変更配信の準備を保証しない。
+postgres_changesのsystem/okを受けた時も再取得し、接続から配信準備までの間に保存された変更を拾う。
+実サービスの試験はこの準備完了を待ってから保存し、実変更通知を受けたことを検査する。
 401では既存のセッション管理へ一回だけ更新を依頼し、更新や通信待ちで編集画面を作り直さない。
 空の初回に取得失敗した場合は読み込み状態を保ち、取得済みの空文書と同じ扱いにしない。
 
@@ -82,4 +87,7 @@ SQLは使い捨てPostgres17のlab_sourceだけに接続して検査する。
 ブラウザーは本物のAuthGate・SDK・Outlinerを使うが、AuthとPostgRESTのHTTP境界は試験用の代役。
 RPCの中身は同じSQLを実Postgresへ実行する。実際のSupabaseサービスへの疎通・JWT署名検査ではない。
 RealtimeはSDKの購読配線の単体試験と、通知をすべて失わせた状態での追いつきを検査する。
-本物のSupabase Realtime配信はまだ検証していない。成功範囲はRESULTS.mdに記録する。
+この合成試験とは別に、0.14.1では独立した検証用Supabaseで実Auth/JWT・RPC・Realtimeの配信を確認した。
+SDKによる二接続と別ユーザーの試験に加え、実Outlinerと実Supabaseを結ぶChromium/WebKitの4シナリオも成功した。
+実機のPWA・日本語IME・完全な圏外での起動の検査はまだ残る。
+成功範囲はRESULTS.mdに記録する。

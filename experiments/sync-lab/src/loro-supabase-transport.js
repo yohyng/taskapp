@@ -18,11 +18,18 @@ export function loroSupabaseTransport(client, { refreshSession } = {}) {
         throw Object.assign(new Error('通信の再開待ち'), { status, cause: error });
       }
     },
-    watch(docId, changed) {
+    watch(docId, changed, { onReady } = {}) {
+      let active = true;
+      const wake = (event) => { if (active) changed(event); };
       const channel = client.channel(`outline-log:${docId}:${crypto.randomUUID()}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'taskspace_loro_documents', filter: `id=eq.${docId}` }, changed)
-        .subscribe((status) => { if (status === 'SUBSCRIBED') changed(); });
-      return () => { client.removeChannel(channel); };
+        // WebSocketの購読成立からDB配信の準備完了までの変更は、通知されないことがある。
+        // 配信準備の通知でもDBを取り直し、その間の確定済み変更を拾う。
+        .on('system', {}, (event) => {
+          if (active && event.extension === 'postgres_changes' && event.status === 'ok') { wake(); onReady?.(); }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'taskspace_loro_documents', filter: `id=eq.${docId}` }, wake)
+        .subscribe((status) => { if (status === 'SUBSCRIBED') wake(); });
+      return () => { active = false; return client.removeChannel(channel); };
     },
   };
 }

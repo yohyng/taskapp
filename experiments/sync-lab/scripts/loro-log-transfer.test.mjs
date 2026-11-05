@@ -30,7 +30,7 @@ test('差分ログ：送信を件数とバイト数で小分けし、取得通�
   assert.equal(logBatch(Array.from({ length: 8 }, () => ({ bytes: new Uint8Array(65536) }))).length, 4);
   assert.throws(() => logBatch([{ bytes: new Uint8Array(65537) }]), /送信上限/);
   let notify, status, removed = 0, signaled, parameters, calls = 0;
-  const channel = { on(_kind, filter, callback) { assert.equal(filter.table, 'taskspace_loro_documents'); notify = callback; return this; }, subscribe(callback) { status = callback; return this; } };
+  const channel = { on(kind, filter, callback) { if (kind === 'postgres_changes') { assert.equal(filter.table, 'taskspace_loro_documents'); notify = callback; } return this; }, subscribe(callback) { status = callback; return this; } };
   const transport = loroSupabaseTransport({ channel: () => channel, removeChannel: () => removed++, rpc(name, params) {
     calls++; assert.equal(name, 'taskspace_loro_exchange'); parameters = params;
     return { abortSignal(signal) { signaled = signal; return Promise.resolve({ data: '応答', error: null }); } };
@@ -39,6 +39,23 @@ test('差分ログ：送信を件数とバイト数で小分けし、取得通�
   const abort = new AbortController(); assert.equal(await transport.sync('文書', {}, abort.signal, { cursor: 4, batch: [] }), '応答');
   assert.deepEqual(parameters, { p_doc: '文書', p_cursor: 4, p_updates: [] }); assert.equal(signaled.aborted, false);
   stop(); assert.equal(removed, 1);
+});
+
+test('差分ログ：接続だけを配信準備完了とせず、DB配信の準備時に空白期間の変更を再取得する', () => {
+  const handlers = new Map(); let status, removed = 0, wakes = 0, ready = 0;
+  const channel = { on(kind, _filter, callback) { handlers.set(kind, callback); return this; }, subscribe(callback) { status = callback; return this; } };
+  const transport = loroSupabaseTransport({ channel: () => channel, removeChannel: () => removed++ });
+  const stop = transport.watch('文書', () => wakes++, { onReady: () => ready++ });
+  status('SUBSCRIBED'); assert.equal(wakes, 1); assert.equal(ready, 0);
+  handlers.get('system')({ extension: 'presence', status: 'ok' });
+  handlers.get('system')({ extension: 'postgres_changes', status: 'error' });
+  assert.equal(wakes, 1); assert.equal(ready, 0);
+  handlers.get('system')({ extension: 'postgres_changes', status: 'ok' });
+  assert.equal(wakes, 2, '接続直後の取りこぼしをDBから再取得する'); assert.equal(ready, 1);
+  handlers.get('postgres_changes')({ new: { head: 2 } }); assert.equal(wakes, 3);
+  stop(); handlers.get('system')({ extension: 'postgres_changes', status: 'ok' });
+  status('SUBSCRIBED'); handlers.get('postgres_changes')({ new: { head: 3 } });
+  assert.equal(removed, 1); assert.equal(wakes, 3); assert.equal(ready, 1, '終了後の通知で再接続を始めない');
 });
 
 test('差分ログ：401の一回だけセッションを更新し、更新待ちに終了した文書は再送しない', async () => {
