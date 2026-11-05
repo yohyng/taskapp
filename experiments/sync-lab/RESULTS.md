@@ -15,6 +15,10 @@ fetchのラップは取り除いた。通信診断と同じ名前・スタック
 最終ソースの配信4シナリオを各3回、計12件と、既存の通常画面/PWA8件がローカルで成功した。lintも成功した。
 所有者の拒否を含む単体一式85件も成功し、最終のローカル実行は計105件で失敗・skipは0件だった。
 Linuxの専用CIにも同じ12件を接続する。結果と本番適用は別に確認し、本番のアプリ・DB・Driveは変更しない。
+最終ソース`c27f9b3`の[Linux配信切替ジョブ](https://github.com/yohyng/taskapp/actions/runs/42042132622/job/127295378951)も12件成功し、失敗・skipは0件だった。
+固定版の取得・二版のビルド・ハッシュ検査を終えた成果物のmanifestと試験記録も保管した。
+[本体CI](https://github.com/yohyng/taskapp/actions/runs/42042132489)と[切替専用CI](https://github.com/yohyng/taskapp/actions/runs/42042132511)も成功した。
+同じソースの[通常画面/PWAの反復](https://github.com/yohyng/taskapp/actions/runs/42042132622)と[全体CI](https://github.com/yohyng/taskapp/actions/runs/42042132554)は別に実行中で、未完了分を合格した扱いにはしない。
 
 ## 0.22.0：通常PWAの更新・切り戻し・配信失敗からの継続
 
