@@ -4,7 +4,7 @@ import process from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { appFixture } from './support/app-fixture.mjs';
 
-test('通常入口のPWA：エンジン本体も圏外で読み、未送信の追記を再起動後も残して復帰する', async ({ browser }, info) => {
+for (const interruptedStorage of [false, true]) test(`通常入口のPWA：圏外再起動から${interruptedStorage ? '保存接続も開き直して' : '未送信の追記を保って'}復帰する`, async ({ browser }, info) => {
   test.skip(process.env.LAB_VERIFY_APP_PWA !== '1', '先にprepare:appでローカル専用の成果物を作る');
   const manifest = JSON.parse(await readFile(new URL('../.data/app-preview.json', import.meta.url), 'utf8'));
   const f = await appFixture(browser, manifest);
@@ -30,6 +30,15 @@ test('通常入口のPWA：エンジン本体も圏外で読み、未送信の�
     await expect(a.locator('[data-row="memo"] [data-row-text]')).toHaveText(value);
     expect(await a.evaluate(() => window.lab.queued())).toBe(true);
     expect((await f.remoteState()).entries).toBe(before.entries);
+    if (interruptedStorage) await a.evaluate(() => {
+      const original = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (...args) {
+        if (this.name.startsWith('taskspace-lab-loro-owner:') && args[1] === 'readwrite') {
+          IDBDatabase.prototype.transaction = original; this.close();
+        }
+        return original.apply(this, args);
+      };
+    });
     await f.stopHttp(false);
     await a.evaluate(() => window.dispatchEvent(new Event('online')));
     await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText(value);
@@ -40,6 +49,11 @@ test('通常入口のPWA：エンジン本体も圏外で読み、未送信の�
       await info.attach('本文を含まない送信確認の停止状態', { body: JSON.stringify(state), contentType: 'application/json' });
       console.log('PWA_DELIVERY_STATE', JSON.stringify(state)); throw error;
     }
+    if (interruptedStorage) expect(await a.evaluate(() => window.lab.persistenceStats().reopens)).toBe(1);
+    // 見た目だけ待ちを消したのではなく、ACKを保存した原本から再び起動できることを確認する。
+    await a.reload({ waitUntil: 'domcontentloaded' });
+    await expect(a.locator('[data-row="memo"] [data-row-text]')).toHaveText(value);
+    await expect.poll(() => a.evaluate(() => window.lab.queued())).toBe(false);
     await expect(a.locator('[data-outline-sync-conflict],[data-outline-recovery]')).toHaveCount(0);
     expect(await f.legacyRequests()).toEqual([]); expect(f.errors).toEqual([]);
   } finally { await f.stopHttp(false); await f.close(); }

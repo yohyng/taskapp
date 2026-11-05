@@ -123,7 +123,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
       transfers.receivedBytes += received.updates.reduce((total, bytes) => total + bytes.length, 0);
       failures = 0; connected = true; deliveryPhase = 'confirmed'; lastDeliveryError = null; notify();
     } catch (error) {
-      failures++; connected = false; lastDeliveryError = { name: error.name, status: error.status ?? null };
+      failures++; connected = false; lastDeliveryError = { name: error.name, status: error.status ?? null, storageStage: error.storageStage ?? null };
       // 認証切れや権限拒否を100msごとに繰り返さない。ログイン状態が戻ったらconnectで再開する。
       if ([401, 403].includes(error.status)) enabled = false;
       notify();

@@ -17,11 +17,14 @@ function checkOutgoing(entry) {
 }
 
 export async function openLoroStorage(docId) {
-  const db = await new Promise((resolve, reject) => {
-    let migrationError;
+  let closed = false, reopening;
+  const open = (allowCreate) => new Promise((resolve, reject) => {
+    let migrationError, abandoned = false;
     const request = indexedDB.open(`taskspace-lab-loro-${docId}`, 2);
     request.onupgradeneeded = (event) => {
       const tx = request.transaction;
+      // 切れた接続の取り直しで保存領域まで消えていたら、空の原本を作らない。
+      if (!allowCreate) { migrationError = new Error('端末の保存領域を再取得できません'); tx.abort(); return; }
       if (event.oldVersion === 0) request.result.createObjectStore('state');
       request.result.createObjectStore('updates', { keyPath: 'sequence', autoIncrement: true });
       const outgoing = request.result.createObjectStore('outbox', { keyPath: 'id' });
@@ -41,15 +44,24 @@ export async function openLoroStorage(docId) {
         } catch (error) { migrationError = error; try { tx.abort(); } catch { /* 移行取引が先に中止されても元の版を残す。 */ } }
       };
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const connection = request.result;
+      if (closed || abandoned) { connection.close(); reject(new Error('端末の保存接続は終了しました')); return; }
+      connection.onversionchange = () => { closed = true; connection.close(); };
+      resolve(connection);
+    };
     request.onerror = () => reject(migrationError || request.error);
-    request.onblocked = () => reject(new Error('検証用の保存領域が開けません'));
+    request.onblocked = () => { abandoned = true; reject(new Error('検証用の保存領域が開けません')); };
   });
-  db.onversionchange = () => db.close();
-  const counts = { appendTransactions: 0, appendedUpdates: 0, appendedBytes: 0, compactions: 0, checkpointExports: 0 };
-  function transaction(stores, mode, action) {
+  let db = await open(true);
+  const counts = { appendTransactions: 0, appendedUpdates: 0, appendedBytes: 0, compactions: 0, checkpointExports: 0, reopens: 0 };
+  function transact(connection, stores, mode, action) {
     return new Promise((resolve, reject) => {
-      const tx = db.transaction(stores, mode);
+      let tx;
+      try { tx = connection.transaction(stores, mode); }
+      catch (cause) {
+        reject(Object.assign(new Error('端末保存の取引を開始できません', { cause }), { name: cause.name, storageStage: 'begin' })); return;
+      }
       let result, failure;
       const fail = (error) => { failure = error; try { tx.abort(); } catch { /* すでに中止された取引も同じ失敗として返す。 */ } };
       tx.onabort = () => reject(failure || tx.error || new Error('端末保存を確定できません'));
@@ -57,6 +69,25 @@ export async function openLoroStorage(docId) {
       try { action(tx, (value) => { result = value; }, fail); } catch (error) { fail(error); }
       tx.oncomplete = () => { try { resolve(typeof result === 'function' ? result() : result); } catch (error) { reject(error); } };
     });
+  }
+  async function transaction(stores, mode, action) {
+    if (closed) throw new Error('端末の保存接続は終了しました');
+    const previous = db;
+    try { return await transact(previous, stores, mode, action); }
+    catch (error) {
+      // WebKitの通信復帰・再起動後に接続だけ閉じる場合がある。取引を始める前の
+      // InvalidStateErrorだけ取り直す。途中の中止・容量不足・明示終了は再実行しない。
+      if (closed || error.name !== 'InvalidStateError' || error.storageStage !== 'begin') throw error;
+      if (db === previous) {
+        if (!reopening) {
+          previous.close();
+          reopening = open(false).then((connection) => { db = connection; counts.reopens++; }).finally(() => { reopening = null; });
+        }
+        await reopening;
+      }
+      if (closed) throw new Error('端末の保存接続は終了しました', { cause: error });
+      return transact(db, stores, mode, action);
+    }
   }
   async function read({ includeArchives = false } = {}) {
     const saved = await transaction(['state', 'updates', 'outbox'], 'readonly', (tx, done) => {
@@ -231,5 +262,5 @@ export async function openLoroStorage(docId) {
     return applied;
   }
   return { id: docId, read, append, compact, readHandoff, commitHandoff, readCutover, captureCutover, finishCutover,
-    readRecovery, commitRecovery, stats: () => ({ ...counts }), close: () => db.close() };
+    readRecovery, commitRecovery, stats: () => ({ ...counts }), close: () => { closed = true; db.close(); } };
 }

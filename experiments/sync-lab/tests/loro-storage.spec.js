@@ -51,6 +51,53 @@ test('Loro差分保存：更新・送信待ち・ACKの取引を途中で中止�
   expect(result).toEqual({ failed: true, unchanged: true, text: '先：最初のメモ', ids: ['a'] });
 });
 
+test('Loro差分保存：ACKの取引開始前に接続が閉じても、原本を開き直して送信確認を確定する', async ({ page }) => {
+  const result = await page.evaluate(async (id) => {
+    const p = window.storageProbe, s = await p.openLoroStorage(id), doc = p.fixtureLoroDocument();
+    const original = IDBDatabase.prototype.transaction;
+    try {
+      const bytes = doc.export({ mode: 'update' });
+      await s.append({ updates: [bytes], outgoing: [{ id: '送信済み', bytes }], cursor: 0 });
+      let interrupted = false;
+      IDBDatabase.prototype.transaction = function (...args) {
+        if (!interrupted && this.name === `taskspace-lab-loro-${id}` && args[1] === 'readwrite') {
+          interrupted = true; this.close();
+        }
+        return original.apply(this, args);
+      };
+      await Promise.all([s.append({ acknowledged: ['送信済み'], cursor: 1 }), s.read()]);
+      const saved = await s.read();
+      return { interrupted, ids: saved.outbox.map((entry) => entry.id), cursor: saved.cursor,
+        same: JSON.stringify(p.rows(saved)) === JSON.stringify(p.loroViewRows(doc)), reopens: s.stats().reopens };
+    } finally { IDBDatabase.prototype.transaction = original; s.close(); doc.free(); }
+  }, randomUUID());
+  expect(result).toEqual({ interrupted: true, ids: [], cursor: 1, same: true, reopens: 1 });
+});
+
+test('Loro差分保存：明示終了は再開せず、消えた保存領域を接続復旧で空に作り直さない', async ({ page }) => {
+  const result = await page.evaluate(async (id) => {
+    const p = window.storageProbe, closed = await p.openLoroStorage(`${id}-終了`);
+    closed.close();
+    let stopped = false;
+    try { await closed.read(); } catch { stopped = true; }
+    const s = await p.openLoroStorage(id), original = IDBDatabase.prototype.transaction;
+    let connection;
+    try {
+      IDBDatabase.prototype.transaction = function (...args) { if (this.name === `taskspace-lab-loro-${id}`) connection = this; return original.apply(this, args); };
+      await s.read(); IDBDatabase.prototype.transaction = original;
+      connection.close();
+      await new Promise((resolve, reject) => {
+        const request = indexedDB.deleteDatabase(connection.name);
+        request.onsuccess = resolve; request.onerror = () => reject(request.error);
+      });
+      let missing = false;
+      try { await s.read(); } catch (error) { missing = error.message === '端末の保存領域を再取得できません'; }
+      return { stopped, missing, reopens: s.stats().reopens };
+    } finally { IDBDatabase.prototype.transaction = original; s.close(); }
+  }, randomUUID());
+  expect(result).toEqual({ stopped: true, missing: true, reopens: 0 });
+});
+
 test('Loro差分保存：まとめ直し中の次の編集と受信、ACKを残して圏外で読み直す', async ({ page }) => {
   const result = await page.evaluate(async (id) => {
     const p = window.storageProbe, s = await p.openLoroStorage(id), other = await p.openLoroStorage(id), doc = p.fixtureLoroDocument();
