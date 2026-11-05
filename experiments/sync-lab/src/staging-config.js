@@ -6,11 +6,10 @@ export function stagingProject(reference) {
   return `https://${reference}.supabase.co`;
 }
 export function documentId(value) {
-  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error('検証文書のUUIDが必要です');
+  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) throw new Error('アウトライン文書のUUIDが必要です');
   return value.toLowerCase();
 }
-export function stagingConfig(env) {
-  const reference = env.LAB_SUPABASE_PROJECT_REF, url = stagingProject(reference), key = env.LAB_SUPABASE_PUBLISHABLE_KEY;
+export function publicBrowserKey(key, reference) {
   // 管理鍵はブラウザーへ渡さない。JWTは公開anon鍵の形式確認だけで、署名を検証した扱いにはしない。
   let allowed = typeof key === 'string' && /^sb_publishable_[A-Za-z0-9_-]+$/.test(key);
   if (!allowed && typeof key === 'string') {
@@ -20,7 +19,11 @@ export function stagingConfig(env) {
       allowed = parts.length === 3 && payload.role === 'anon' && payload.ref === reference;
     } catch { /* 設定値を含む例外を画面・ログへ出さない。 */ }
   }
-  if (!allowed) throw new Error('検証用のpublishable鍵または同じプロジェクトのanon鍵が必要です（管理鍵は使用不可）');
+  return allowed;
+}
+export function stagingConfig(env) {
+  const reference = env.LAB_SUPABASE_PROJECT_REF, url = stagingProject(reference), key = env.LAB_SUPABASE_PUBLISHABLE_KEY;
+  if (!publicBrowserKey(key, reference)) throw new Error('検証用のpublishable鍵または同じプロジェクトのanon鍵が必要です（管理鍵は使用不可）');
   return Object.freeze({ mode: 'staging', reference, url, key, docId: documentId(env.LAB_SUPABASE_DOCUMENT_ID), cutover: env.LAB_SUPABASE_CUTOVER === '1' });
 }
 export function fixtureConfig(config, origin) {

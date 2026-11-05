@@ -9,3 +9,6 @@ performance-output.log
 performance-results.json
 volume-results.json
 app-results.json
+pwa-repeat-results.json
+release-results.json
+release-output.log

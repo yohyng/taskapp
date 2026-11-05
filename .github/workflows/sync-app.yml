@@ -43,9 +43,16 @@ jobs:
         run: pnpm test tests/app-pwa.spec.js --project=webkit -g '圏外再起動から未送信の追記を保って復帰する' --repeat-each=20 --max-failures=1 --reporter=line,json > pwa-repeat-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-repeat-results.json
+      - name: 本番向けの入口を合成接続で生成
+        run: node scripts/build-app-preview.mjs --release
+      - name: 既存ログインと未送信の引き継ぎ・停止未確認の拒否を検査
+        run: pnpm test tests/app-release.spec.js --max-failures=1 --reporter=line,json > release-output.log 2>&1
+        env:
+          LAB_VERIFY_APP_RELEASE: '1'
+          PLAYWRIGHT_JSON_OUTPUT_NAME: release-results.json
       - name: 結果を表示
         if: always()
-        run: cat app-output.log pwa-repeat-output.log 2>/dev/null || true
+        run: cat app-output.log pwa-repeat-output.log release-output.log 2>/dev/null || true
       - name: 本文を含まない停止状態と合成試験のトレースを保管
         if: always()
         uses: actions/upload-artifact@v4
@@ -54,5 +61,6 @@ jobs:
           path: |
             experiments/sync-lab/app-results.json
             experiments/sync-lab/pwa-repeat-results.json
+            experiments/sync-lab/release-results.json
             experiments/sync-lab/test-results/
           retention-days: 7

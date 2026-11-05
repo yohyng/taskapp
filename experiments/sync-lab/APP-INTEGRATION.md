@@ -12,11 +12,12 @@ lab 0.20.6 / 本体 1.15.31。新同期を`src/main.jsx`の通常入口へ接続
 |---|---|
 | 従来のdev / production | 従来のProvider。通常配信を自動で切り替えない |
 | `sync-staging` | 新Providerと検証先のSDK。設定済みの`experiments/sync-lab/.env.staging.local`だけを使い、本番参照IDと管理鍵を拒否する |
+| `sync-release` | 新Providerと本番向けSDK。従来のログイン保存を読み、公開鍵・文書UUID・旧書き込み停止の設定を必須にする。まだ配信しない |
 | labの`app.html` | 通常入口を使う合成試験。windowの設定は試験側が用意する。公開しない |
 
 `sync-staging`は本体側の`VITE_SUPABASE_*`へフォールバックしない。
 旧書き込み停止からの引き継ぎは、別途`LAB_SUPABASE_CUTOVER=1`が必要。
-本番用の認証保存名・接続設定・切替経路を備えた配信成果物は、次の切替リハーサルで仕上げる。
+本番向け接続と既存ログインの引き継ぎは0.21.0で実装した。PWAの配信更新・互換成果物の往復は残す。
 
 ## 実画面の接続
 
@@ -95,15 +96,40 @@ npm run build -- --mode sync-staging --outDir experiments/sync-lab/.data/新規�
 
 ## 次の区切り
 
-本番向けの次の実装では、検証専用の認証保存名を本番へ流用しない。
-現在の本体SDKが使う既存の認証保存を同じSDKで読み、AuthGate・タスク・新Providerを一つの利用者へ固定する。
+0.21.0の`sync-release`では、検証専用の認証保存名を本番へ流用しない。
+本体SDKと同じ既定値で既存の認証保存を直接読み、AuthGate・タスク・新Providerを同じSDK・利用者へ固定する。
+ログインのコピー・削除・再ログインによる移し替えはしない。windowの検証設定と診断APIも使わない。
 同じ所有者・文書UUID・`owner:${ownerId}:${docId}`の保存名を最新版と互換版で維持する。
-実接続のビルドはwindowの合成設定へフォールバックせず、公開鍵と文書を検査し、旧書き込み停止の確認を必須にする。
+実接続のビルドはwindowの合成設定へフォールバックせず、公開鍵と文書を検査する。
+起動時はサーバーの旧書き込み停止・本人・移行先を確認し、原本を確定してから引き継ぐ。
 設定不足で従来Providerへ逃がすと停止済みの旧同期を再開しかねないため、新経路のビルドはその場で失敗させる。
-Loroなど検証室内に置いている依存も、きれいな環境から同じlockfileで導入して通常成果物を作れる経路へ揃える。
-これは点検で確定した実装条件で、まだ本番接続モードの実装・配信を完了した記録ではない。
 
-1. 本番用の接続設定と通常PWAの更新・互換版への切り戻しを、同じ保存・最新編集を保って通す。
+設定は従来の本体`.env.production*`またはビルド環境から読む。公開する値は次の4項目だけ。
+`VITE_SUPABASE_URL`は既存の本番プロジェクトへ固定し、管理鍵と他プロジェクトのanon JWTを拒否する。
+publishable鍵の所属や本人の権限は、実際のAuth/RLSと切替APIで確認する。鍵の形式検査を署名検証と呼ばない。
+
+```text
+VITE_SUPABASE_URL=既存の本番Supabase URL
+VITE_SUPABASE_ANON_KEY=既存の公開鍵
+VITE_OUTLINE_DOCUMENT_ID=切替SQLで用意する固定の文書UUID
+VITE_OUTLINE_CUTOVER=1
+```
+
+`VITE_OUTLINE_CUTOVER=1`は停止済みであるという自己申告ではない。初回起動で停止確認APIを必ず通す設定。
+未準備のSQL・別所有者・別文書・未停止の応答では、新旧どちらへの書き込みも始めない。
+本番切替前の三端末の新しい控え・共通原本・切替SQLに合わせて文書を固定し、端末ごとにUUIDを作らない。
+
+依存は追加せず、本体の`npm ci`と検証室の`pnpm install --frozen-lockfile`を先に行う。
+その後、ルートの`npm run build -- --mode sync-release --outDir experiments/sync-lab/.data/新規の生成先`で通常Appの成果物を作る。
+専用CIも両lockfileから取得してからこのモードをビルドする。通常の`npm run build`の配信先は変えていない。
+
+接続先だけをlocalhostの合成Auth/RPCへ置換した検証成果物は、検証室から
+`node scripts/build-app-preview.mjs --release`で作る。実サービスの鍵や本文は入らない。
+`LAB_VERIFY_APP_PWA=1`と`LAB_VERIFY_APP_RELEASE=1`を指定し、`pnpm test tests/app-release.spec.js`で検査する。
+既存SDKが保存したログイン、旧版の未送信、原本保持、通常Appのタスク、再起動後の本文、
+開いただけの非書込みと停止未確認時の拒否をChromium/WebKitで確認する。これは本番での移行成功の記録ではない。
+
+1. 通常PWAの配信更新・互換版への切り戻しを、同じ接続・保存・最新編集を保って通す。
 2. 実Supabaseの旧書き込み停止からの自動切替と、実GASの画像・控えを通す。
 3. PC・iPad・Androidの実機PWAで持ち替え・日本語変換・終了再開・圏外からの復帰を確認する。
 

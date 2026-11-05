@@ -58,7 +58,9 @@ export function ProductOutline({ children, tools = true }) {
       if (live) {
         backup = outlineBackup({ engine, ownerId, docId: connection.docId, activeOwner: () => live ? sessions.snapshot()?.user?.id : null,
           onState: (state) => { if (live) setBackupState({ ...state, engine }); } });
-        engineRef.current = engine; backup.start(); window.lab = engine; publish();
+        engineRef.current = engine; backup.start();
+        if (connection.mode !== 'production') window.lab = engine;
+        publish();
         if (recovered) setRecoveryNote({ ownerId, text: recovered.applied ? '控えとこの端末の内容を合わせました' : 'この控えは復元済みです' });
       }
     }).catch((value) => { if (live) setError(value.message); });

@@ -2,7 +2,7 @@ import { Buffer } from 'node:buffer';
 import { seedOutlineDocument } from '../../src/outline-model.js';
 
 // ブラウザーの通信差し替えと、Service Workerを通る実HTTPの両方で同じ合成DBを使う。
-export function appState() {
+export function appState({ cutoverRoute } = {}) {
   const source = seedOutlineDocument([{ id: 'memo', text: '端末を持ち替えて書くメモ', children: [] }]);
   const snapshot = Buffer.from(source.export({ mode: 'snapshot' })).toString('base64'); source.free();
   const entries = [], legacy = [], date = new Date();
@@ -10,8 +10,14 @@ export function appState() {
   const tasks = [{ id: 'task-probe', title: 'タスクも同じ画面で使える', status: '未着手', plain: true, scheduled_date: today,
     stock: false, stock_view_id: null, style: null, block_type: 'task', canvas_x: null, canvas_y: null, page_id: null,
     row_key: null, col_index: 0, col_width: null, code_lang: '', day_date: '' }];
-  return { entries, legacy, respond(path, method, body) {
+  const startup = { routeCalls: 0, exchanges: 0, allowed: true };
+  return { entries, legacy, startup, respond(path, method, body) {
+    if (path.endsWith('/rpc/taskspace_loro_cutover_route') && cutoverRoute) {
+      startup.routeCalls++;
+      return { status: 200, json: { ...cutoverRoute, legacyWritesBlocked: startup.allowed } };
+    }
     if (path.endsWith('/rpc/taskspace_loro_exchange')) {
+      startup.exchanges++;
       for (const entry of body.p_updates) {
         const old = entries.find((value) => value.id === entry.id);
         if (old && old.bytes !== entry.bytes) throw new Error('同じ送信IDの内容が変わった');
