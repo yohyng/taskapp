@@ -10,7 +10,7 @@ for (const interruptedStorage of [false, true]) test(`通常入口のPWA：圏�
   const f = await appFixture(browser, manifest);
   const value = `圏外から再起動しても残す🌿${randomUUID()}`;
   try {
-    const a = await f.open({ pwa: true }), b = await f.open({ pwa: true });
+    let a = await f.open({ pwa: true }); const b = await f.open({ pwa: true });
     await expect(a.locator('[data-pane="tasks"] [data-task-id="task-probe"]')).toBeVisible();
     for (const page of [a, b]) await page.evaluate(async () => {
       await navigator.serviceWorker.ready;
@@ -26,7 +26,7 @@ for (const interruptedStorage of [false, true]) test(`通常入口のPWA：圏�
     await a.locator('[data-row="memo"] textarea').fill(value);
     await a.evaluate(() => window.lab.localBarrier());
     expect(await a.evaluate(() => window.lab.queued())).toBe(true);
-    await a.reload({ waitUntil: 'domcontentloaded' });
+    a = await f.restart(a);
     await expect(a.locator('[data-row="memo"] [data-row-text]')).toHaveText(value);
     expect(await a.evaluate(() => window.lab.queued())).toBe(true);
     expect((await f.remoteState()).entries).toBe(before.entries);

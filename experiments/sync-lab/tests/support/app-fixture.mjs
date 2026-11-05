@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { ownerFixture } from './owner-fixture.mjs';
 import { appState } from './app-state.mjs';
 
@@ -7,11 +10,19 @@ export async function appFixture(browser, manifest) {
   const auth = manifest ? { ...(await (await fetch(`${manifest.config.url}/__app-fixture/config`)).json()),
     apiKey: manifest.config.key, close: async () => {} } : await ownerFixture(docId, { ownerId });
   const state = appState(), { entries, legacy } = state;
-  const contexts = [], errors = [], nativeNetwork = [], offline = new Set();
-  async function open({ pwa = false } = {}) {
-    const context = await browser.newContext({ serviceWorkers: pwa ? 'allow' : 'block' }); contexts.push(context);
-    const page = await context.newPage(), failedRequests = new Set();
-    page.on('requestfailed', (request) => failedRequests.add(request.url()));
+  const contexts = [], profiles = new Map(), errors = [], nativeNetwork = [], offline = new Set();
+  async function open({ pwa = false, profile } = {}) {
+    // PWAは端末のディスク保存が前提。一時contextの保存サービス消失と区別し、
+    // ブラウザープロセスを終了しても同じ保存・SWから起動する。利用者のprofileは使わない。
+    const directory = pwa ? profile || await mkdtemp(join(tmpdir(), 'taskspace-pwa-')) : null;
+    const context = pwa
+      ? await browser.browserType().launchPersistentContext(directory, { headless: true, serviceWorkers: 'allow', viewport: { width: 1280, height: 720 } })
+      : await browser.newContext({ serviceWorkers: 'block' });
+    contexts.push(context);
+    const page = context.pages()[0] || await context.newPage(), failedRequests = new Set();
+    if (pwa) profiles.set(page, directory);
+    // SW経由のfetchはpageの要求イベントへ出ない場合がある。同じ端末contextで追う。
+    context.on('requestfailed', (request) => failedRequests.add(request.url()));
     page.on('pageerror', (error) => {
       // WebKitは、catch済みfetchの通信診断もpageerrorへ載せる。実際に失敗した合成APIと
       // native fetchだけのスタックに限って分け、下のwindow側でも未処理例外を独立して拾う。
@@ -40,13 +51,22 @@ export async function appFixture(browser, manifest) {
       await route.fulfill(state.respond(path, request.method(), request.postData() ? request.postDataJSON() : null));
     });
     await page.goto(pwa ? 'http://127.0.0.1:4183/' : '/app.html');
-    await page.getByPlaceholder('メールアドレス').fill(auth.credentials.email);
-    await page.getByPlaceholder('パスワード').fill(auth.credentials.password);
-    await page.getByRole('button', { name: 'ログイン', exact: true }).click();
+    await page.locator('[data-row="memo"], input[type="email"]').first().waitFor({ timeout: 20000 });
+    if (await page.getByPlaceholder('メールアドレス').isVisible()) {
+      await page.getByPlaceholder('メールアドレス').fill(auth.credentials.email);
+      await page.getByPlaceholder('パスワード').fill(auth.credentials.password);
+      await page.getByRole('button', { name: 'ログイン', exact: true }).click();
+    }
     await page.locator('[data-row="memo"]').waitFor({ timeout: 20000 });
     return page;
   }
   return { open, entries, get errors() { return [...errors, ...nativeNetwork.filter((entry) => !entry.failedRequests.has(entry.url)).map((entry) => entry.message)]; }, legacy, offline,
+    async restart(page) {
+      const profile = profiles.get(page);
+      if (!profile) throw new Error('PWAのディスク保存profileが必要です');
+      await page.context().close();
+      return open({ pwa: true, profile });
+    },
     async legacyRequests() { return manifest ? (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()).legacy : legacy; },
     async remoteState() { return (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()); },
     async stopHttp(offline) { await fetch(`${manifest.config.url}/__app-fixture/offline`, { method: 'POST', body: JSON.stringify({ offline }) }); },

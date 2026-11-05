@@ -25,7 +25,7 @@ export async function openLoroStorage(docId) {
     request.onupgradeneeded = (event) => {
       const tx = request.transaction;
       // 切れた接続の取り直しで保存領域まで消えていたら、空の原本を作らない。
-      if (!allowCreate) { migrationError = Object.assign(new Error('端末の保存領域を再取得できません'), { storageStage: 'missing' }); tx.abort(); return; }
+      if (!allowCreate) { migrationError = Object.assign(new Error('端末の保存領域を再取得できません'), { storageStage: event.oldVersion === 0 ? 'missing' : 'version-mismatch' }); tx.abort(); return; }
       if (event.oldVersion === 0) request.result.createObjectStore('state');
       request.result.createObjectStore('updates', { keyPath: 'sequence', autoIncrement: true });
       const outgoing = request.result.createObjectStore('outbox', { keyPath: 'id' });
