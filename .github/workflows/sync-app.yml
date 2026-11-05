@@ -10,6 +10,10 @@ permissions:
 jobs:
   app:
     runs-on: ubuntu-latest
+    # 同じPlaywright版のブラウザーとOS依存を固定し、外部aptミラー待ちを試験へ持ち込まない。
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --shm-size=1gb
     timeout-minutes: 12
     defaults:
       run:
@@ -27,11 +31,8 @@ jobs:
           npm install -g pnpm@11.25.0
           pnpm install --frozen-lockfile
           pnpm prepare:assets
-      - name: 外部ミラーの待ち時間を制限
-        run: |
-          printf '%s\n' 'Acquire::http::Timeout "60";' 'Acquire::https::Timeout "60";' 'Acquire::Retries "2";' | sudo tee /etc/apt/apt.conf.d/99-sync-app-timeout > /dev/null
-      - name: ChromiumとWebKitを準備
-        run: pnpm exec playwright install --with-deps chromium webkit
+      - name: 同梱ブラウザーの版を確認
+        run: pnpm exec playwright --version
       - name: 通常入口の合成PWAを生成
         run: pnpm prepare:app
       - name: 普段の画面と全HTTP停止からの復帰を5回ずつ確認
