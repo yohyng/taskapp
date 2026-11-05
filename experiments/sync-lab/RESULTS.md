@@ -10,6 +10,8 @@
 localhostの合成Auth/RPCへ固定した通常Appの本番向けPWAビルドで、両ブラウザーの4件が成功した。
 通常画面・PWA・切替起動の既存24件も成功。接続・認証・所有者固定・切替起動の単体は25件成功し、実DBの1件はローカルでは対象外。
 lint・従来の通常ビルド・合成PWAの両モードも成功した。新実装の全体CIはコード反映後に別途確認する。
+実装`c9da850`を開発ブランチへ反映した。[切替専用CI](https://github.com/yohyng/taskapp/actions/runs/42032386499)は成功した。
+[本体CI](https://github.com/yohyng/taskapp/actions/runs/42032386510)・[通常画面/PWAと本番向け入口のCI](https://github.com/yohyng/taskapp/actions/runs/42032386610)・[全体CI](https://github.com/yohyng/taskapp/actions/runs/42032386455)は実行中で、成功した扱いにはしない。
 既存SDKのログイン保存で再ログインなく起動し、旧版の未送信を自動で引き継ぐ。
 原本の保存名と内容を保ち、新しい編集後のPWAプロセス再起動でも同じ文書を開く。
 停止未確認では原本捕捉・差分交換・旧同期書き込みへ進まない。検証APIをwindowへ公開しないことも検査する。
