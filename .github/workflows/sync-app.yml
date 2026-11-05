@@ -88,7 +88,7 @@ jobs:
       - name: 固定互換版と最新版の成果物を生成
         run: pnpm prepare:pwa
       - name: 同じ保存のままPWAを更新・切り戻し・圏外再起動する
-        run: pnpm test:pwa --max-failures=1 --reporter=line,json > pwa-update-output.log 2>&1
+        run: pnpm test:pwa --repeat-each=3 --max-failures=1 --reporter=line,json > pwa-update-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-update-results.json
       - name: 結果を表示
@@ -99,6 +99,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sync-pwa-update
+          include-hidden-files: true
           path: |
             experiments/sync-lab/.data/pwa-rehearsal.json
             experiments/sync-lab/pwa-update-results.json

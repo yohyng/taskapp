@@ -1,8 +1,15 @@
 import { readFile, readdir, realpath } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, sep, relative } from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 export const fileHash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+export function artifactGit(repository, args, { encoding = 'utf8', env = process.env } = {}) {
+  // CIのcheckoutとコンテナーでは所有者が違う。この呼出しの対象だけを許可し、
+  // ユーザーのglobal設定や、他のリポジトリへの信頼を変更しない。
+  return execFileSync('git', ['-c', `safe.directory=${resolve(repository).replaceAll('\\', '/')}`, ...args],
+    { cwd: repository, encoding, env, maxBuffer: 100 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] });
+}
 export async function compatibleLocks(current, fixed) {
   const npm = async (root) => Object.entries(JSON.parse(await readFile(resolve(root, 'package-lock.json'), 'utf8')).packages).filter(([key]) => key !== '');
   const pnpm = async (root) => (await readFile(resolve(root, 'experiments/sync-lab/pnpm-lock.yaml'), 'utf8')).replaceAll('\r\n', '\n');

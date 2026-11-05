@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { artifactHashes, loadPwaArtifacts, compatibleLocks } from './pwa-artifacts.mjs';
+import { artifactHashes, loadPwaArtifacts, compatibleLocks, artifactGit } from './pwa-artifacts.mjs';
+import { execFileSync } from 'node:child_process';
 
 async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'taskspace-pwa-artifacts-'));
@@ -46,4 +47,14 @@ test('PWAの固定依存：WindowsとGit展開の改行と本体版番号だけ�
   assert.equal(await compatibleLocks(join(directory, 'current'), join(directory, 'fixed')), true);
   await writeFile(join(directory, 'current/experiments/sync-lab/pnpm-lock.yaml'), '別の依存');
   assert.equal(await compatibleLocks(join(directory, 'current'), join(directory, 'fixed')), false);
+});
+
+test('PWAの固定版取得：所有者の違うcheckoutだけを一回のGit呼出しで許可し、他のリポジトリは許可しない', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'taskspace-pwa-git-'));
+  const root = join(directory, 'source'), other = join(directory, 'other');
+  for (const path of [root, other]) execFileSync('git', ['init', '--quiet', path]);
+  const env = { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1', GIT_CONFIG_GLOBAL: join(directory, 'no-global-config'), GIT_CONFIG_NOSYSTEM: '1' };
+  assert.throws(() => execFileSync('git', ['-c', 'safe.directory=', 'status', '--porcelain'], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] }), /dubious ownership/);
+  assert.equal(artifactGit(root, ['rev-parse', '--is-inside-work-tree'], { env }).trim(), 'true');
+  assert.throws(() => artifactGit(root, ['-C', other, 'status', '--porcelain'], { env }), /dubious ownership/);
 });

@@ -5,17 +5,17 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { productionProject } from '../src/staging-config.js';
-import { artifactHashes, loadPwaArtifacts, compatibleLocks } from './pwa-artifacts.mjs';
+import { artifactHashes, loadPwaArtifacts, compatibleLocks, artifactGit } from './pwa-artifacts.mjs';
 
 // 本番向け入口を初めて備えた版。古いfixture専用クライアントをPWAの切り戻し先にしない。
 const compatibleRef = 'c9da85005ec7a85663b6d99ba55b54e75d97b355';
 const repository = fileURLToPath(new URL('../../../', import.meta.url)), lab = fileURLToPath(new URL('../', import.meta.url));
 const data = join(lab, '.data'); await mkdir(data, { recursive: true });
 const directory = await mkdtemp(join(data, 'pwa-rehearsal-')), source = join(directory, 'source'); await mkdir(source);
-const git = (...args) => execFileSync('git', args, { cwd: repository, encoding: 'utf8' }).trim();
+const git = (...args) => artifactGit(repository, args).trim();
 if (git('rev-parse', `${compatibleRef}^{commit}`) !== compatibleRef) throw new Error('互換版の固定コミットがありません');
 const archive = join(directory, 'source.tar');
-await writeFile(archive, execFileSync('git', ['archive', '--format=tar', compatibleRef], { cwd: repository, maxBuffer: 100 * 1024 * 1024 }));
+await writeFile(archive, artifactGit(repository, ['archive', '--format=tar', compatibleRef], { encoding: null }));
 execFileSync('tar', ['-xf', archive, '-C', source]);
 const json = async (path) => JSON.parse(await readFile(path, 'utf8'));
 if (!await compatibleLocks(repository, source)) throw new Error('互換版と最新版の固定依存が違うため、別々の準備が必要です');

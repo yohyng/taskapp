@@ -59,16 +59,16 @@ for (const interruptedStorage of [false, true]) test(`通常入口のPWA：圏�
   } finally { await f.stopHttp(false); await f.close(); }
 });
 
-test('PWAの例外検出：通信診断と同じ形でもJavaScriptの未処理Promiseを見逃さない', async ({ browser }) => {
+test('PWAの例外検出：通信診断と同じ形でもJavaScriptの未処理Promiseと例外を見逃さない', async ({ browser }) => {
   test.skip(process.env.LAB_VERIFY_APP_PWA !== '1', '先にprepare:appでローカル専用の成果物を作る');
   const manifest = JSON.parse(await readFile(new URL('../.data/app-preview.json', import.meta.url), 'utf8'));
-  const f = await appFixture(browser, manifest, { browserFailureEvents: false });
+  const f = await appFixture(browser, manifest);
   try {
     const a = await f.open({ pwa: true });
     await f.stopHttp(true);
     await a.evaluate(async () => { try { await fetch('/rest/v1/errors-probe'); } catch { /* 意図した圏外応答は処理済み。 */ } });
-    expect(f.fetchFailures).toContain(`${manifest.config.url}/rest/v1/errors-probe`);
     await f.stopHttp(false);
+    expect(f.errors).toEqual([]);
     await a.evaluate(() => {
       const error = new Error('この未処理例外を見逃さない');
       error.name = 'Fetch API cannot load http';
@@ -76,5 +76,12 @@ test('PWAの例外検出：通信診断と同じ形でもJavaScriptの未処理P
       Promise.reject(error);
     });
     await expect.poll(() => f.errors.includes('この未処理例外を見逃さない')).toBe(true);
+    await a.evaluate(() => {
+      const error = new Error('この同期例外も見逃さない');
+      error.name = 'Fetch API cannot load http';
+      error.stack = `Fetch API cannot load ${location.origin}/rest/v1/errors-probe due to access control checks.\n    at fetch ([native code]:0:0)`;
+      setTimeout(() => { throw error; }, 0);
+    });
+    await expect.poll(() => f.errors.includes('この同期例外も見逃さない')).toBe(true);
   } finally { await f.stopHttp(false); await f.close(); }
 });
