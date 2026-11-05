@@ -1,5 +1,44 @@
 # 同期比較の実行結果
 
+## 0.20.6：ディスク保存からPWAのプロセスを起動し直す
+
+0.20.5の[一時contextの反復](https://github.com/yohyng/taskapp/actions/runs/42022372829)は39件成功・1件失敗だった。
+停止位置はACK保存で、再取得の開始1回・成功0回・`storageStage: missing`と記録された。
+元の保存領域を再取得できず、空のDBを作らない保護が働いていた。単に接続を閉じる回帰とは別の条件だった。
+別の[実行](https://github.com/yohyng/taskapp/actions/runs/42022493788)は通常範囲40件が成功したが、追加反復でSW経由のnative通信診断を1件拾い、途中終了した。
+
+実PWAは端末のディスク保存を使うため、0.20.6ではPWAのfixtureだけを新規の永続profileへ揃えた。
+利用者のprofileは使わず、毎回tmpdirへ独立した検証用の保存を作る。
+圏外の追記を端末確定後、ブラウザープロセスごと終了し、同じprofileをもう一度開く。
+ログイン保存・Service Worker・WASM・IndexedDBから起動し、本文と未送信を保って復帰する。
+ACK確定後の再読込も検査する。保存領域が消えた場合に作り直さない回帰はそのまま残し、停止条件を緩めない。
+
+native通信診断の照合もpageだけでなく同じcontextの失敗要求を使う。SWの要求がpageへ通知されない場合を含める。
+window側の未処理例外の記録と、その検出回帰は維持する。
+新規PWAビルド・lintと、永続profileでの通常画面/PWA/例外検出8件が両ブラウザーで成功した。
+今回のローカル関連範囲は保存16件・編集/移行/控え/復元56件と合わせて80件。
+[同じ最終ソースの専用CI](https://github.com/yohyng/taskapp/actions/runs/42023912202)で通常範囲40件とWebKitの通常復帰20件を確認中。
+最新の全体CIは別に実行中で、0.20.4の全体合格をそのまま最新ソースの合格とはしない。本番・DB・Driveは未変更。
+
+## 0.20.5：全体試験の合格と圏外診断の区別
+
+保存接続の再取得を含む0.20.4 / d242740の[全体CI](https://github.com/yohyng/taskapp/actions/runs/42019622187)は、
+ブラウザー264件と独立した一万行比較6件が成功した。
+同じソースの[本体CI](https://github.com/yohyng/taskapp/actions/runs/42019622234)も単体374件・同期250件・操作155件とビルドが成功し、
+[切替専用CI](https://github.com/yohyng/taskapp/actions/runs/42019622280)も成功した。
+
+固定した公式環境の[反復試験](https://github.com/yohyng/taskapp/actions/runs/42020774727)では、
+送信確認・再起動・注入した接続断の条件は通ったが、圏外のWebKit診断をJavaScript例外として数えた1件が残り、29件成功・1件失敗となった。
+トレースのpageErrorはnative fetch一フレームの通信診断で、通常AppのタスクAPIが意図したHTTP停止で失敗したものだった。
+
+0.20.5は試験側だけを修正した。実際に失敗した同じページの合成API要求・一致するnative fetch診断だけを分ける。
+windowのerrorとunhandledrejectionも独立して記録するため、JavaScriptの未処理例外は分けた通信診断へ紛れ込まない。
+通信診断と同じ名前・スタックを持つ未処理Promiseも捕捉する回帰を両ブラウザーで確認した。
+通常画面/PWA/例外検出8件がローカルで成功し、保存16件・関連56件と合わせた今回の範囲は80件。lintも成功した。
+[専用CI](https://github.com/yohyng/taskapp/actions/runs/42022493788)は通常の範囲を5回ずつ実行し、
+さらに失敗していたWebKitの通常復帰だけを20回反復する構成を追加した。最終結果と試験条件の変更は上の0.20.6を参照。
+本番接続・PWA配信切替・実サービスの切替・実機の条件は[RELEASE-GATES.md](RELEASE-GATES.md)へ残す。本番・Driveは未変更。
+
 ## 0.20.4：PWAの送信確認停止を再現し、保存接続断を調べる
 
 0.20.2の[全体CI](https://github.com/yohyng/taskapp/actions/runs/42015790784)も257件成功・1件失敗で、
@@ -17,7 +56,7 @@ WebKitのACK保存時に`InvalidStateError`となっていた。
 ただし0.20.3の[Linux反復](https://github.com/yohyng/taskapp/actions/runs/42018327657)は23件成功・2件失敗で途中終了した。
 接続断を注入した試験は通ったが、通常ケースには別の停止条件が残った。
 0.20.4では明示終了・版変更・保存領域欠損・開き直し待ちを本文なしの分類で記録する。
-最新の[専用CI](https://github.com/yohyng/taskapp/actions/runs/42020774727)で原因を確認中で、全面解決とはしない。
+この時点では接続終了の条件を確認中だった。最終の全体CIと固定環境の反復結果は上の0.20.5を参照。
 専用CIはPlaywright 1.63.0の公式nobleイメージをSHA-256で固定し、外部aptミラーで準備が止まる条件を除いた。
 本番アプリ・DB・Driveは未変更。
 
