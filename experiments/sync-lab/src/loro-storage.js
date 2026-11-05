@@ -120,5 +120,42 @@ export async function openLoroStorage(docId) {
     return { compacted, count: compacted ? saved.updates.length : 0,
       bytes: compacted ? saved.updates.reduce((total, entry) => total + entry.bytes.length, 0) : 0 };
   }
-  return { read, append, compact, stats: () => ({ ...counts }), close: () => db.close() };
+  const readHandoff = (key) => transaction(['state'], 'readonly', (tx, done) => {
+    const request = tx.objectStore('state').get(`handoff:${key}`);
+    done(() => request.result ?? null);
+  });
+  async function commitHandoff({ receipt, expected, updates, outgoing }) {
+    if (!receipt || receipt.format !== 1 || !/^[a-f0-9]{64}$/.test(receipt.key)
+      || !expected || !Array.isArray(updates) || !updates.every(binary) || !Array.isArray(outgoing)) throw new Error('引き継ぎの保存形式が不正です');
+    outgoing.forEach(checkOutgoing);
+    if (updates.length !== outgoing.length || updates.some((bytes, index) => bytes.length !== outgoing[index].bytes.length
+      || bytes.some((value, at) => value !== outgoing[index].bytes[at]))) throw new Error('引き継ぐ編集と送信待ちが一致しません');
+    const applied = await transaction(['state', 'updates', 'outbox'], 'readwrite', (tx, done, fail) => {
+      const state = tx.objectStore('state'), old = state.get(`handoff:${receipt.key}`), base = state.get('document');
+      const cursor = state.get('remote-cursor'), tail = tx.objectStore('updates').openCursor(null, 'prev');
+      let ready = 0;
+      const check = () => {
+        if (++ready !== 4) return;
+        try {
+          if (old.result) { done(false); return; }
+          checkBase(base.result);
+          if (base.result.generation !== expected.generation || base.result.cutoff !== expected.cutoff
+            || (cursor.result ?? -1) !== expected.cursor || (tail.result?.key ?? base.result.cutoff) !== expected.tail) {
+            throw new Error('引き継ぎ候補の作成中に文書が変わりました');
+          }
+          for (const bytes of updates) tx.objectStore('updates').add({ bytes });
+          for (const entry of outgoing) tx.objectStore('outbox').add(entry);
+          // 控えだけ・編集だけ・処理済み印だけが残る中間状態を作らない。
+          state.add(receipt, `handoff:${receipt.key}`); done(true);
+        } catch (error) { fail(error); }
+      };
+      for (const request of [old, base, cursor, tail]) request.onsuccess = check;
+    });
+    if (applied) {
+      counts.appendTransactions++; counts.appendedUpdates += updates.length;
+      counts.appendedBytes += updates.reduce((total, bytes) => total + bytes.length, 0);
+    }
+    return applied;
+  }
+  return { id: docId, read, append, compact, readHandoff, commitHandoff, stats: () => ({ ...counts }), close: () => db.close() };
 }

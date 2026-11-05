@@ -7,6 +7,10 @@ import { prepareHandoff } from './prepare-outline-handoff.mjs';
 import { mkdtemp, readFile, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { seedOutlineDocument, outlineNodes } from '../src/outline-model.js';
+import { loroViewRows } from '../src/loro-model.js';
+import { commitOutlineHandoff } from '../src/commit-outline-handoff.js';
+import { LoroDoc } from 'loro-crdt';
 
 const original = [{ id: 'a', text: '元の本文', children: [] }, { id: 'b', text: '別の行', children: [] }];
 function saved(nodes, operations = []) {
@@ -56,16 +60,78 @@ test('移行：送信結果が既に一致する再開は差分を増やさず�
   }
 });
 
-test('移行：新規行・削除・移動は構造用の次工程まで保全し、消された行を復活させない', () => {
+test('移行：作成の根拠がない行や削除の基準がない行は保全し、消された行を復活させない', () => {
   const added = [...original, { id: 'new', text: '新規', children: [] }];
   assert.deepEqual(planLegacyOutlineHandoff(saved(added, [{ id: 'new' }]), original).retained, [{ id: 'new', reason: 'missing-target' }]);
   const removed = saved([original[1]], [{ id: 'a', kind: 'delete' }]);
-  assert.deepEqual(planLegacyOutlineHandoff(removed, original).retained, [{ id: 'a', reason: 'structure' }]);
+  assert.deepEqual(planLegacyOutlineHandoff(removed, original).retained, [{ id: 'a', reason: 'delete-conflict' }]);
   assert.deepEqual(planLegacyOutlineHandoff(removed, [original[1]]).settled, ['a']);
   const moved = [original[1], original[0]];
-  assert.deepEqual(planLegacyOutlineHandoff(saved(moved, [{ ...operation(), positionChanged: true }]), original).retained, [{ id: 'a', reason: 'structure' }]);
+  const plan = planLegacyOutlineHandoff(saved(moved, [{ ...operation(), positionChanged: true }]), original);
+  assert.deepEqual(plan.retained, []); assert.equal(plan.structures[0].kind, 'move');
   const edited = structuredClone(original); edited[0].text += '・追記';
   assert.deepEqual(planLegacyOutlineHandoff(saved(edited, [operation()]), [original[1]]).retained, [{ id: 'a', reason: 'missing-target' }]);
+});
+
+test('移行：新規親子は親から作り、現在の兄弟IDを挿入位置の目印にする', () => {
+  const local = [original[0], { id: 'new', text: '親', children: [{ id: 'child', text: '子', children: [] }] }, original[1]];
+  const plan = planLegacyOutlineHandoff(saved(local, [{ id: 'child', expectedRevision: 0 }, { id: 'new', expectedRevision: 0 }]), original);
+  assert.deepEqual(plan.structures.map((command) => [command.id, command.placement]), [
+    ['new', { parentId: null, beforeId: 'b', afterId: 'a' }], ['child', { parentId: 'new', beforeId: null, afterId: null }],
+  ]);
+  assert.deepEqual(plan.retained, []);
+  assert.deepEqual(planLegacyOutlineHandoff(saved(local, [{ id: 'new', expectedRevision: 0 }, { id: 'child', expectedRevision: 0 }]), original,
+    { reservedIds: new Set(['new']) }).structures, []);
+});
+
+test('移行：削除する枝の全行が編集前と一致するときだけ枝の削除を候補にする', () => {
+  const old = [{ id: 'a', text: '枝', children: [{ id: 'child', text: '子', children: [] }] }, original[1]];
+  const ops = flattenTree(old).slice(0, 2).map((row) => ({ id: row.id, kind: 'delete', baseSignature: outlineRowSignature(row) }));
+  const checkpoint = saved([original[1]], ops);
+  const plan = planLegacyOutlineHandoff(checkpoint, old);
+  assert.deepEqual(plan.structures.map((command) => [command.kind, command.id, command.expected.map((row) => row.id)]), [['delete', 'a', ['a', 'child']]]);
+  const edited = structuredClone(old); edited[0].children[0].text += '・別端末';
+  const added = structuredClone(old); added[0].children.push({ id: 'remote', text: '別端末の新規行', children: [] });
+  for (const latest of [edited, added]) {
+    const blocked = planLegacyOutlineHandoff(checkpoint, latest);
+    assert.deepEqual(blocked.structures, []);
+    assert.deepEqual(blocked.retained.map((entry) => entry.reason), ['delete-conflict', 'delete-conflict']);
+  }
+});
+
+test('移行：別端末で位置が変わった枝や循環する移動は保全して最新の木を維持する', () => {
+  const moved = [original[1], original[0]], checkpoint = saved(moved, [{ ...operation(), positionChanged: true }]);
+  const shifted = [{ id: 'remote', text: '追加', children: [] }, ...original];
+  assert.equal(planLegacyOutlineHandoff(checkpoint, shifted).retained[0].reason, 'stale-placement');
+  const old = [{ ...original[0], children: [] }, { id: 'c', text: '別枝', children: [] }];
+  const local = [{ ...old[1], children: [old[0]] }], latest = [{ ...old[0], children: [old[1]] }];
+  const cycle = planLegacyOutlineHandoff(saved(local, [{ ...operation(old), positionChanged: true }]), latest);
+  assert.equal(cycle.retained[0].reason, 'invalid-parent'); assert.deepEqual(cycle.structures, []);
+});
+
+test('移行の実適用：四行の全並べ替えと、新規親への既存枝の移動をLoroの差分として復元する', async () => {
+  const rows = ['a', 'b', 'c', 'd'].map((id) => ({ id, text: id, children: [] }));
+  const permutations = (list) => list.length ? list.flatMap((item) => permutations(list.filter((other) => other !== item)).map((rest) => [item, ...rest])) : [[]];
+  const cases = permutations(rows).flatMap((nodes) => [{ nodes }, { nodes, reverse: true }]);
+  cases.push({ nodes: [{ id: 'new', text: '新規の親', children: [rows[0], { id: 'new-child', text: '新規の子', children: [] }] }, ...rows.slice(1)] });
+  for (const { nodes, reverse } of cases) {
+    const base = new Map(flattenTree(rows).map((row) => [row.id, row]));
+    const operations = flattenTree(nodes).filter((row) => !base.has(row.id) || row.parentId !== base.get(row.id).parentId || row.sortOrder !== base.get(row.id).sortOrder)
+      .map((row) => ({ id: row.id, positionChanged: true, ...(base.has(row.id) ? { baseSignature: outlineRowSignature(base.get(row.id)) } : { expectedRevision: 0 }) }));
+    const doc = seedOutlineDocument(rows), restored = new LoroDoc();
+    try {
+      const snapshot = doc.export({ mode: 'snapshot' }); restored.import(snapshot);
+      let entries;
+      const storage = { id: 'owner:alice:doc', readHandoff: async () => null,
+        read: async () => ({ base: { snapshot: null, generation: 0, cutoff: 0 }, updates: [{ sequence: 1, bytes: snapshot }], outbox: [], cursor: 0 }),
+        async commitHandoff({ updates }) { entries = updates; return true; } };
+      const result = await commitOutlineHandoff({ storage, checkpoint: saved(nodes, reverse ? operations.reverse() : operations), ownerId: 'alice', legacyOwnerId: 'alice', docId: 'doc', activeOwner: () => 'alice', remoteHead: 0 });
+      entries.forEach((bytes) => restored.import(bytes));
+      assert.deepEqual(result.receipt.retained, []);
+      const shape = (tree) => tree.map((node) => ({ id: node.id, children: shape(node.children ?? []) }));
+      assert.deepEqual(shape(outlineNodes(loroViewRows(restored))), shape(nodes));
+    } finally { doc.free(); restored.free(); }
+  }
 });
 
 test('移行：本文が変わらず日時だけ違っても、送信や確認の候補を作らない', () => {

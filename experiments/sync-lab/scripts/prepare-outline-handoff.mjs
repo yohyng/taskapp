@@ -17,7 +17,7 @@ export async function prepareHandoff(input, latestInput, directory) {
   const plan = planLegacyOutlineHandoff(checkpoint, Array.isArray(latest) ? latest : latest.items);
   const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
   const manifest = { format: 1, sourceSha256: hash(source), latestSha256: hash(latestSource),
-    pending: checkpoint.sync.pending.length, changes: plan.changes.length, settled: plan.settled.length,
+    pending: checkpoint.sync.pending.length, changes: plan.changes.length, structures: plan.structures.length, settled: plan.settled.length,
     retained: new Set(plan.retained.map((entry) => entry.id)).size, applied: false };
   await mkdir(directory);
   await writeFile(join(directory, 'source.json'), source, { flag: 'wx' });
