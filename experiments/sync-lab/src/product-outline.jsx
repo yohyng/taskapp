@@ -4,6 +4,7 @@ import { sessions, supabase, connection } from './session-client.js';
 import { sessionDocument } from './session-document.js';
 import { loroSupabaseTransport } from './loro-supabase-transport.js';
 import { exclusiveDocument } from './exclusive-document.js';
+import { prepareCutover, fetchCutoverRoute, retryCutover } from './cutover-startup.js';
 
 // 製品の編集画面は再利用し、旧同期Providerを同時に起動しない。旧ローカル保存名にも書かない。
 export function ProductOutline() {
@@ -14,9 +15,13 @@ export function ProductOutline() {
     if (!ownerId) return;
     let live = true, engine;
     const publish = () => { if (live && engine) setCurrent({ ownerId, engine, nodes: engine.outline(), queued: engine.queued(), ...engine.connectionState() }); };
-    const record = sessionDocument({ sessions, ownerId, docId: connection.docId,
-      transport: loroSupabaseTransport(supabase, { refreshSession: () => sessions.token(ownerId, { refresh: true }) }),
-      createDocument: exclusiveDocument,
+    const refreshSession = () => sessions.token(ownerId, { refresh: true });
+    const transport = loroSupabaseTransport(supabase, { refreshSession });
+    const record = sessionDocument({ sessions, ownerId, docId: connection.docId, transport,
+      createDocument: (options) => exclusiveDocument({ ...options, legacyLease: connection.cutover,
+        beforeOpen: connection.cutover ? () => retryCutover(() => prepareCutover({ ...options, ownerId,
+          activeOwner: () => options.signal.aborted ? null : sessions.snapshot()?.user?.id,
+          route: (signal) => fetchCutoverRoute(supabase, signal, refreshSession) }), options.signal) : undefined }),
       onChange: publish, onError: (value) => { if (live) setError(value.message); },
     });
     record.ready.then((value) => { engine = value; if (live) { window.lab = engine; publish(); } }).catch((value) => { if (live) setError(value.message); });

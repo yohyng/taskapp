@@ -59,13 +59,16 @@ function applyPlan(doc, plan) {
 }
 
 // 編集エンジンを開く前の排他区間で使う。生きている文書の外から保存を書き換える入口にしない。
-// 旧保存の所有者確認と旧書き込み停止を済ませた呼出元だけが接続する。製品UIにはまだ接続しない。
+// 旧保存の所有者確認と旧書き込み停止を済ませた切替起動だけが接続する。通常の本番起動は変えない。
+export async function outlineHandoffKey(checkpoint) {
+  const encoded = new TextEncoder().encode(JSON.stringify(checkpoint));
+  return [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoded))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 export async function commitOutlineHandoff({ storage, checkpoint, ownerId, legacyOwnerId, docId, activeOwner, remoteHead }) {
   const active = () => ownerId && legacyOwnerId === ownerId && activeOwner?.() === ownerId
     && storage.id === `owner:${ownerId}:${docId}`;
   if (!docId || !active()) throw new Error('引き継ぐ文書の所有者を確認できません');
-  const encoded = new TextEncoder().encode(JSON.stringify(checkpoint));
-  const key = [...new Uint8Array(await crypto.subtle.digest('SHA-256', encoded))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+  const key = await outlineHandoffKey(checkpoint);
   function checked(receipt) {
     if (!receipt || receipt.format !== 1 || receipt.key !== key || receipt.ownerId !== ownerId || receipt.docId !== docId
       || JSON.stringify(receipt.archive) !== JSON.stringify(checkpoint) || !Array.isArray(receipt.retained)) throw new Error('保存済みの引き継ぎ記録を確認できません');

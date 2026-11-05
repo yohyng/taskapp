@@ -157,5 +157,32 @@ export async function openLoroStorage(docId) {
     }
     return applied;
   }
-  return { id: docId, read, append, compact, readHandoff, commitHandoff, stats: () => ({ ...counts }), close: () => db.close() };
+  const readCutover = () => transaction(['state'], 'readonly', (tx, done) => {
+    const request = tx.objectStore('state').get('cutover'); done(() => request.result ?? null);
+  });
+  async function captureCutover(record) {
+    return transaction(['state'], 'readwrite', (tx, done) => {
+      const state = tx.objectStore('state'), old = state.get('cutover');
+      old.onsuccess = () => {
+        if (old.result) { done(old.result); return; }
+        state.add(record, 'cutover'); done(record);
+      };
+    });
+  }
+  async function finishCutover(record, key) {
+    await transaction(['state'], 'readwrite', (tx, _done, fail) => {
+      const state = tx.objectStore('state'), current = state.get('cutover'), handoff = state.get(`handoff:${key}`);
+      let ready = 0;
+      const check = () => {
+        if (++ready !== 2) return;
+        if (!current.result || current.result.migrationId !== record.migrationId || handoff.result?.ownerId !== record.ownerId
+          || handoff.result?.docId !== record.docId || JSON.stringify(handoff.result?.archive) !== JSON.stringify(current.result.checkpoint)) {
+          fail(new Error('引き継ぎの確定記録が揃っていません')); return;
+        }
+        state.put({ ...current.result, phase: 'complete', handoffKey: key }, 'cutover');
+      };
+      current.onsuccess = check; handoff.onsuccess = check;
+    });
+  }
+  return { id: docId, read, append, compact, readHandoff, commitHandoff, readCutover, captureCutover, finishCutover, stats: () => ({ ...counts }), close: () => db.close() };
 }

@@ -21,9 +21,9 @@ export function stagingConfig(env) {
     } catch { /* 設定値を含む例外を画面・ログへ出さない。 */ }
   }
   if (!allowed) throw new Error('検証用のpublishable鍵または同じプロジェクトのanon鍵が必要です（管理鍵は使用不可）');
-  return Object.freeze({ mode: 'staging', reference, url, key, docId: documentId(env.LAB_SUPABASE_DOCUMENT_ID) });
+  return Object.freeze({ mode: 'staging', reference, url, key, docId: documentId(env.LAB_SUPABASE_DOCUMENT_ID), cutover: env.LAB_SUPABASE_CUTOVER === '1' });
 }
 export function fixtureConfig(config, origin) {
   if (!config?.key || !config?.docId) throw new Error('認証検証の設定が必要です。実接続には検証用モードを使ってください');
-  return { mode: 'fixture', url: origin, key: config.key, docId: config.docId };
+  return { mode: 'fixture', url: origin, key: config.key, docId: config.docId, cutover: config.cutover === true };
 }

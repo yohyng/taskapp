@@ -30,7 +30,9 @@ test('実接続設定：管理鍵・他プロジェクトのJWT・欠損設定�
   }
   assert.throws(() => stagingConfig({ VITE_SUPABASE_URL: 'https://example.test', VITE_SUPABASE_ANON_KEY: 'key' }), /本番とは別/);
   assert.throws(() => stagingConfig({ ...env, LAB_SUPABASE_DOCUMENT_ID: 'x);delete' }), /UUID/);
-  assert.deepEqual(fixtureConfig({ key: 'fixture', docId: 'synthetic' }, 'http://127.0.0.1:4180'), { mode: 'fixture', url: 'http://127.0.0.1:4180', key: 'fixture', docId: 'synthetic' });
+  assert.deepEqual(fixtureConfig({ key: 'fixture', docId: 'synthetic' }, 'http://127.0.0.1:4180'), { mode: 'fixture', url: 'http://127.0.0.1:4180', key: 'fixture', docId: 'synthetic', cutover: false });
+  assert.equal(fixtureConfig({ key: 'fixture', docId: 'synthetic', cutover: 'true' }, 'http://127.0.0.1:4180').cutover, false);
+  assert.equal(fixtureConfig({ key: 'fixture', docId: 'synthetic', cutover: true }, 'http://127.0.0.1:4180').cutover, true);
   assert.throws(() => fixtureConfig(null, 'http://127.0.0.1:4180'), /設定が必要/);
 });
 
