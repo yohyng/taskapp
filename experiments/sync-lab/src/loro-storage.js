@@ -187,5 +187,49 @@ export async function openLoroStorage(docId) {
       current.onsuccess = check; handoff.onsuccess = check;
     });
   }
-  return { id: docId, read, append, compact, readHandoff, commitHandoff, readCutover, captureCutover, finishCutover, stats: () => ({ ...counts }), close: () => db.close() };
+  const readRecovery = (key) => transaction(['state'], 'readonly', (tx, done) => {
+    const request = tx.objectStore('state').get(`recovery:${key}`); done(() => request.result ?? null);
+  });
+  async function commitRecovery({ receipt, expected, updates, outgoing, archives, cursor, active, signal }) {
+    if (!receipt || receipt.format !== 1 || !/^[a-f0-9]{64}$/.test(receipt.key) || !expected || !updates.every(binary)
+      || !Array.isArray(archives) || !Number.isSafeInteger(cursor) || cursor < 0) throw new Error('復元の保存形式が不正です');
+    outgoing.forEach(checkOutgoing);
+    const sameOutbox = (left, right) => left.length === right.length && left.every((entry, index) => entry.id === right[index].id
+      && entry.bytes.length === right[index].bytes.length && entry.bytes.every((byte, at) => byte === right[index].bytes[at]));
+    const applied = await transaction(['state', 'updates', 'outbox'], 'readwrite', (tx, done, fail) => {
+      const cancel = () => fail(new Error('復元中に画面が切り替わりました'));
+      const clean = () => signal?.removeEventListener('abort', cancel);
+      signal?.addEventListener('abort', cancel, { once: true });
+      tx.addEventListener('complete', clean, { once: true }); tx.addEventListener('abort', clean, { once: true });
+      if (signal?.aborted) { cancel(); return; }
+      const state = tx.objectStore('state'), old = state.get(`recovery:${receipt.key}`), base = state.get('document');
+      const remote = state.get('remote-cursor'), tail = tx.objectStore('updates').openCursor(null, 'prev'), pending = tx.objectStore('outbox').getAll();
+      const keys = state.getAllKeys(), values = state.getAll();
+      let ready = 0;
+      const check = () => {
+        if (++ready !== 7) return;
+        try {
+          if (!active()) throw new Error('復元中に利用者が変わりました');
+          if (old.result) { done(false); return; }
+          checkBase(base.result);
+          const currentArchives = keys.result.flatMap((key, index) => key === 'cutover' || String(key).startsWith('handoff:') ? [{ key, value: values.result[index] }] : []);
+          if (base.result.generation !== expected.base.generation || base.result.cutoff !== expected.base.cutoff
+            || (tail.result?.key ?? base.result.cutoff) !== (expected.updates.at(-1)?.sequence ?? expected.base.cutoff)
+            || (remote.result ?? -1) !== expected.cursor || !sameOutbox(pending.result, expected.outbox)
+            || JSON.stringify(currentArchives) !== JSON.stringify(expected.archives)
+            || expected.cursor >= 0 && cursor !== expected.cursor) throw new Error('復元候補の作成中に端末の保存が変わりました');
+          for (const bytes of updates) tx.objectStore('updates').add({ bytes });
+          for (const entry of outgoing) tx.objectStore('outbox').add(entry);
+          for (const entry of archives) state.add(entry.value, entry.key);
+          // 元の基準・追記は消さない。合流する履歴・未送信・復元前の姿・処理済み印を一体で残す。
+          state.put(cursor, 'remote-cursor'); state.add(receipt, `recovery:${receipt.key}`); done(true);
+        } catch (error) { fail(error); }
+      };
+      for (const request of [old, base, remote, tail, pending, keys, values]) request.onsuccess = check;
+    });
+    if (applied) { counts.appendTransactions++; counts.appendedUpdates += updates.length; counts.appendedBytes += updates.reduce((total, bytes) => total + bytes.length, 0); }
+    return applied;
+  }
+  return { id: docId, read, append, compact, readHandoff, commitHandoff, readCutover, captureCutover, finishCutover,
+    readRecovery, commitRecovery, stats: () => ({ ...counts }), close: () => db.close() };
 }

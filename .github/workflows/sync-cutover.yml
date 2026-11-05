@@ -39,6 +39,6 @@ jobs:
           npm install -g pnpm@11.25.0
           pnpm install --frozen-lockfile
       - name: 使い捨て実DBで停止・所有者・古い取引・再送を検証
-        run: node --test scripts/loro-cutover.test.mjs scripts/loro-postgres.test.mjs scripts/cutover-startup.test.mjs scripts/loro-backup.test.mjs
+        run: node --test scripts/loro-cutover.test.mjs scripts/loro-postgres.test.mjs scripts/cutover-startup.test.mjs scripts/loro-backup.test.mjs scripts/outline-recovery.test.mjs
         env:
           LAB_POWERSYNC: '1'

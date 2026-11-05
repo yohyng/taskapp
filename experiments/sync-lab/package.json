@@ -1,17 +1,18 @@
 {
   "name": "taskspace-sync-lab",
   "private": true,
-  "version": "0.18.0",
+  "version": "0.19.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "dev:staging": "node scripts/staging-dev.mjs",
     "verify:staging": "node scripts/verify-supabase-staging.mjs",
     "verify:staging:outline": "node scripts/verify-staging-outline.mjs",
+    "prepare:rollback": "node scripts/build-rollback-preview.mjs",
     "test": "playwright test",
     "test:performance": "playwright test --config playwright.performance.config.js",
     "test:unit": "node --test scripts/field-merge.test.mjs scripts/replace-file.test.mjs scripts/tree.test.mjs scripts/loro-tree.test.mjs scripts/loro-binding.test.mjs scripts/fixture-size.test.mjs scripts/loro-projection.test.mjs scripts/loro-journal.test.mjs scripts/loro-transfer.test.mjs scripts/owner-authorization.test.mjs scripts/durable-file.test.mjs scripts/loro-transport.test.mjs scripts/loro-api.test.mjs scripts/auth-session.test.mjs scripts/session-document.test.mjs",
-    "test:log": "node --test scripts/loro-postgres.test.mjs scripts/outline-model.test.mjs scripts/loro-log-transfer.test.mjs scripts/outline-migration.test.mjs scripts/legacy-outline-handoff.test.mjs scripts/cutover-startup.test.mjs scripts/loro-cutover.test.mjs scripts/loro-backup.test.mjs scripts/loro-update-parts.test.mjs scripts/loro-text-update.test.mjs scripts/staging-config.test.mjs",
+    "test:log": "node --test scripts/loro-postgres.test.mjs scripts/outline-model.test.mjs scripts/loro-log-transfer.test.mjs scripts/outline-migration.test.mjs scripts/legacy-outline-handoff.test.mjs scripts/cutover-startup.test.mjs scripts/loro-cutover.test.mjs scripts/loro-backup.test.mjs scripts/outline-recovery.test.mjs scripts/loro-update-parts.test.mjs scripts/loro-text-update.test.mjs scripts/staging-config.test.mjs",
     "prepare:assets": "powersync-web copy-assets"
   },
   "dependencies": {
