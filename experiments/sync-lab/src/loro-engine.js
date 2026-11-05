@@ -204,6 +204,16 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     }); },
     undo: () => history(false), redo: () => history(true), connect, disconnect,
     localBarrier: barrier,
+    async recoveryState() {
+      await barrier();
+      if (closing || signal?.aborted) throw new Error('画面が切り替わったため、控えを見送りました');
+      if (cursor < 0) throw new Error('本文の初回取得が終わっていないため、控えを見送りました');
+      // 生きた画面と送信待ちを別々に採らず、ACKやまとめ直しと同じDB取引の姿を控える。
+      const value = await storage.read({ includeArchives: true });
+      if (fatal) throw fatal;
+      if (closing || signal?.aborted) throw new Error('画面が切り替わったため、控えを見送りました');
+      return value;
+    },
     outline: () => outlineNodes(snapshot()),
     changeOutline(makeNext) { local(() => { const before = outlineNodes(snapshot()); applyOutlineIntent(doc, before, typeof makeNext === 'function' ? makeNext(before) : makeNext); }); },
     canUndo: () => undo.canUndo(), canRedo: () => undo.canRedo(),

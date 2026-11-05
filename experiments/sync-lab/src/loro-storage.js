@@ -58,12 +58,15 @@ export async function openLoroStorage(docId) {
       tx.oncomplete = () => { try { resolve(typeof result === 'function' ? result() : result); } catch (error) { reject(error); } };
     });
   }
-  async function read() {
+  async function read({ includeArchives = false } = {}) {
     const saved = await transaction(['state', 'updates', 'outbox'], 'readonly', (tx, done) => {
       const base = tx.objectStore('state').get('document');
       const updates = tx.objectStore('updates').getAll(), outbox = tx.objectStore('outbox').getAll();
       const cursor = tx.objectStore('state').get('remote-cursor');
-      done(() => ({ base: base.result, updates: updates.result, outbox: outbox.result, cursor: cursor.result ?? -1 }));
+      const keys = includeArchives ? tx.objectStore('state').getAllKeys() : null;
+      const values = includeArchives ? tx.objectStore('state').getAll() : null;
+      done(() => ({ base: base.result, updates: updates.result, outbox: outbox.result, cursor: cursor.result ?? -1,
+        ...(includeArchives ? { archives: keys.result.flatMap((key, index) => key === 'cutover' || String(key).startsWith('handoff:') ? [{ key, value: values.result[index] }] : []) } : {}) }));
     });
     checkBase(saved.base);
     let previous = saved.base.cutoff;

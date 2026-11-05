@@ -5,16 +5,18 @@ import { sessionDocument } from './session-document.js';
 import { loroSupabaseTransport } from './loro-supabase-transport.js';
 import { exclusiveDocument } from './exclusive-document.js';
 import { prepareCutover, fetchCutoverRoute, retryCutover } from './cutover-startup.js';
+import { outlineBackup } from './outline-backup.js';
 
 // 製品の編集画面は再利用し、旧同期Providerを同時に起動しない。旧ローカル保存名にも書かない。
 export function ProductOutline() {
   const session = useSyncExternalStore(sessions.subscribe, sessions.snapshot), ownerId = session?.user?.id;
   const [current, setCurrent] = useState(null), [error, setError] = useState('');
+  const [backupState, setBackupState] = useState(null);
   const [view, setView] = useState({ fontSize: 14, align: 'left', typewriter: false, immersive: false, anchor: 0.6 });
   useEffect(() => {
     if (!ownerId) return;
-    let live = true, engine;
-    const publish = () => { if (live && engine) setCurrent({ ownerId, engine, nodes: engine.outline(), queued: engine.queued(), ...engine.connectionState() }); };
+    let live = true, engine, backup;
+    const publish = () => { if (live && engine) setCurrent({ ownerId, engine, backup, nodes: engine.outline(), queued: engine.queued(), ...engine.connectionState() }); };
     const refreshSession = () => sessions.token(ownerId, { refresh: true });
     const transport = loroSupabaseTransport(supabase, { refreshSession });
     const record = sessionDocument({ sessions, ownerId, docId: connection.docId, transport,
@@ -24,8 +26,15 @@ export function ProductOutline() {
           route: (signal) => fetchCutoverRoute(supabase, signal, refreshSession) }), options.signal) : undefined }),
       onChange: publish, onError: (value) => { if (live) setError(value.message); },
     });
-    record.ready.then((value) => { engine = value; if (live) { window.lab = engine; publish(); } }).catch((value) => { if (live) setError(value.message); });
-    return () => { live = false; delete window.lab; record.dispose().catch(() => {}); };
+    record.ready.then((value) => {
+      engine = value;
+      if (live) {
+        backup = outlineBackup({ engine, ownerId, docId: connection.docId, activeOwner: () => live ? sessions.snapshot()?.user?.id : null,
+          onState: (state) => { if (live) setBackupState({ ...state, engine }); } });
+        backup.start(); window.lab = engine; publish();
+      }
+    }).catch((value) => { if (live) setError(value.message); });
+    return () => { live = false; backup?.dispose(); delete window.lab; record.dispose().catch(() => {}); };
   }, [ownerId]);
   const active = current?.ownerId === ownerId ? current : null;
   if (!active) return <p data-outline-connecting>保存済みのアウトラインを開いています…<span data-error>{error}</span></p>;
@@ -38,7 +47,7 @@ export function ProductOutline() {
     undo: () => engine.undo(), redo: () => engine.redo(), canUndo: engine.canUndo(), canRedo: engine.canRedo(),
     retryLocalSave: () => engine.localBarrier(), refresh: () => engine.connect(),
     resetSync: unsupported, pullRemote: unsupported, clearRemote: unsupported,
-    backupState: { status: 'idle' }, createBackup: unsupported, getLocalCheckpoint: () => null,
+    backupState: backupState?.engine === engine ? backupState : { status: 'idle' }, createBackup: () => active.backup.run(), getLocalCheckpoint: () => null,
   };
   return <main data-product-outline style={{ background: '#181818', color: '#ddd', minHeight: '100vh', padding: 16 }}>
     <button data-session-signout onClick={() => supabase.auth.signOut({ scope: 'local' })}>ログアウト</button>
