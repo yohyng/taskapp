@@ -1,5 +1,15 @@
 name: 同期方式の独立比較
 on:
+  # PRイベントの配信だけに依存せず、本番へ統合する前の開発先でも最新の全体試験を行う。
+  push:
+    branches: ['codex/compare-sync-engines']
+    paths:
+      - 'experiments/sync-lab/**'
+      - '!experiments/sync-lab/**/*.md'
+      - '.github/workflows/sync-lab.yml'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
   pull_request:
     paths:
       - 'experiments/sync-lab/**'

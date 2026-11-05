@@ -1,6 +1,20 @@
 name: アウトラインの同期回帰テスト
 
 on:
+  # 独立した新同期の変更も、再利用する本体画面の回帰試験を通してから統合する。
+  push:
+    branches: ["codex/compare-sync-engines"]
+    paths:
+      - "src/**"
+      - "experiments/sync-lab/**"
+      - "!experiments/sync-lab/**/*.md"
+      - "docs/gas-image-upload.gs"
+      - "sync-tests/**"
+      - "tests/**"
+      - "package*.json"
+      - "playwright*.config.js"
+      - "vite.config.js"
+      - ".github/workflows/outline-sync.yml"
   pull_request:
     paths:
       - "src/**"
