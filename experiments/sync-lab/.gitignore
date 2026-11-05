@@ -7,3 +7,4 @@ comparison-results.json
 .bench-results/
 performance-output.log
 performance-results.json
+volume-results.json
