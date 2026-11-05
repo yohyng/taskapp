@@ -34,6 +34,9 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
+      - name: 実接続確認が使う本体SDKを既存lockで取得
+        working-directory: .
+        run: npm ci
       - name: 既存の検証依存を取得
         run: |
           npm install -g pnpm@11.25.0
