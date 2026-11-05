@@ -1,5 +1,8 @@
 # 実Supabaseへの接続と試験（0.14.1）
 
+0.19.2でも設定済みの同じ検証先でSDK試験と実Outlinerの4シナリオを再実行し成功した。
+最新の結果と範囲は[RESULTS.md](RESULTS.md)、通常入口・切替・PWAの残りは[RELEASE-GATES.md](RELEASE-GATES.md)を参照。
+
 本体Outliner・AuthGate・SDK・Loroの経路を、独立したSupabaseプロジェクトへ接続する。
 本番へ切り替える工程ではない。0.14.0の実装時点では検証先が未指定だったが、0.14.1では以下の実サービス試験まで成功した。
 合成Auth・PostgREST・通知を止めた試験の成功を、実サービスの成功と読み替えない。
