@@ -163,7 +163,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
     kind: 'loro', snapshot, queued: () => !!fatal || saves > 0 || outbox.length > 0,
     connectionState: () => ({ connected, ready: !transport.decode || cursor >= 0 }),
     // 本文・差分・認証値を含めず、通信と端末確定のどちらで止まったかを試験から確認する。
-    deliveryState: () => ({ phase: deliveryPhase, enabled, connected, inFlight: !!flight, saving: saves,
+    deliveryState: () => ({ phase: deliveryPhase, enabled, connected, closing, inFlight: !!flight, saving: saves,
       pending: outbox.length, cursor, failures, fatal: fatal?.name ?? null, lastError: lastDeliveryError }),
     inputState: (id) => ({ text: node(id).data.get('text').toString(), draft: false }),
     treeState: () => analyzeTree(snapshot()),

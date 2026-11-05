@@ -17,14 +17,15 @@ function checkOutgoing(entry) {
 }
 
 export async function openLoroStorage(docId) {
-  let closed = false, reopening;
+  let closed = false, closedReason = null, reopening;
+  const stopped = (cause) => Object.assign(new Error('端末の保存接続は終了しました', { cause }), { storageStage: closedReason || 'closed-during-open' });
   const open = (allowCreate) => new Promise((resolve, reject) => {
     let migrationError, abandoned = false;
     const request = indexedDB.open(`taskspace-lab-loro-${docId}`, 2);
     request.onupgradeneeded = (event) => {
       const tx = request.transaction;
       // 切れた接続の取り直しで保存領域まで消えていたら、空の原本を作らない。
-      if (!allowCreate) { migrationError = new Error('端末の保存領域を再取得できません'); tx.abort(); return; }
+      if (!allowCreate) { migrationError = Object.assign(new Error('端末の保存領域を再取得できません'), { storageStage: 'missing' }); tx.abort(); return; }
       if (event.oldVersion === 0) request.result.createObjectStore('state');
       request.result.createObjectStore('updates', { keyPath: 'sequence', autoIncrement: true });
       const outgoing = request.result.createObjectStore('outbox', { keyPath: 'id' });
@@ -46,15 +47,15 @@ export async function openLoroStorage(docId) {
     };
     request.onsuccess = () => {
       const connection = request.result;
-      if (closed || abandoned) { connection.close(); reject(new Error('端末の保存接続は終了しました')); return; }
-      connection.onversionchange = () => { closed = true; connection.close(); };
+      if (closed || abandoned) { connection.close(); reject(stopped()); return; }
+      connection.onversionchange = () => { closed = true; closedReason = 'versionchange'; connection.close(); };
       resolve(connection);
     };
     request.onerror = () => reject(migrationError || request.error);
-    request.onblocked = () => { abandoned = true; reject(new Error('検証用の保存領域が開けません')); };
+    request.onblocked = () => { abandoned = true; reject(Object.assign(new Error('検証用の保存領域が開けません'), { storageStage: 'blocked' })); };
   });
   let db = await open(true);
-  const counts = { appendTransactions: 0, appendedUpdates: 0, appendedBytes: 0, compactions: 0, checkpointExports: 0, reopens: 0 };
+  const counts = { appendTransactions: 0, appendedUpdates: 0, appendedBytes: 0, compactions: 0, checkpointExports: 0, reopens: 0, reopenAttempts: 0 };
   function transact(connection, stores, mode, action) {
     return new Promise((resolve, reject) => {
       let tx;
@@ -71,7 +72,7 @@ export async function openLoroStorage(docId) {
     });
   }
   async function transaction(stores, mode, action) {
-    if (closed) throw new Error('端末の保存接続は終了しました');
+    if (closed) throw stopped();
     const previous = db;
     try { return await transact(previous, stores, mode, action); }
     catch (error) {
@@ -80,12 +81,12 @@ export async function openLoroStorage(docId) {
       if (closed || error.name !== 'InvalidStateError' || error.storageStage !== 'begin') throw error;
       if (db === previous) {
         if (!reopening) {
-          previous.close();
+          previous.close(); counts.reopenAttempts++;
           reopening = open(false).then((connection) => { db = connection; counts.reopens++; }).finally(() => { reopening = null; });
         }
         await reopening;
       }
-      if (closed) throw new Error('端末の保存接続は終了しました', { cause: error });
+      if (closed) throw stopped(error);
       return transact(db, stores, mode, action);
     }
   }
@@ -262,5 +263,5 @@ export async function openLoroStorage(docId) {
     return applied;
   }
   return { id: docId, read, append, compact, readHandoff, commitHandoff, readCutover, captureCutover, finishCutover,
-    readRecovery, commitRecovery, stats: () => ({ ...counts }), close: () => { closed = true; db.close(); } };
+    readRecovery, commitRecovery, stats: () => ({ ...counts }), close: () => { closed = true; closedReason = 'disposed'; db.close(); } };
 }
