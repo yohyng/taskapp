@@ -1,0 +1,31 @@
+import { test, expect } from '@playwright/test';
+import { appFixture } from './support/app-fixture.mjs';
+
+test('通常の入口：タスク・分割画面・メモ追加を新同期へ渡し、StrictModeでも旧同期を起動しない', async ({ browser }) => {
+  const f = await appFixture(browser);
+  try {
+    const a = await f.open(), b = await f.open();
+    await expect(a.locator('[data-pane="tasks"] [data-task-id="task-probe"]')).toBeVisible();
+    await expect(a.locator('[data-pane="outline"] [data-row="memo"]')).toBeVisible();
+    expect(f.entries).toHaveLength(0);
+    await expect(a.locator('[data-outline-recovery],[data-session-signout]')).toHaveCount(0);
+    await a.locator('[data-row="memo"] [data-row-text]').click();
+    await a.locator('[data-row="memo"] textarea').fill('普段の画面から編集');
+    await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText('普段の画面から編集');
+    await a.locator('[data-quick-add]').click();
+    await a.locator('[data-quick-add-dialog] textarea').fill('タスク画面からメモへ追加🌿');
+    await a.locator('[data-add-memo]').click(); await a.locator('[data-quick-add-dialog] textarea').press('Escape');
+    await expect.poll(() => b.evaluate(() => window.lab.snapshot().filter((row) => row.text === 'タスク画面からメモへ追加🌿').length)).toBe(1);
+    await a.locator('[data-pane-add]').click();
+    await expect(a.locator('[data-outliner]')).toHaveCount(2);
+    await expect(a.locator('[data-row="memo"] [data-row-text]')).toHaveCount(2);
+    await a.locator('[data-outline-view]').first().click();
+    await expect(a.locator('[data-outline-pull],[data-outline-clear]')).toHaveCount(0);
+    expect(await a.evaluate(() => JSON.parse(localStorage.getItem('taskspace-outline-view')).fontSize)).toBe(22);
+    await a.evaluate(() => window.lab.localBarrier()); await a.reload();
+    await expect(a.locator('[data-outliner]')).toHaveCount(2);
+    await expect.poll(() => a.evaluate(() => window.lab.snapshot().filter((row) => row.text === 'タスク画面からメモへ追加🌿').length)).toBe(1);
+    expect(await a.evaluate(() => localStorage.getItem('taskspace-outline-v1'))).toBe('[{"id":"legacy","text":"旧保存は残す","children":[]}]');
+    expect(f.legacy).toEqual([]); expect(f.errors).toEqual([]);
+  } finally { await f.close(); }
+});

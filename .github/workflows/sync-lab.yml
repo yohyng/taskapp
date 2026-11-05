@@ -10,17 +10,20 @@ on:
       - 'src/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.js'
+      - 'index.html'
+      - 'public/**'
   pull_request:
     paths:
       - 'experiments/sync-lab/**'
       - '!experiments/sync-lab/**/*.md'
       - '.github/workflows/sync-lab.yml'
-      - 'src/AuthGate.jsx'
-      - 'src/Outliner.jsx'
-      - 'src/lib/**'
-      - 'src/index.css'
+      - 'src/**'
       - 'package.json'
       - 'package-lock.json'
+      - 'vite.config.js'
+      - 'index.html'
+      - 'public/**'
 permissions:
   contents: read
 jobs:
@@ -33,6 +36,7 @@ jobs:
     env:
       LAB_POWERSYNC: '1'
       LAB_VERIFY_ROLLBACK: '1'
+      LAB_VERIFY_APP_PWA: '1'
     steps:
       - uses: actions/checkout@v6
         with:
@@ -56,6 +60,8 @@ jobs:
         run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 150
       - name: 固定コミットから互換性検証用の前版をビルド
         run: pnpm prepare:rollback
+      - name: 通常入口の合成PWAをビルド
+        run: pnpm prepare:app
       - name: 列の統合と三端末の動作を比較
         run: |
           pnpm test:unit

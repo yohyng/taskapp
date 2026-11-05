@@ -36,8 +36,8 @@ const OutlineApiContext = React.createContext(null);
 
 // 同じ編集画面を別の保存経路でも検査できるよう、表示の入口だけを公開する。
 // 旧Providerの起動・保存・Realtimeはここから実行しない。
-export function OutlineDataProvider({ value, children }) {
-  return <OutlineContext.Provider value={value}>{children}</OutlineContext.Provider>;
+export function OutlineDataProvider({ value, api, children }) {
+  return <OutlineApiContext.Provider value={api}><OutlineContext.Provider value={value}>{children}</OutlineContext.Provider></OutlineApiContext.Provider>;
 }
 
 const OUTLINE_VIEW_KEY = "taskspace-outline-view";
@@ -1039,7 +1039,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup } = useOutline();
+  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup, legacySyncControls = true } = useOutline();
   const loading = !contentReady && (nodes.length === 0 || isOutlinePlaceholder(nodes));
   const syncFailed = syncNote.startsWith("error:");
   const localFailed = localSave.status === "error";
@@ -1984,7 +1984,7 @@ export default function Outliner() {
               </div>
 
               <div className="mb-2 border-t border-white/10 pt-2">
-                <div className="mb-1 text-[10px] text-neutral-500">端末どうしを揃える</div>
+                {legacySyncControls && <><div className="mb-1 text-[10px] text-neutral-500">端末どうしを揃える</div>
                 <button
                   data-outline-pull
                   onClick={async () => {
@@ -2020,7 +2020,7 @@ export default function Outliner() {
                   この端末からも Supabase からも消えます。⌘Z で戻せますが、
                   念のため先に ↓ で書き出しておくと安心です。
                 </div>
-              </div>
+              </>}</div>
 
               <button
                 data-immersive

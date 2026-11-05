@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* 本体外の検証入口からも、実画面のレイアウトに必要なクラスを生成する。 */
+@source "./App.jsx";
+@source "./Outliner.jsx";
 
 /* ドラッグモード中はカード全体のタッチスクロールを無効化 */
 .ts-drag-mode [data-draggable] {

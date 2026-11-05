@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 
 // Authサービスの応答だけを代役にする。本物のSupabaseへのログインやJWT署名の試験とは区別する。
-export async function ownerFixture(docId, { ownerId = '検証の所有者' } = {}) {
-  const tokens = new Map(), apiKey = randomUUID(), refreshTokens = new Map(), accounts = new Map();
+export async function ownerFixture(docId, { ownerId = '検証の所有者', apiKey = randomUUID() } = {}) {
+  const tokens = new Map(), refreshTokens = new Map(), accounts = new Map();
   let refreshes = 0, refreshGate, releaseRefresh, refreshStarted;
   const account = (userId) => {
     const value = { email: `${randomUUID()}@example.test`, password: randomUUID(), userId };
@@ -96,6 +96,7 @@ export async function ownerFixture(docId, { ownerId = '検証の所有者' } = {
         catch { await route.abort('failed').catch(() => {}); }
       });
     },
+    authUrl: `http://127.0.0.1:${issuer.address().port}`,
     async routeAuth(page) {
       await page.route('**/auth/v1/**', async (route) => {
         const target = new URL(route.request().url());

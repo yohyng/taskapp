@@ -1,0 +1,40 @@
+import { randomUUID } from 'node:crypto';
+import { ownerFixture } from './owner-fixture.mjs';
+import { appState } from './app-state.mjs';
+
+export async function appFixture(browser, manifest) {
+  const docId = manifest?.config.docId || randomUUID(), ownerId = manifest?.ownerId || randomUUID();
+  const auth = manifest ? { ...(await (await fetch(`${manifest.config.url}/__app-fixture/config`)).json()),
+    apiKey: manifest.config.key, close: async () => {} } : await ownerFixture(docId, { ownerId });
+  const state = appState(), { entries, legacy } = state;
+  const contexts = [], errors = [], offline = new Set();
+  async function open({ pwa = false } = {}) {
+    const context = await browser.newContext({ serviceWorkers: pwa ? 'allow' : 'block' }); contexts.push(context);
+    const page = await context.newPage(); page.on('pageerror', (error) => errors.push(error.message));
+    await page.addInitScript(({ docId, key }) => {
+      window.labAuthConfig = { docId, key };
+      if (!localStorage.getItem('taskspace-panes-v1')) localStorage.setItem('taskspace-panes-v1', JSON.stringify([
+        { id: 'tasks', mode: 'tasks', weight: 1 }, { id: 'outline', mode: 'outline', weight: 1 }]));
+      if (!localStorage.getItem('taskspace-outline-v1')) localStorage.setItem('taskspace-outline-v1', '[{"id":"legacy","text":"旧保存は残す","children":[]}]');
+      if (!localStorage.getItem('taskspace-outline-view')) localStorage.setItem('taskspace-outline-view', '{"fontSize":22,"align":"left"}');
+    }, { docId, key: auth.apiKey });
+    if (!pwa) await auth.routeAuth(page);
+    await page.routeWebSocket('**/realtime/v1/**', (socket) => socket.close());
+    if (!pwa) await page.route('**/rest/v1/**', async (route) => {
+      const request = route.request(), path = new URL(request.url()).pathname;
+      if (offline.has(page)) { await route.abort('failed'); return; }
+      await route.fulfill(state.respond(path, request.method(), request.postData() ? request.postDataJSON() : null));
+    });
+    await page.goto(pwa ? 'http://127.0.0.1:4183/' : '/app.html');
+    await page.getByPlaceholder('メールアドレス').fill(auth.credentials.email);
+    await page.getByPlaceholder('パスワード').fill(auth.credentials.password);
+    await page.getByRole('button', { name: 'ログイン', exact: true }).click();
+    await page.locator('[data-row="memo"]').waitFor({ timeout: 20000 });
+    return page;
+  }
+  return { open, entries, errors, legacy, offline,
+    async legacyRequests() { return manifest ? (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()).legacy : legacy; },
+    async remoteState() { return (await (await fetch(`${manifest.config.url}/__app-fixture/state`)).json()); },
+    async stopHttp(offline) { await fetch(`${manifest.config.url}/__app-fixture/offline`, { method: 'POST', body: JSON.stringify({ offline }) }); },
+    async close() { await Promise.allSettled(contexts.map((context) => context.close())); await auth.close(); } };
+}

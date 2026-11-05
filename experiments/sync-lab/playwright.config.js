@@ -8,7 +8,8 @@ export default defineConfig({
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
-  webServer: {
+  webServer: [{
     command: `"${process.execPath}" scripts/dev.mjs`, url: 'http://127.0.0.1:4180', reuseExistingServer: false, timeout: 120000,
-  },
+  }, ...(process.env.LAB_VERIFY_APP_PWA === '1' ? [{ command: `"${process.execPath}" scripts/serve-app-preview.mjs`,
+    url: 'http://127.0.0.1:4183', reuseExistingServer: false, timeout: 120000 }] : [])],
 });

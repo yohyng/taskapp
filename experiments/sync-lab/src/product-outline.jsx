@@ -1,5 +1,6 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Outliner, { OutlineDataProvider } from '../../../src/Outliner.jsx';
+import { addMemoUnderDate } from '../../../src/lib/outline.js';
 import { sessions, supabase, connection } from './session-client.js';
 import { sessionDocument } from './session-document.js';
 import { loroSupabaseTransport } from './loro-supabase-transport.js';
@@ -9,13 +10,27 @@ import { outlineBackup } from './outline-backup.js';
 import { restoreOutlineBackup } from './restore-outline-backup.js';
 
 // 製品の編集画面は再利用し、旧同期Providerを同時に起動しない。旧ローカル保存名にも書かない。
-export function ProductOutline() {
+export function ProductOutline({ children, tools = true }) {
   const session = useSyncExternalStore(sessions.subscribe, sessions.snapshot), ownerId = session?.user?.id;
   const [current, setCurrent] = useState(null), [error, setError] = useState('');
   const [backupState, setBackupState] = useState(null);
   const [recovery, setRecovery] = useState(null), [recoveryNote, setRecoveryNote] = useState(null);
-  const generation = recovery?.ownerId === ownerId ? recovery.id : null;
-  const [view, setView] = useState({ fontSize: 14, align: 'left', typewriter: false, immersive: false, anchor: 0.6 });
+  // AuthGateのログイン通知が先に届くことがある。未確定の所有者同士を一致と扱わない。
+  const generation = ownerId && recovery?.ownerId === ownerId ? recovery.id : null;
+  const engineRef = useRef(null);
+  const [view, setView] = useState(() => {
+    const defaults = { fontSize: 14, align: 'left', typewriter: false, immersive: false, anchor: 0.6 };
+    try { return { ...defaults, ...JSON.parse(localStorage.getItem('taskspace-outline-view') || '{}') }; } catch { return defaults; }
+  });
+  useEffect(() => { try { localStorage.setItem('taskspace-outline-view', JSON.stringify(view)); } catch { /* 表示設定の保存失敗で本文入力を止めない。 */ } }, [view]);
+  // Appは木を購読しない。メモ追加の時点で稼働中の文書を読み、同じ変更経路へ一度だけ渡す。
+  const api = useMemo(() => ({ addMemo(date, text) {
+    const engine = engineRef.current;
+    if (!engine || sessions.snapshot()?.user?.id !== ownerId) return null;
+    let result;
+    engine.changeOutline((nodes) => { result = addMemoUnderDate(nodes, date, text); return result.nodes; });
+    return result;
+  } }), [ownerId]);
   useEffect(() => {
     if (!ownerId) return;
     let live = true, engine, backup, recovered;
@@ -43,13 +58,13 @@ export function ProductOutline() {
       if (live) {
         backup = outlineBackup({ engine, ownerId, docId: connection.docId, activeOwner: () => live ? sessions.snapshot()?.user?.id : null,
           onState: (state) => { if (live) setBackupState({ ...state, engine }); } });
-        backup.start(); window.lab = engine; publish();
+        engineRef.current = engine; backup.start(); window.lab = engine; publish();
         if (recovered) setRecoveryNote({ ownerId, text: recovered.applied ? '控えとこの端末の内容を合わせました' : 'この控えは復元済みです' });
       }
     }).catch((value) => { if (live) setError(value.message); });
-    return () => { live = false; backup?.dispose(); delete window.lab; record.dispose().catch(() => {}); };
+    return () => { live = false; if (engineRef.current === engine) engineRef.current = null; backup?.dispose(); delete window.lab; record.dispose().catch(() => {}); };
   }, [ownerId, recovery, generation]);
-  const active = current?.ownerId === ownerId && current.generation === generation ? current : null;
+  const active = ownerId && current?.ownerId === ownerId && current.generation === generation ? current : null;
   if (!active) return <p data-outline-connecting>保存済みのアウトラインを開いています…<span data-error>{error}</span></p>;
   const engine = active.engine;
   async function recover(file) {
@@ -70,9 +85,10 @@ export function ProductOutline() {
     syncNote: '', historyNote: '', dismissHistoryNote() {}, dismissSync() {}, dismissLocalInfo() {},
     undo: () => engine.undo(), redo: () => engine.redo(), canUndo: engine.canUndo(), canRedo: engine.canRedo(),
     retryLocalSave: () => engine.localBarrier(), refresh: () => engine.connect(),
-    resetSync: unsupported, pullRemote: unsupported, clearRemote: unsupported,
+    resetSync: unsupported, pullRemote: unsupported, clearRemote: unsupported, legacySyncControls: false,
     backupState: backupState?.engine === engine ? backupState : { status: 'idle' }, createBackup: () => active.backup.run(), getLocalCheckpoint: () => null,
   };
+  if (!tools) return <OutlineDataProvider value={value} api={api}>{children}</OutlineDataProvider>;
   return <main data-product-outline style={{ background: '#181818', color: '#ddd', minHeight: '100vh', padding: 16 }}>
     <button data-session-signout onClick={() => supabase.auth.signOut({ scope: 'local' })}>ログアウト</button>
     <details data-outline-recovery>
@@ -81,6 +97,6 @@ export function ProductOutline() {
       <input data-outline-recovery-file type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; recover(file); }} />
       <p data-outline-recovery-state role="status">{recoveryNote?.ownerId === ownerId ? recoveryNote.text : ''}</p>
     </details>
-    <p data-error>{error}</p><OutlineDataProvider value={value}><Outliner /></OutlineDataProvider>
+    <p data-error>{error}</p><OutlineDataProvider value={value} api={api}><Outliner /></OutlineDataProvider>
   </main>;
 }
