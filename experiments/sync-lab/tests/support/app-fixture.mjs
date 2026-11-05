@@ -6,12 +6,12 @@ import { ownerFixture } from './owner-fixture.mjs';
 import { appState } from './app-state.mjs';
 import { createClient } from '@supabase/supabase-js';
 
-export async function appFixture(browser, manifest) {
+export async function appFixture(browser, manifest, { browserFailureEvents = true } = {}) {
   const docId = manifest?.config.docId || randomUUID(), ownerId = manifest?.ownerId || randomUUID();
   const auth = manifest ? { ...(await (await fetch(`${manifest.config.url}/__app-fixture/config`)).json()),
     apiKey: manifest.config.key, close: async () => {} } : await ownerFixture(docId, { ownerId });
   const state = appState(), { entries, legacy } = state;
-  const contexts = [], profiles = new Map(), errors = [], nativeNetwork = [], offline = new Set(), authRequests = [];
+  const contexts = [], profiles = new Map(), errors = [], nativeNetwork = [], offline = new Set(), authRequests = [], fetchFailures = [];
   async function open({ pwa = false, profile, existingLogin = false, initialOutline, waitForOutline = true } = {}) {
     // PWAは端末のディスク保存が前提。一時contextの保存サービス消失と区別し、
     // ブラウザープロセスを終了しても同じ保存・SWから起動する。利用者のprofileは使わない。
@@ -23,7 +23,7 @@ export async function appFixture(browser, manifest) {
     const page = context.pages()[0] || await context.newPage(), failedRequests = new Set();
     if (pwa) profiles.set(page, directory);
     // SW経由のfetchはpageの要求イベントへ出ない場合がある。同じ端末contextで追う。
-    context.on('requestfailed', (request) => failedRequests.add(request.url()));
+    if (browserFailureEvents) context.on('requestfailed', (request) => failedRequests.add(request.url()));
     context.on('request', (request) => {
       const url = new URL(request.url());
       if (url.pathname === '/auth/v1/token') authRequests.push(url.searchParams.get('grant_type'));
@@ -36,10 +36,21 @@ export async function appFixture(browser, manifest) {
       else errors.push(error.message);
     });
     await page.exposeFunction('__labScriptFailure', (message) => errors.push(message));
+    await page.exposeFunction('__labFetchFailure', (url) => { failedRequests.add(url); fetchFailures.push(url); });
     await page.addInitScript(() => {
       const report = (value) => window.__labScriptFailure(String(value?.message || value)).catch(() => {});
       window.addEventListener('error', (event) => { if (event.error) report(event.error); });
       window.addEventListener('unhandledrejection', (event) => report(event.reason));
+      // SWの交代で中止されたfetchはrequestfailedへ出ないことがある。実際のPromiseの
+      // 失敗も記録するが、例外はそのまま投げ直し、未処理なら上の独立した検査で失敗させる。
+      const fetch = window.fetch;
+      window.fetch = async (...args) => {
+        try { return await fetch.apply(window, args); }
+        catch (error) {
+          const input = args[0], url = new URL(typeof input === 'string' ? input : input.url || String(input), location.href).href;
+          await window.__labFetchFailure(url).catch(() => {}); throw error;
+        }
+      };
     });
     let savedLogin = [];
     if (existingLogin) {
@@ -82,7 +93,7 @@ export async function appFixture(browser, manifest) {
     await page.locator('[data-row="memo"]').waitFor({ timeout: 20000 });
     return page;
   }
-  return { open, entries, authRequests, get errors() { return [...errors, ...nativeNetwork.filter((entry) => !entry.failedRequests.has(entry.url)).map((entry) => entry.message)]; }, legacy, offline,
+  return { open, entries, authRequests, fetchFailures, get errors() { return [...errors, ...nativeNetwork.filter((entry) => !entry.failedRequests.has(entry.url)).map((entry) => entry.message)]; }, legacy, offline,
     async restart(page) {
       const profile = profiles.get(page);
       if (!profile) throw new Error('PWAのディスク保存profileが必要です');

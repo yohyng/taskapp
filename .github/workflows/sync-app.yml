@@ -64,3 +64,43 @@ jobs:
             experiments/sync-lab/release-results.json
             experiments/sync-lab/test-results/
           retention-days: 7
+  update:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --shm-size=1gb
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 同じ固定依存を取得
+        run: |
+          npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 固定互換版と最新版の成果物を生成
+        run: pnpm prepare:pwa
+      - name: 同じ保存のままPWAを更新・切り戻し・圏外再起動する
+        run: pnpm test:pwa --max-failures=1 --reporter=line,json > pwa-update-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-update-results.json
+      - name: 結果を表示
+        if: always()
+        run: cat pwa-update-output.log 2>/dev/null || true
+      - name: 合成成果物のハッシュと試験記録を保管
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-pwa-update
+          path: |
+            experiments/sync-lab/.data/pwa-rehearsal.json
+            experiments/sync-lab/pwa-update-results.json
+            experiments/sync-lab/test-results/
+          retention-days: 7

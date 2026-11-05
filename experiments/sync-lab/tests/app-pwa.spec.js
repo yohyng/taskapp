@@ -62,11 +62,12 @@ for (const interruptedStorage of [false, true]) test(`通常入口のPWA：圏�
 test('PWAの例外検出：通信診断と同じ形でもJavaScriptの未処理Promiseを見逃さない', async ({ browser }) => {
   test.skip(process.env.LAB_VERIFY_APP_PWA !== '1', '先にprepare:appでローカル専用の成果物を作る');
   const manifest = JSON.parse(await readFile(new URL('../.data/app-preview.json', import.meta.url), 'utf8'));
-  const f = await appFixture(browser, manifest);
+  const f = await appFixture(browser, manifest, { browserFailureEvents: false });
   try {
     const a = await f.open({ pwa: true });
     await f.stopHttp(true);
     await a.evaluate(async () => { try { await fetch('/rest/v1/errors-probe'); } catch { /* 意図した圏外応答は処理済み。 */ } });
+    expect(f.fetchFailures).toContain(`${manifest.config.url}/rest/v1/errors-probe`);
     await f.stopHttp(false);
     await a.evaluate(() => {
       const error = new Error('この未処理例外を見逃さない');
