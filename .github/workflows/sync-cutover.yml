@@ -14,6 +14,37 @@ on:
 permissions:
   contents: read
 jobs:
+  production-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: lab_source
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab-only-password
+        ports: ['5434:5432']
+        options: --health-cmd "pg_isready -U lab -d lab_source" --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 本体の既存依存を取得
+        working-directory: .
+        run: npm ci
+      - name: 検証室の固定依存を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 本番用二段階SQLを使い捨てDBだけで検証
+        run: node --test scripts/production-cutover.test.mjs
+        env:
+          LAB_PRODUCTION_SQL: '1'
   staging-setup:
     runs-on: ubuntu-latest
     timeout-minutes: 10

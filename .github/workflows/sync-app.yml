@@ -2,9 +2,9 @@ name: 通常画面とPWAの保存・復帰
 on:
   push:
     branches: ['codex/compare-sync-engines']
-    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'scripts/production-release.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
   pull_request:
-    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'scripts/production-release.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
 permissions:
   contents: read
 jobs:
