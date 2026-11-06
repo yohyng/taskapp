@@ -1,6 +1,33 @@
 import { test, expect } from '@playwright/test';
 import { appFixture } from './support/app-fixture.mjs';
 
+test('接続ランプ：同期済みは緑の丸を表示し、切断中は待機して復帰後に再び同期済みになる', async ({ browser }) => {
+  const f = await appFixture(browser);
+  try {
+    const a = await f.open(), b = await f.open();
+    const link = a.locator('[data-outline-link]'), status = a.locator('[data-sync]');
+    await expect(status).toHaveAttribute('data-sync', 'synced');
+    await expect(link).toHaveAttribute('data-link', 'live');
+    await expect(link).toHaveText('●');
+    await expect(link).toHaveAttribute('title', 'ほかの端末とつながっています（押すと読み直す）');
+    f.offline.add(a);
+    await a.evaluate(() => window.dispatchEvent(new Event('offline')));
+    await expect(link).toHaveAttribute('data-link', 'waking');
+    await expect(link).toHaveText('◌');
+    await a.locator('[data-row="memo"] [data-row-text]').click();
+    await a.locator('[data-row="memo"] textarea').fill('圏外の入力も復帰後に届ける');
+    await a.evaluate(() => window.lab.localBarrier());
+    await expect(status).toHaveAttribute('data-sync', 'waiting');
+    f.offline.delete(a);
+    await a.evaluate(() => window.dispatchEvent(new Event('online')));
+    await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText('圏外の入力も復帰後に届ける');
+    await expect(status).toHaveAttribute('data-sync', 'synced');
+    await expect(link).toHaveAttribute('data-link', 'live');
+    await expect(link).toHaveText('●');
+    expect(f.legacy).toEqual([]); expect(f.errors).toEqual([]);
+  } finally { await f.close(); }
+});
+
 test('通常の入口：タスク・分割画面・メモ追加を新同期へ渡し、StrictModeでも旧同期を起動しない', async ({ browser }) => {
   const f = await appFixture(browser);
   try {
