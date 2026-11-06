@@ -1,0 +1,106 @@
+name: 同期切替の保存と旧書き込み停止
+on:
+  push:
+    branches: ['codex/compare-sync-engines']
+    paths:
+      - 'experiments/sync-lab/**'
+      - '!experiments/sync-lab/**/*.md'
+      - '.github/workflows/sync-cutover.yml'
+  pull_request:
+    paths:
+      - 'experiments/sync-lab/**'
+      - '!experiments/sync-lab/**/*.md'
+      - '.github/workflows/sync-cutover.yml'
+permissions:
+  contents: read
+jobs:
+  production-cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: lab_source
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab-only-password
+        ports: ['5434:5432']
+        options: --health-cmd "pg_isready -U lab -d lab_source" --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 本体の既存依存を取得
+        working-directory: .
+        run: npm ci
+      - name: 検証室の固定依存を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 本番用二段階SQLを使い捨てDBだけで検証
+        run: node --test scripts/production-cutover.test.mjs
+        env:
+          LAB_PRODUCTION_SQL: '1'
+  staging-setup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: lab_source
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab-only-password
+        ports: ['5434:5432']
+        options: --health-cmd "pg_isready -U lab -d lab_source" --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 実接続確認が使う本体SDKを既存lockで取得
+        working-directory: .
+        run: npm ci
+      - name: 既存の検証依存を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 新規の使い捨てDBで検証専用SQLと全体の巻き戻しを確認
+        run: node --test scripts/staging-cutover.test.mjs scripts/staging-app-artifacts.test.mjs scripts/drive-rehearsal.test.mjs
+        env:
+          LAB_STAGING_SETUP: '1'
+  cutover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: lab_source
+          POSTGRES_USER: lab
+          POSTGRES_PASSWORD: lab-only-password
+        ports: ['5434:5432']
+        options: --health-cmd "pg_isready -U lab -d lab_source" --health-interval 5s --health-timeout 5s --health-retries 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 既存の検証依存を取得
+        run: |
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 使い捨て実DBで停止・所有者・古い取引・再送を検証
+        run: node --test scripts/loro-cutover.test.mjs scripts/loro-postgres.test.mjs scripts/cutover-startup.test.mjs scripts/loro-backup.test.mjs scripts/outline-recovery.test.mjs
+        env:
+          LAB_POWERSYNC: '1'

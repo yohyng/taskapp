@@ -1,0 +1,16 @@
+node_modules/
+.data/
+test-results/
+playwright-report/
+public/@powersync/
+comparison-results.json
+.bench-results/
+performance-output.log
+performance-results.json
+volume-results.json
+app-results.json
+pwa-repeat-results.json
+release-results.json
+release-output.log
+pwa-update-results.json
+pwa-update-output.log

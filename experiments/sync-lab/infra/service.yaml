@@ -1,0 +1,17 @@
+telemetry:
+  disable_telemetry_sharing: true
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATA_SOURCE_URI
+      sslmode: disable
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_SOURCE_URI
+  sslmode: disable
+port: !env PS_PORT
+sync_config:
+  path: sync-config.yaml
+client_auth:
+  jwks_uri: !env PS_JWKS_URL
+  audience: [taskspace-lab]

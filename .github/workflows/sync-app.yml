@@ -1,0 +1,111 @@
+name: 通常画面とPWAの保存・復帰
+on:
+  push:
+    branches: ['codex/compare-sync-engines']
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'scripts/production-release.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+  pull_request:
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'scripts/production-release.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+permissions:
+  contents: read
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    # 同じPlaywright版のブラウザーとOS依存を固定し、外部aptミラー待ちを試験へ持ち込まない。
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --shm-size=1gb
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    env:
+      LAB_VERIFY_APP_PWA: '1'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 既存の依存関係を取得
+        run: |
+          npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+          pnpm prepare:assets
+      - name: 同梱ブラウザーの版を確認
+        run: pnpm exec playwright --version
+      - name: 検証ブランチだけを実検証先へ配信する条件を確認
+        run: node --test ../../scripts/vercel-build.test.mjs scripts/published-staging-assets.test.mjs scripts/published-staging-access.test.mjs
+      - name: Driveへ送信せず新形式の端末復元と追記を確認
+        run: node scripts/verify-drive-rehearsal.mjs .data/local-recovery --local-recovery
+      - name: 通常入口の合成PWAを生成
+        run: pnpm prepare:app
+      - name: 普段の画面と全HTTP停止からの復帰を5回ずつ確認
+        run: pnpm test tests/app-screen.spec.js tests/app-pwa.spec.js --repeat-each=5 --max-failures=2 --reporter=line,json > app-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: app-results.json
+      - name: 失敗していたWebKitの通常復帰を20回反復する
+        run: pnpm test tests/app-pwa.spec.js --project=webkit -g '圏外再起動から未送信の追記を保って復帰する' --repeat-each=20 --max-failures=1 --reporter=line,json > pwa-repeat-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-repeat-results.json
+      - name: 本番向けの入口を合成接続で生成
+        run: node scripts/build-app-preview.mjs --release
+      - name: 既存ログインと未送信の引き継ぎ・停止未確認の拒否を検査
+        run: pnpm test tests/app-release.spec.js --max-failures=1 --reporter=line,json > release-output.log 2>&1
+        env:
+          LAB_VERIFY_APP_RELEASE: '1'
+          PLAYWRIGHT_JSON_OUTPUT_NAME: release-results.json
+      - name: 結果を表示
+        if: always()
+        run: cat app-output.log pwa-repeat-output.log release-output.log 2>/dev/null || true
+      - name: 本文を含まない停止状態と合成試験のトレースを保管
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-app
+          path: |
+            experiments/sync-lab/app-results.json
+            experiments/sync-lab/pwa-repeat-results.json
+            experiments/sync-lab/release-results.json
+            experiments/sync-lab/test-results/
+          retention-days: 7
+  update:
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble@sha256:eff16c30e6f3f4af0a03fa4b706120d5e9b0891c344a27d64559aff5900a4a27
+      options: --shm-size=1gb
+    timeout-minutes: 12
+    defaults:
+      run:
+        working-directory: experiments/sync-lab
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: 同じ固定依存を取得
+        run: |
+          npm ci --prefix ../.. --ignore-scripts --no-audit --no-fund
+          npm install -g pnpm@11.25.0
+          pnpm install --frozen-lockfile
+      - name: 固定互換版と最新版の成果物を生成
+        run: pnpm prepare:pwa
+      - name: 同じ保存のままPWAを更新・切り戻し・圏外再起動する
+        run: pnpm test:pwa --repeat-each=3 --max-failures=1 --reporter=line,json > pwa-update-output.log 2>&1
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_NAME: pwa-update-results.json
+      - name: 結果を表示
+        if: always()
+        run: cat pwa-update-output.log 2>/dev/null || true
+      - name: 合成成果物のハッシュと試験記録を保管
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-pwa-update
+          include-hidden-files: true
+          path: |
+            experiments/sync-lab/.data/pwa-rehearsal.json
+            experiments/sync-lab/pwa-update-results.json
+            experiments/sync-lab/test-results/
+          retention-days: 7
