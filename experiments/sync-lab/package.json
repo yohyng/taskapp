@@ -1,7 +1,7 @@
 {
   "name": "taskspace-sync-lab",
   "private": true,
-  "version": "0.24.0",
+  "version": "0.25.0",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -9,6 +9,7 @@
     "verify:staging": "node scripts/verify-supabase-staging.mjs",
     "verify:staging:outline": "node scripts/verify-staging-outline.mjs",
     "verify:staging:app": "node scripts/verify-staging-app.mjs",
+    "verify:staging:drive": "node scripts/verify-drive-rehearsal.mjs",
     "prepare:rollback": "node scripts/build-rollback-preview.mjs",
     "prepare:app": "node scripts/build-app-preview.mjs",
     "prepare:pwa": "node scripts/build-pwa-rehearsal.mjs",

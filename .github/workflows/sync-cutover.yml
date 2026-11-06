@@ -42,7 +42,7 @@ jobs:
           npm install -g pnpm@11.25.0
           pnpm install --frozen-lockfile
       - name: 新規の使い捨てDBで検証専用SQLと全体の巻き戻しを確認
-        run: node --test scripts/staging-cutover.test.mjs scripts/staging-app-artifacts.test.mjs
+        run: node --test scripts/staging-cutover.test.mjs scripts/staging-app-artifacts.test.mjs scripts/drive-rehearsal.test.mjs
         env:
           LAB_STAGING_SETUP: '1'
   cutover:
