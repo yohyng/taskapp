@@ -2,9 +2,9 @@ name: 通常画面とPWAの保存・復帰
 on:
   push:
     branches: ['codex/compare-sync-engines']
-    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
   pull_request:
-    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
+    paths: ['src/**', 'vite.config.js', 'index.html', 'package*.json', 'vercel.json', 'scripts/vercel-build*', 'experiments/sync-lab/**', '!experiments/sync-lab/**/*.md', '.github/workflows/sync-app.yml']
 permissions:
   contents: read
 jobs:
@@ -33,6 +33,8 @@ jobs:
           pnpm prepare:assets
       - name: 同梱ブラウザーの版を確認
         run: pnpm exec playwright --version
+      - name: 検証ブランチだけを実検証先へ配信する条件を確認
+        run: node --test ../../scripts/vercel-build.test.mjs scripts/published-staging-assets.test.mjs
       - name: Driveへ送信せず新形式の端末復元と追記を確認
         run: node scripts/verify-drive-rehearsal.mjs .data/local-recovery --local-recovery
       - name: 通常入口の合成PWAを生成
