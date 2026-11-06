@@ -84,36 +84,45 @@ commit;
 select '転送の準備ができました' as result, count(*) as parts from taskspace_loro.production_transfer;
 `;
   const activateSql = `-- 本番専用：全片と保全原本を照合し、同じsnapshotを一度だけ有効化する。
-begin;
-set local lock_timeout = '5s';
-set local statement_timeout = '60s';
-select pg_advisory_xact_lock(1414745932, 1);
-lock table public.outline_nodes in share row exclusive mode;
-do $$ begin
+-- 一時表を別の文で用意する手順に依存しない。照合から削除まで、このDO一文が一つの取引になる。
+do $$
+declare source_body bytea; snapshot_body bytea; expected_rows jsonb;
+begin
+  perform pg_catalog.set_config('lock_timeout', '5s', true);
+  perform pg_catalog.set_config('statement_timeout', '60s', true);
+  perform pg_catalog.pg_advisory_xact_lock(1414745932, 1);
+  lock table public.outline_nodes in share row exclusive mode;
+  -- 結果の受信に失敗した後の再実行でも、同じ有効化済み原本を再登録しない。
+  if exists (select 1 from taskspace_loro.legacy_cutover where singleton and phase = 'active'
+    and migration_id = '${migration}' and owner_id = '${owner}' and doc_id = '${docId}') then
+    if not exists (select 1 from public.taskspace_loro_documents d join taskspace_loro.snapshots s on s.doc_id = d.id
+      where d.id = '${docId}' and d.owner_id = '${owner}' and encode(sha256(s.bytes), 'hex') = '${manifest.snapshotSha256}') then
+      raise exception '有効化済みの原本が一致しません'; end if;
+    drop function if exists public.taskspace_loro_upload_production(text, integer, text, text);
+    drop table if exists taskspace_loro.production_transfer;
+    notify pgrst, 'reload schema';
+    return;
+  end if;
   if not exists (select 1 from taskspace_loro.legacy_cutover where ${route}) then raise exception '停止済み本番が一致しません'; end if;
   if (select count(*) from taskspace_loro.production_transfer) <> ${parts.length}
     or exists (select 1 from taskspace_loro.production_transfer where bytes is null or octet_length(bytes) <> expected_bytes
       or encode(sha256(bytes), 'hex') <> expected_sha256) then raise exception '転送が完了していません'; end if;
-  if (select encode(sha256(string_agg(bytes, ''::bytea order by part)), 'hex') from taskspace_loro.production_transfer where kind = 'source') <> '${manifest.sourceSha256}'
-    or (select encode(sha256(string_agg(bytes, ''::bytea order by part)), 'hex') from taskspace_loro.production_transfer where kind = 'snapshot') <> '${manifest.snapshotSha256}' then
+  select string_agg(bytes, ''::bytea order by part) into source_body from taskspace_loro.production_transfer where kind = 'source';
+  select string_agg(bytes, ''::bytea order by part) into snapshot_body from taskspace_loro.production_transfer where kind = 'snapshot';
+  if encode(sha256(source_body), 'hex') is distinct from '${manifest.sourceSha256}'
+    or encode(sha256(snapshot_body), 'hex') is distinct from '${manifest.snapshotSha256}' then
     raise exception '転送全体の内容が一致しません'; end if;
-end $$;
-create temporary table taskspace_production_expected(rows jsonb) on commit drop;
-insert into taskspace_production_expected select convert_from(string_agg(bytes, ''::bytea order by part), 'UTF8')::jsonb
-  from taskspace_loro.production_transfer where kind = 'source';
-do $$ begin
-  if (select jsonb_agg(to_jsonb(n) order by id collate "C") from public.outline_nodes n) is distinct from (select rows from pg_temp.taskspace_production_expected)
-    or (select rows from taskspace_loro.production_original where migration_id = '${migration}') is distinct from (select rows from pg_temp.taskspace_production_expected) then
+  expected_rows := convert_from(source_body, 'UTF8')::jsonb;
+  if (select jsonb_agg(to_jsonb(n) order by id collate "C") from public.outline_nodes n) is distinct from expected_rows
+    or (select rows from taskspace_loro.production_original where migration_id = '${migration}') is distinct from expected_rows then
     raise exception '停止後の全行と保全した原本が一致しません'; end if;
+  insert into public.taskspace_loro_documents(id, owner_id) values ('${docId}', '${owner}');
+  insert into taskspace_loro.snapshots(doc_id, bytes) values ('${docId}', snapshot_body);
+  update taskspace_loro.legacy_cutover set phase = 'active' where singleton;
+  drop function public.taskspace_loro_upload_production(text, integer, text, text);
+  drop table taskspace_loro.production_transfer;
+  notify pgrst, 'reload schema';
 end $$;
-insert into public.taskspace_loro_documents(id, owner_id) values ('${docId}', '${owner}');
-insert into taskspace_loro.snapshots(doc_id, bytes) select '${docId}', string_agg(bytes, ''::bytea order by part)
-  from taskspace_loro.production_transfer where kind = 'snapshot';
-update taskspace_loro.legacy_cutover set phase = 'active' where singleton;
-drop function public.taskspace_loro_upload_production(text, integer, text, text);
-drop table taskspace_loro.production_transfer;
-notify pgrst, 'reload schema';
-commit;
 select c.phase, c.owner_id, c.doc_id, d.head, encode(sha256(s.bytes), 'hex') as snapshot_sha256
   from taskspace_loro.legacy_cutover c join public.taskspace_loro_documents d on d.id = c.doc_id
   join taskspace_loro.snapshots s on s.doc_id = d.id where singleton;

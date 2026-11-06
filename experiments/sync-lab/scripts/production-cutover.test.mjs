@@ -46,6 +46,7 @@ test('本番の小分け転送：同じsnapshotを保ち、本文や転送鍵を
   const activation = productionActivation(f.manifest, f.receipt, f.rows);
   const transfer = productionTransfer(activation.manifest, f.rows, activation.snapshot);
   assert.ok(transfer.setupSql.length < 15000 && transfer.activateSql.length < 5000);
+  assert.doesNotMatch(transfer.activateSql, /create temporary|pg_temp\./i);
   assert.ok(transfer.parts.every((part) => part.bytes.length <= 49152));
   assert.equal(Buffer.concat(transfer.parts.filter((p) => p.kind === 'snapshot').map((p) => p.bytes)).equals(activation.snapshot), true);
   assert.ok(!transfer.setupSql.includes(transfer.token) && !transfer.setupSql.includes(f.rows[0].text));
@@ -113,7 +114,15 @@ test('本番SQLの実DB：取り違え・所有者曖昧は全体を戻し、停
     await send(first);
     await client.query('update taskspace_loro.production_transfer set deadline=now()-interval \'1 second\' where kind=$1 and part=$2', [first.kind, first.part]);
     await assert.rejects(send(first), /期限/);
-    await client.query(transfer.activateSql);
+    // 実行ツールが文ごとに自動確定しても、DO単独で照合から有効化まで完了する。
+    const end = transfer.activateSql.indexOf('\nend $$;') + '\nend $$;'.length;
+    const activateStatement = transfer.activateSql.slice(0, end), receiptStatement = transfer.activateSql.slice(end);
+    await client.query(activateStatement);
+    const activeReceipt = (await client.query(receiptStatement)).rows[0];
+    assert.equal(activeReceipt.phase, 'active'); assert.equal(activeReceipt.head, '0');
+    assert.equal(activeReceipt.snapshot_sha256, activation.manifest.snapshotSha256);
+    await client.query(activateStatement);
+    assert.deepEqual((await client.query(receiptStatement)).rows[0], activeReceipt);
     assert.equal((await client.query("select to_regclass('taskspace_loro.production_transfer') as value")).rows[0].value, null);
     assert.equal((await client.query("select to_regprocedure('public.taskspace_loro_upload_production(text,integer,text,text)') as value")).rows[0].value, null);
     assert.equal((await client.query('select phase from taskspace_loro.legacy_cutover')).rows[0].phase, 'active');
