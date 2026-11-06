@@ -1,6 +1,6 @@
 # 同期比較の実行結果
 
-## 0.25.0：実Driveの保存先分離とデプロイ前の確認
+## 0.25.0：実Driveの保存先分離とデプロイの接続確認
 
 接続済みDriveへ独立した検証用フォルダーを作り、ID・名前・空の内容を読み戻した。
 通常のGAS・フォルダー・過去の控えは変更しない。
@@ -13,6 +13,15 @@
 この結果は`realDrive: false`で、実Googleサービスへの保存・表示の成功とは数えない。
 GAS編集画面へはこの環境のブラウザーで入れず、公開案内ページへ転送されたため、貼り付けと新規デプロイをユーザーへ依頼する。
 コード・専用設定・生成済みGASはローカルに用意済み。[手順](DRIVE-STAGING.md)を参照。
+
+受領した新規デプロイURLで実ブラウザー検証を開始したが、隔離先の接続確認で停止した。
+読み取り専用の追加確認はHTTP 200で、最終応答先が`accounts.google.com`、内容はログインHTMLだった。
+GASのJSON応答を確認できず、画像・控えのPOSTは実行していない。アクセス設定の更新を依頼し、実Driveの往復は未完了として残す。
+合言葉や応答本文は出力しない。本番・通常のDrive設定は変更しない。
+
+実装`43c8731`の[専用CI](https://github.com/yohyng/taskapp/actions/runs/42148639445)は準備/GAS12件と切替/復元25件、計37件が成功し、失敗・skipは0件だった。
+同じソースの[通常App/PWA](https://github.com/yohyng/taskapp/actions/runs/42148639702)・[全体CI](https://github.com/yohyng/taskapp/actions/runs/42148639498)・[本体CI](https://github.com/yohyng/taskapp/actions/runs/42148639503)も全て完了して成功した。
+通常App/PWAのローカル復元ステップも成功した。これらを実Googleサービスへの保存成功には数えない。
 
 ## 0.24.0：検証用Supabaseと通常App/PWAの通し確認
 
