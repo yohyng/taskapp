@@ -1,10 +1,10 @@
 {
   "format": 1,
-  "enabled": false,
+  "enabled": true,
   "reference": "eiyzlawmcyybchxzyozr",
   "documentId": "de4a3f8d-7181-407d-bd89-b91e16718b2e",
   "migrationId": "2036d79b-ef8e-4e90-b9b8-4ec45fbcabe3",
-  "ownerId": null,
-  "snapshotSha256": null,
+  "ownerId": "6560fcd0-e180-415b-bf30-d4a8b01dc9c0",
+  "snapshotSha256": "366eb61a8e9c7c774bddaebec67992f38e9e9ddbf5701cddc6bd12d53ca5b5a7",
   "rows": 11438
 }
