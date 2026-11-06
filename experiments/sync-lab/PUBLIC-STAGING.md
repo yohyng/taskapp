@@ -33,7 +33,9 @@ PWA名`Task Space 検証`・`start_url: /`・standaloneも照合する。認証�
 
 最初に既存Previewを未ログインで取得すると、Vercelのログイン画面へ転送された。
 管理画面もこの環境では未ログインで、CLIの既存ログインもなかった。
-新ビルドの配信後、この検証版へアクセスできることを確認してから実機を依頼する。
+実装`d4f31b5`の[Vercelデプロイ](https://vercel.com/willowyana3-2255s-projects/taskapp/CkNH83B2aS3VGiXCPWuCRBs4XmyJ)はGitHubのコミットstatusで成功を確認した。
+配信後の成果物照合コマンドは、ログイン制限による転送を拒んで未完了となった。
+管理画面へのログイン後、この検証版へアクセスできることと配信バイト列を確認してから実機を依頼する。
 Vercelの全Previewの保護をまとめて解除する対応は行わない。
 
 ## 実機での短い確認

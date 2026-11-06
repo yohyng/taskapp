@@ -13,6 +13,12 @@ Service Worker生成後に、配信元コミット・公開設定・全ファイ
 最初の未ログイン取得はVercelのログイン画面へ転送された。アカウントのアクセス確認と新ビルド配信後の確認を残し、
 現時点で三端末から開ける新同期版の公開成功には数えない。[手順](PUBLIC-STAGING.md)。
 
+同じ検証設定で通常App・約3.6MBのWASM・Service Workerをローカルビルドし、14項目のprecacheまで成功した。
+実装`d4f31b5`の[Vercelデプロイ](https://vercel.com/willowyana3-2255s-projects/taskapp/CkNH83B2aS3VGiXCPWuCRBs4XmyJ)もGitHubのコミットstatusが成功になった。
+配信後の全ファイル照合はVercelログイン制限で未完了。デプロイstatusだけでは接続先・バイト列・実画面の合格にしない。
+[専用CI](https://github.com/yohyng/taskapp/actions/runs/42166187313/job/127723102159)でも追加6件のステップが成功した。
+同じ実装の既存App/PWA・本体・全体・切替CIは実行中として残し、未完了分を合格に数えない。
+
 ## 0.25.0：隔離した実Driveで画像・控え・端末復元が成功
 
 接続済みDriveへ独立した検証用フォルダーを作り、ID・名前・空の内容を読み戻した。
