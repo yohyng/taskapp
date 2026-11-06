@@ -34,7 +34,7 @@ jobs:
       - name: 同梱ブラウザーの版を確認
         run: pnpm exec playwright --version
       - name: 検証ブランチだけを実検証先へ配信する条件を確認
-        run: node --test ../../scripts/vercel-build.test.mjs scripts/published-staging-assets.test.mjs
+        run: node --test ../../scripts/vercel-build.test.mjs scripts/published-staging-assets.test.mjs scripts/published-staging-access.test.mjs
       - name: Driveへ送信せず新形式の端末復元と追記を確認
         run: node scripts/verify-drive-rehearsal.mjs .data/local-recovery --local-recovery
       - name: 通常入口の合成PWAを生成

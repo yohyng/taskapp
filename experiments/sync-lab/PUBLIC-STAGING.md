@@ -1,6 +1,6 @@
 # 三端末から開く検証版
 
-0.26.0 / 本体1.15.35。通常Appを新同期と検証用Supabaseへ接続し、既存VercelのGit連携でPreviewへ配る。
+0.27.0 / 本体1.15.35。通常Appを新同期と検証用Supabaseへ接続し、既存VercelのGit連携でPreviewへ配る。
 本番のドメイン・DB・通常のDrive設定は変更しない。新しい認証情報や管理鍵も追加しない。
 
 ## 配信する版
@@ -36,7 +36,32 @@ PWA名`Task Space 検証`・`start_url: /`・standaloneも照合する。認証�
 実装`d4f31b5`の[Vercelデプロイ](https://vercel.com/willowyana3-2255s-projects/taskapp/CkNH83B2aS3VGiXCPWuCRBs4XmyJ)はGitHubのコミットstatusで成功を確認した。
 配信後の成果物照合コマンドは、ログイン制限による転送を拒んで未完了となった。
 管理画面へのログイン後、この検証版へアクセスできることと配信バイト列を確認してから実機を依頼する。
-Vercelの全Previewの保護をまとめて解除する対応は行わない。
+その後ユーザーからこの検証版の共有リンクを受領し、`02b2b98`の公開確認が成功した。Vercel全体の保護設定は変更していない。
+リンクの値は`.data/published-access.private.json`だけに保存し、Git・ログ・資料へ載せない。
+
+## 共有リンクでの公開版の確認結果
+
+```sh
+node scripts/verify-staging-app.mjs .data/staging-app-0231/manifest.json --chromium --published .data/published-access.private.json --ref <40桁の配信コミット>
+node scripts/verify-staging-app.mjs .data/staging-app-0231/manifest.json --webkit-live --published .data/published-access.private.json --ref <同じコミット>
+```
+
+二つを並行させず、実行中はソース・資料も編集しない。
+既知の検証URL・一つの共有値だけを受け付け、外部への転送を拒む。
+アプリのログインを行う前に、コミット・接続先・PWA識別と15ファイルのSHA-256を照合する。
+共有Cookieは検証用ブラウザーのメモリー内で使い、アプリの認証値と一緒に記録しない。
+
+初回のHTML照合はVercelの既知のfeedback.js追加で停止した。
+アプリ本体の照合は、[公式のリクエスト単位のツールバー省略](https://vercel.com/docs/vercel-toolbar/managing-toolbar#disable-toolbar-for-automation)を使用し、15ファイル全てが元のSHA-256と一致した。
+HTMLを正規表現で削って成功にする処理は追加しない。実画面は通常の公開URLを開き、HTMLやAPI応答を差し替えない。
+
+11月6日、公開コミット`02b2b98b9424fdbc53b7566586dcd19f46ba4d27`で以下が成功した。
+
+- Chromiumの永続profile：タスク表示と旧未送信の自動引き継ぎ・通常入力の同期・圏外プロセス再起動と合流・古い未編集端末の非書込み起動の4シナリオ。
+- WebKitの通常context：引き継ぎ・通常入力の同期・三接続での古い未編集端末の非書込み起動の3シナリオ。
+- 共有アクセス・公開照合・実Auth・RPC・Realtime・実Service Workerを使い、旧同期への要求・確認バナー・未処理JS例外はなかった。
+
+WebKitの3件を永続PWAの再起動やiPad実機の成功には数えない。次は下記の三端末実機を確認する。
 
 ## 実機での短い確認
 

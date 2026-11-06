@@ -10,7 +10,9 @@ import { chromium, webkit } from '@playwright/test';
 import { createClient } from '@supabase/supabase-js';
 import { LoroDoc } from 'loro-crdt';
 import { loadStagingApp } from './staging-app-artifacts.mjs';
-import { verifyStagingCutover } from './verify-staging-cutover.mjs';
+import { verifyStagingCutover, cutoverVerificationConfig } from './verify-staging-cutover.mjs';
+import { openPublishedStaging } from './published-staging-access.mjs';
+import { stagingOrigin } from './published-staging-assets.mjs';
 import { decodeLogTransfer } from '../src/loro-log-transfer.js';
 import { outlineNodes } from '../src/outline-model.js';
 import { loroViewRows } from '../src/loro-model.js';
@@ -18,7 +20,7 @@ import { outlineCheckpoint } from '../../../src/lib/outline-checkpoint.js';
 import { flattenTree, outlineRowSignature } from '../../../src/lib/outline.js';
 import { pwaState } from '../tests/support/pwa-state.mjs';
 
-const timeout = { timeout: 30000 }, origin = 'http://127.0.0.1:4184';
+const timeout = { timeout: 30000 }, localOrigin = 'http://127.0.0.1:4184';
 function checkpoint(nodes, value) {
   const before = flattenTree(nodes).find((row) => row.id === 'probe'), copy = structuredClone(nodes);
   if (value !== undefined) copy.find((node) => node.id === 'probe').text = value;
@@ -28,15 +30,22 @@ function checkpoint(nodes, value) {
 }
 
 // 実サービスへの追記は、この明示コマンドと合成manifestに限定する。trace・画像・生の例外は出さない。
-export async function verifyStagingApp(manifestPath, browser = 'all') {
+export async function verifyStagingApp(manifestPath, browser = 'all', { published } = {}) {
   let phase = '設定', step = '', completed = 0, server, client, blockedStatic = 0, offlineStatic = false;
+  const origin = published ? stagingOrigin : localOrigin;
   const contexts = new Set(), processes = new Set(), errors = [], legacyRequests = [], responses = [], failedRequests = [];
   try {
     const env = parseEnv(await readFile(new URL('../.env.verify.local', import.meta.url), 'utf8'));
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
     const cutover = JSON.parse(await readFile(manifest.cutoverManifest, 'utf8'));
     const source = JSON.parse(await readFile(env.LAB_STAGING_MANIFEST, 'utf8'));
-    const { config, files } = await loadStagingApp(manifest, env, cutover, source, fileURLToPath(new URL('../.data/', import.meta.url)));
+    let config, files, accessCookies;
+    if (published) {
+      phase = '公開版のコミット・接続先・全ファイル照合';
+      const checked = await openPublishedStaging(published.accessPath, published.ref);
+      config = cutoverVerificationConfig(env, cutover, source); assert.deepEqual(checked.manifest.config, config);
+      files = checked.files; accessCookies = checked.accessCookies;
+    } else ({ config, files } = await loadStagingApp(manifest, env, cutover, source, fileURLToPath(new URL('../.data/', import.meta.url))));
     phase = '旧停止と原本の確認'; await verifyStagingCutover(env, cutover, source);
     client = createClient(config.url, config.key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
       global: { fetch: (url, options = {}) => fetch(url, { ...options, signal: AbortSignal.timeout(10000) }) } });
@@ -60,7 +69,7 @@ export async function verifyStagingApp(manifestPath, browser = 'all') {
       } finally { doc.free(); }
     }
     // 検証済みの静的ファイルだけを配る。Auth・RPC・Realtimeを代役へ差し替えない。
-    server = createServer((request, response) => {
+    if (!published) server = createServer((request, response) => {
       if (offlineStatic) { blockedStatic++; response.destroy(); return; }
       const path = new URL(request.url, origin).pathname, bytes = files.get(path === '/' ? '/index.html' : path);
       response.setHeader('Cache-Control', 'no-store');
@@ -69,7 +78,7 @@ export async function verifyStagingApp(manifestPath, browser = 'all') {
       response.setHeader('Content-Type', ({ html: 'text/html', js: 'text/javascript', css: 'text/css', wasm: 'application/wasm', webmanifest: 'application/manifest+json', png: 'image/png', ico: 'image/x-icon' })[type] || 'application/octet-stream');
       response.end(bytes);
     });
-    await new Promise((done, reject) => { server.once('error', reject); server.listen(4184, '127.0.0.1', done); });
+    if (server) await new Promise((done, reject) => { server.once('error', reject); server.listen(4184, '127.0.0.1', done); });
     const text = (page, id) => page.evaluate((id) => window.lab.snapshot().find((row) => row.id === id)?.text, id);
     const equals = (page, id, value) => page.waitForFunction(({ id, value }) => window.lab.snapshot().find((row) => row.id === id)?.text === value, { id, value }, timeout);
     const saved = async (page) => {
@@ -100,6 +109,8 @@ export async function verifyStagingApp(manifestPath, browser = 'all') {
           context = await instance.newContext(options);
         } else context = await browserType.launchPersistentContext(directory, { ...options, headless: true });
         contexts.add(context); if (offline) await context.setOffline(true);
+        // Vercelの共有Cookieとアプリのログインを混ぜず、既知の検証originだけへ渡す。
+        if (accessCookies && !offline) await context.addCookies(accessCookies);
         context.on('request', (request) => {
           const url = new URL(request.url());
           if (url.origin === config.url && (/\/outline_nodes$/.test(url.pathname) || /\/rpc\/taskspace_outline_/.test(url.pathname))) legacyRequests.push(url.pathname);
@@ -211,7 +222,8 @@ export async function verifyStagingApp(manifestPath, browser = 'all') {
       completed++; console.log(`${name}：古い未編集端末も最新を表示し、書き戻し・確認バナー・旧同期への通信がない`);
     }
     return { complete: true, projectRef: config.reference, browserScenarios: completed, browser,
-      realSupabase: true, normalApp: true, persistentPwaRestart: browser !== 'webkit-live', blockedStatic, productionChanged: false };
+      realSupabase: true, normalApp: true, published: !!published, publishedRef: published?.ref, verifiedFiles: files.size,
+      persistentPwaRestart: browser !== 'webkit-live', blockedStatic, productionChanged: false };
   } catch (error) {
     // Playwrightの例外には入力した認証情報が含まれ得る。段階と型だけを残す。
     const states = [];
@@ -239,6 +251,8 @@ export async function verifyStagingApp(manifestPath, browser = 'all') {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const selected = process.argv.includes('--webkit-live') ? 'webkit-live' : process.argv.includes('--webkit') ? 'webkit' : process.argv.includes('--chromium') ? 'chromium' : 'all';
-  const result = await verifyStagingApp(resolve(process.argv[2] || '.data/staging-app-0231/manifest.json'), selected);
+  const accessAt = process.argv.indexOf('--published'), refAt = process.argv.indexOf('--ref');
+  const published = accessAt < 0 ? undefined : { accessPath: resolve(process.argv[accessAt + 1]), ref: refAt < 0 ? undefined : process.argv[refAt + 1] };
+  const result = await verifyStagingApp(resolve(process.argv[2] || '.data/staging-app-0231/manifest.json'), selected, { published });
   console.log(JSON.stringify(result)); if (!result.complete) process.exitCode = 1;
 }
