@@ -1,5 +1,33 @@
 # 実Supabaseへの接続と試験
 
+## 通常App/PWAの実接続確認（0.24.0）
+
+切り替え用SQLの適用後、前回生成した通常App/PWAのmanifestを指定する。
+既存の`.env.verify.local`を読み、接続先・所有者・切り替え先・全ファイルのハッシュを照合してからログインする。
+検証先以外・変更された成果物は実行せず、公開設定以外をアプリへ渡さない。
+`4184`番で検証済みの静的バイト列だけを配り、Auth・RPC・Realtimeは実サービスを利用する。
+
+```sh
+node scripts/verify-staging-app.mjs <実接続Appのmanifest.json> --chromium
+node scripts/verify-staging-app.mjs <実接続Appのmanifest.json> --webkit
+```
+
+同時に走らせない。実行中はソース・成果物・資料を編集せず、通常Playwrightや開発サーバーとも並行しない。
+合成文書へ実際の追記を行い、通常の利用者profileやDrive設定は使わない。
+Chromiumは旧未送信の移行・通常入力の同期・圏外プロセス再起動と自動統合・古い未編集端末の非書込み起動の4件が成功した。
+
+このWindowsでは永続WebKitの外向きHTTPSが、単独の公開設定GETでも停止した。
+通常contextの接続は成功するため、実接続の同期だけを別に検査する明示モードも用意した。
+
+```sh
+node scripts/verify-staging-app.mjs <実接続Appのmanifest.json> --webkit-live
+```
+
+これは通常Appの引き継ぎ・通常入力・古い端末の3件で、永続profileの圏外再起動を含めない。
+自動でこのモードへ切り替えて合格を作らない。既定の全ブラウザー実行は永続profileを使う。
+結果に`persistentPwaRestart: false`を記録し、iPad PWAの確認は別に残す。
+現時点の成果物はローカルのみで、実機から開ける検証URLへの配信は未実施。
+
 ## 通常アプリへ進むための合成切り替え（0.23.0）
 
 前回の二文書をそのまま残し、別の文書を作って旧同期の停止・凍結原本・新同期の開始を検証する。
