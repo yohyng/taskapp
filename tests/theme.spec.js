@@ -58,6 +58,33 @@ async function pickTheme(page, title) {
 }
 
 test.describe("配色", () => {
+  test("アクセントを選び、背景変更と再起動をまたいで保存し、個別に戻せる", async ({ page }) => {
+    const note = page.locator('[data-quick-add]');
+    const initial = await note.evaluate((el) => getComputedStyle(el).color);
+    await page.getByTitle('Settings', { exact: true }).click();
+    await page.locator('[data-app-accent="#a78bfa"]').click();
+    await expect(page.locator('[data-app-accent="#a78bfa"]')).toHaveAttribute('aria-pressed', 'true');
+    expect(await note.evaluate((el) => getComputedStyle(el).color)).not.toBe(initial);
+    expect(await page.evaluate(() => localStorage.getItem('taskspace-app-accent'))).toBe('#a78bfa');
+    await page.getByTitle('紙', { exact: true }).click();
+    await expect(page.locator('[data-app-accent-custom]')).toHaveValue('#a78bfa');
+    expect((await rootColors(page)).bg).toBe('rgb(250, 249, 247)');
+    // OSの色選択画面は自動操作できないため、同じ入力イベントで任意色を渡す。
+    await page.locator('[data-app-accent-custom]').evaluate((el) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, '#dc517e');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await page.reload();
+    await page.getByTitle('Settings', { exact: true }).click();
+    await expect(page.locator('[data-app-accent-custom]')).toHaveValue('#dc517e');
+    // 共通fixtureは読み直し時に背景を既定へ戻すので、再び明るい配色で独立性を確かめる。
+    await page.getByTitle('紙', { exact: true }).click();
+    await page.locator('[data-app-accent-reset]').click();
+    await expect(page.locator('[data-app-accent-custom]')).toHaveValue('#34d399');
+    expect((await rootColors(page)).bg).toBe('rgb(250, 249, 247)');
+  });
+
   test("プリセットを選ぶと背景と文字色が変わり保存される", async ({ page }) => {
     expect(await rootColors(page)).toEqual({ bg: "rgb(10, 10, 10)", color: "rgb(245, 245, 245)" });
 

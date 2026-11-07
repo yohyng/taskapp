@@ -3,6 +3,16 @@
 @source "./App.jsx";
 @source "./Outliner.jsx";
 
+/* 操作の強調色は分類色から分け、背景を変えたときは文字色側へ明度を寄せる。 */
+@theme inline {
+  --color-accent-100: color-mix(in srgb, var(--ts-accent) 15%, var(--ts-text));
+  --color-accent-200: color-mix(in srgb, var(--ts-accent) 25%, var(--ts-text));
+  --color-accent-300: color-mix(in srgb, var(--ts-accent) 35%, var(--ts-text));
+  --color-accent-400: color-mix(in srgb, var(--ts-accent) 90%, var(--ts-text));
+  --color-accent-500: var(--ts-accent);
+  --color-accent-600: color-mix(in srgb, var(--ts-accent) 80%, var(--ts-bg));
+}
+
 /* ドラッグモード中はカード全体のタッチスクロールを無効化 */
 .ts-drag-mode [data-draggable] {
   touch-action: none;
@@ -61,6 +71,7 @@
 :root {
   --ts-bg: #0a0a0a;
   --ts-text: #f5f5f5;
+  --ts-accent: #34d399;
 
   /* 補助文字の濃度。暗い文字を明るい面に置くほうがコントラストが出にくいので、
      明るい背景のときは JS 側（--ts-ink-*）で濃いめに差し替える。 */
