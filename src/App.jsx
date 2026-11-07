@@ -14,6 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import Outliner, { useOutlineApi } from "./Outliner";
+import { useVoiceInput } from "./useVoiceInput";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -44,6 +45,8 @@ import {
   Info,
   Pin,
   Pencil,
+  Mic,
+  Square,
   Copy,
   Airplay,
   LayoutGrid,
@@ -1025,6 +1028,13 @@ function App() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
   const [quickAddTitle, setQuickAddTitle] = useState("");
+  const quickAddInputRef = useRef(null);
+  const quickAddVoice = useVoiceInput({ enabled: quickAddOpen, value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
+  function closeQuickAdd() {
+    quickAddVoice.cancel();
+    setQuickAddOpen(false);
+    setQuickAddTitle("");
+  }
   // 追加したタスクをいつに置くか。既定は今日。
   const [quickAddWhen, setQuickAddWhen] = useState(() => toDateKey(new Date()));
   // 入力欄の高さ。つまんで変えたら覚えておく。
@@ -3183,6 +3193,8 @@ function App() {
   function submitQuickAdd(kind) {
     const title = quickAddTitle.trim();
     if (!title) return;
+    // 追加後の空欄へ遅れて届いた認識結果を入れない。
+    quickAddVoice.cancel();
     rememberKind(kind);
     if (kind === "memo") {
       if (!addMemo(title)) return;
@@ -4401,20 +4413,20 @@ function App() {
             onPointerDown={(e) => e.stopPropagation()}
             // 後ろは暗くしない。押したら閉じる受け皿としてだけ置く。
             className="fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"
-            onClick={(e) => { if (e.target === e.currentTarget) { setQuickAddOpen(false); setQuickAddTitle(""); } }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeQuickAdd(); }}
           >
             <form
               onSubmit={(e) => {
                 e.preventDefault();
                 submitQuickAdd(quickAddKind);
               }}
-              className="w-full max-w-md rounded-2xl border border-white/20 ts-surface p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
+              className="max-h-[80dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-white/20 ts-surface p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
             >
               <div className="mb-3 flex items-center justify-between">
                 <span className="text-sm font-semibold ts-text">書きとめる</span>
                 <button
                   type="button"
-                  onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }}
+                  onClick={closeQuickAdd}
                   className="rounded-md border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"
                 >
                   <X className="h-4 w-4" />
@@ -4422,12 +4434,13 @@ function App() {
               </div>
 
               <textarea
+                ref={quickAddInputRef}
                 autoFocus
                 value={quickAddTitle}
                 style={{ height: quickAddHeight }}
-                onChange={(e) => setQuickAddTitle(e.target.value)}
+                onChange={(e) => { quickAddVoice.cancel(); setQuickAddTitle(e.target.value); }}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") { setQuickAddOpen(false); setQuickAddTitle(""); }
+                  if (e.key === "Escape") closeQuickAdd();
                   // Enter で追加、Shift+Enter で改行
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
                 }}
@@ -4468,6 +4481,14 @@ function App() {
                 className="mx-auto -mt-1 flex h-5 w-24 cursor-ns-resize touch-none items-center justify-center"
               >
                 <span className="h-1 w-10 rounded-full bg-white/20" />
+              </div>
+
+              <div className="mt-1 flex flex-wrap items-center gap-2">
+                <button type="button" data-quick-add-voice data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={quickAddVoice.phase === "stopping"} className={classNames("flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
+                  {quickAddVoice.phase !== "idle" ? <Square aria-hidden="true" className="h-3.5 w-3.5" /> : <Mic aria-hidden="true" className="h-3.5 w-3.5" />}
+                  {quickAddVoice.phase === "stopping" ? "確定中" : quickAddVoice.phase !== "idle" ? "停止" : "音声入力"}
+                </button>
+                <span data-quick-add-voice-status role="status" className="min-w-0 flex-1 text-[11px] text-neutral-500">{quickAddVoice.message}</span>
               </div>
 
               <div className={classNames("mt-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
@@ -4519,7 +4540,7 @@ function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => { setQuickAddOpen(false); setQuickAddTitle(""); }}
+                  onClick={closeQuickAdd}
                   className="rounded-xl border border-white/10 px-3 py-2.5 text-sm text-neutral-400 transition hover:bg-white/[0.07]"
                 >
                   閉じる

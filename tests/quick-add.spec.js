@@ -203,8 +203,10 @@ test.describe("メモに書きとめる", () => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
-  const outlineOf = (page) => page.evaluate(() =>
-    JSON.parse(localStorage.getItem("taskspace-outline-v1") || "[]"));
+  const outlineOf = (page) => page.evaluate(() => {
+    const saved = JSON.parse(localStorage.getItem("taskspace-outline-v1") || "[]");
+    return Array.isArray(saved) ? saved : saved.nodes;
+  });
 
   test("ヘッダーのボタンは「ノート」", async ({ page }) => {
     await expect(page.locator("[data-quick-add]")).toContainText("ノート");
