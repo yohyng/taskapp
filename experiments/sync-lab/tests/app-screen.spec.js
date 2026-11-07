@@ -56,3 +56,30 @@ test('通常の入口：タスク・分割画面・メモ追加を新同期へ�
     expect(f.legacy).toEqual([]); expect(f.errors).toEqual([]);
   } finally { await f.close(); }
 });
+
+
+test('直接入力：全体比較を通らず同期し、改行とインデント後も入力を続けられる', async ({ browser }) => {
+  const f = await appFixture(browser);
+  try {
+    const a = await f.open(), b = await f.open();
+    await a.evaluate(() => {
+      const original = window.lab.changeOutline;
+      window.__restoreOutlineChange = () => { window.lab.changeOutline = original; };
+      window.lab.changeOutline = () => { throw new Error('文字入力で全体比較を呼びました'); };
+    });
+    await a.locator('[data-row="memo"] [data-row-text]').click();
+    const input = a.locator('[data-row="memo"] textarea'); await input.fill('直接入力の本文');
+    await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText('直接入力の本文');
+    await a.evaluate(async () => {
+      await window.lab.localBarrier();
+      if (window.lab.outline() !== window.lab.outline()) throw new Error('状態通知で木を再生成しました');
+      window.__restoreOutlineChange();
+    });
+    await input.press('End'); await input.press('Enter');
+    const next = a.locator('[data-outliner] textarea'); await next.fill('改行した子'); await next.press('Tab');
+    await expect.poll(() => b.evaluate(() => window.lab.snapshot().find((row) => row.text === '改行した子')?.parentId)).toBe('memo');
+    await next.press('Shift+Tab');
+    await expect.poll(() => b.evaluate(() => window.lab.snapshot().find((row) => row.text === '改行した子')?.parentId)).not.toBe('memo');
+    expect(f.errors).toEqual([]); expect(f.legacy).toEqual([]);
+  } finally { await f.close(); }
+});

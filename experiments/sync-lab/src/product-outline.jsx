@@ -82,7 +82,7 @@ export function ProductOutline({ children, tools = true }) {
   }
   const unsupported = async () => ({ ok: false, why: 'この検証画面では旧同期の置換操作は使いません' });
   // 既存の接続ランプが認識する値へ渡す。未知の値は正常時でも警告の三角になってしまう。
-  const value = { nodes: active.nodes, setNodes: (makeNext) => engine.changeOutline(makeNext), view, setView: (patch) => setView((before) => ({ ...before, ...patch })),
+  const value = { nodes: active.nodes, patchNode: (id, patch) => engine.patchOutline(id, patch), setNodes: (makeNext) => engine.changeOutline(makeNext), view, setView: (patch) => setView((before) => ({ ...before, ...patch })),
     owner: 'active', link: active.connected ? 'live' : 'waking', contentReady: active.ready, syncStatus: active.queued ? 'waiting' : active.connected ? 'synced' : 'checking', syncedAt: null,
     localSave: { status: error ? 'error' : 'saved', busy: false, large: false, hidden: true },
     syncNote: '', historyNote: '', dismissHistoryNote() {}, dismissSync() {}, dismissLocalInfo() {},

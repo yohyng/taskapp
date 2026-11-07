@@ -1039,7 +1039,7 @@ function Marked({ text, query }) {
 
 // アウトライン（Quietliner）。
 export default function Outliner() {
-  const { nodes, setNodes, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup, legacySyncControls = true } = useOutline();
+  const { nodes, setNodes, patchNode, undo, redo, canUndo, canRedo, historyNote, dismissHistoryNote, syncNote, dismissSync, localSave, retryLocalSave, dismissLocalInfo, getLocalCheckpoint, view, setView, resetSync, pullRemote, clearRemote, owner, link, syncedAt, syncStatus, refresh, contentReady, backupState, createBackup, legacySyncControls = true } = useOutline();
   const loading = !contentReady && (nodes.length === 0 || isOutlinePlaceholder(nodes));
   const syncFailed = syncNote.startsWith("error:");
   const localFailed = localSave.status === "error";
@@ -1241,6 +1241,8 @@ export default function Outliner() {
   }, [zoomNode]);
 
   function patch(id, p, opts) {
+    // 子の入れ替えは木全体の操作として扱い、属性だけは対象行へ直接渡す。
+    if (patchNode && !Object.hasOwn(p, 'children')) return patchNode(id, p);
     setNodes((prev) => updateNode(prev, id, p), opts);
   }
 

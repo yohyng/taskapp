@@ -71,3 +71,26 @@ export function seedOutlineDocument(nodes) {
     return doc;
   } catch (error) { doc.free(); throw error; }
 }
+
+// 属性だけの入力では全行を比較しない。構造の変更は従来の木全体の検証へ渡す。
+export function patchOutlineNode(node, patch) {
+  const fields = ['text', 'favorite', 'completed', ...outlineFields];
+  if (Object.keys(patch).some((field) => !fields.includes(field))) throw new Error('行の属性以外は変更できません');
+  if ('text' in patch && typeof patch.text !== 'string') throw new Error('本文が不正です');
+  const data = node.data;
+  if ('text' in patch) updateOutlineText(data.get('text'), patch.text);
+  for (const field of fields.filter((field) => field !== 'text')) {
+    if (field in patch && data.get(field) !== (patch[field] ?? null)) data.set(field, patch[field] ?? null);
+  }
+  data.set('updatedAt', new Date().toISOString());
+}
+
+// 保存待ちや接続状況だけの通知では、同じ本文の木を使い回す。
+export function createOutlineReader(readRows) {
+  let previous, nodes;
+  return () => {
+    const rows = readRows();
+    if (rows !== previous) { nodes = outlineNodes(rows); previous = rows; }
+    return nodes;
+  };
+}
