@@ -39,8 +39,8 @@ export default defineConfig(({ mode }) => {
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],
       manifest: {
-        name: staging ? 'Task Space 検証' : 'Task Space',
-        short_name: staging ? 'Task Space 検証' : 'Task Space',
+        name: staging ? 'fragments 検証' : 'fragments',
+        short_name: staging ? 'fragments 検証' : 'fragments',
         description: 'Notion-like project task manager',
         theme_color: '#0f172a',
         background_color: '#0f172a',

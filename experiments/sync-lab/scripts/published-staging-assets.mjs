@@ -31,7 +31,7 @@ export async function publishedStagingAssets(origin, ref, { fetcher = fetch } = 
     files.set('/' + path, bytes);
   }
   const pwa = JSON.parse(new TextDecoder().decode(files.get('/manifest.webmanifest')));
-  if (pwa.name !== 'Task Space 検証' || pwa.start_url !== '/' || pwa.display !== 'standalone') throw new Error('検証用PWAの識別が一致しません');
+  if (pwa.name !== 'fragments 検証' || pwa.start_url !== '/' || pwa.display !== 'standalone') throw new Error('検証用PWAの識別が一致しません');
   return { manifest, files };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
