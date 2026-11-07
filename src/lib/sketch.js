@@ -6,31 +6,38 @@ export function readSketchDraft() {
   try {
     const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && point.length === 2 && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
+}
+
+// 移動中は新しく届いた線だけを描き、過去の全ストロークを走査しない。
+export function appendSketch(canvas, stroke, from = 0) {
+  const ctx = canvas.getContext("2d");
+  const scale = canvas.width / SKETCH_WIDTH;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.strokeStyle = ctx.fillStyle = stroke.color;
+  const size = (a, b = a) => stroke.width * scale * (stroke.pressure ? 0.55 + 0.9 * (((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2) : 1);
+  if (from === 0 && stroke.points.length) {
+    const a = stroke.points[0];
+    ctx.beginPath();
+    ctx.arc(a[0] * canvas.width, a[1] * canvas.height, size(a) / 2, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+  for (let i = Math.max(1, from); i < stroke.points.length; i++) {
+    const a = stroke.points[i - 1], b = stroke.points[i];
+    ctx.lineWidth = size(a, b);
+    ctx.beginPath();
+    ctx.moveTo(a[0] * canvas.width, a[1] * canvas.height);
+    ctx.lineTo(b[0] * canvas.width, b[1] * canvas.height);
+    ctx.stroke();
+  }
 }
 
 export function paintSketch(canvas, strokes) {
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const scale = canvas.width / SKETCH_WIDTH;
-  ctx.lineCap = ctx.lineJoin = "round";
-  for (const stroke of strokes) {
-    ctx.strokeStyle = ctx.fillStyle = stroke.color;
-    ctx.lineWidth = stroke.width * scale;
-    ctx.beginPath();
-    stroke.points.forEach(([x, y], i) => {
-      if (i === 0) ctx.moveTo(x * canvas.width, y * canvas.height);
-      else ctx.lineTo(x * canvas.width, y * canvas.height);
-    });
-    if (stroke.points.length > 1) ctx.stroke();
-    else {
-      const [x, y] = stroke.points[0];
-      ctx.arc(x * canvas.width, y * canvas.height, ctx.lineWidth / 2, 0, 2 * Math.PI);
-      ctx.fill();
-    }
-  }
+  for (const stroke of strokes) appendSketch(canvas, stroke);
 }
 
 export async function sketchFile(strokes) {
