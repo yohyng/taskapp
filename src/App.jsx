@@ -3692,20 +3692,16 @@ function App() {
     <div data-app-root className="flex h-[100dvh] flex-col overflow-hidden ts-bg ts-text" style={{ fontFamily: appFontCss }}>
       <div className="mx-auto flex h-full w-full max-w-[2400px] min-h-0 flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
-          <div className="mr-3 flex items-baseline gap-2">
-            <h1 className="flex items-center gap-2 text-base font-semibold tracking-tight sm:text-xl"><img src="/favicon.svg" alt="" className="h-6 w-6 shrink-0 rounded" />fragments</h1>
-            <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
-          </div>
-
           {/* 枠（ペイン）。1つなら全画面、増やすと横に並べて分け合う。 */}
-          <div data-panes-bar className="flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.03] p-0.5">
-            {panes.map((pane, i) => (
-              <div key={pane.id} data-pane-chip={pane.id} className="flex items-center">
+          <div data-panes-bar aria-label="表示する枠" className="flex max-w-full flex-wrap items-end gap-1 border-b border-white/15 px-1 pt-1">
+            {panes.map((pane) => (
+              <div key={pane.id} data-pane-chip={pane.id} className="ts-pane-tab flex min-w-0 items-center gap-1 rounded-t-lg border px-1.5">
                 <select
                   data-pane-mode={pane.id}
                   value={pane.mode}
                   onChange={(e) => setPaneMode(pane.id, e.target.value)}
-                  className="rounded-md bg-transparent px-1.5 py-1 text-xs ts-text outline-none [&>option]:bg-neutral-900"
+                  aria-label="枠の種類"
+                  className="min-h-9 rounded-t-md bg-transparent px-2 py-1.5 text-xs ts-text focus-visible:outline focus-visible:outline-1 [&>option]:bg-neutral-900"
                 >
                   <option value="tasks">タスク</option>
                   <option value="outline">アウトライン</option>
@@ -3715,12 +3711,12 @@ function App() {
                     data-pane-close={pane.id}
                     onClick={() => closePane(pane.id)}
                     title="この枠を閉じる"
-                    className="rounded p-0.5 text-neutral-600 transition hover:bg-white/10 hover:text-neutral-200"
+                    aria-label="この枠を閉じる"
+                    className="flex h-8 w-8 items-center justify-center rounded text-neutral-500 transition hover:bg-white/10 hover:text-neutral-200"
                   >
                     <X className="h-3 w-3" />
                   </button>
                 )}
-                {i < panes.length - 1 && <span className="mx-0.5 h-4 w-px bg-white/10" />}
               </div>
             ))}
             <button
@@ -3728,9 +3724,10 @@ function App() {
               onClick={addPane}
               disabled={panes.length >= MAX_PANES}
               title="枠を増やす（横に並びます）"
-              className="rounded-md px-1.5 py-1 text-xs text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-30"
+              aria-label="枠を追加"
+              className="mb-1 flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-30"
             >
-              ＋枠
+              ＋
             </button>
           </div>
 
@@ -3762,7 +3759,10 @@ function App() {
                   data-header-settings
                   className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-white/15 ts-surface p-3 shadow-2xl max-h-[60dvh] overflow-y-auto md:w-64">
                   <div className="mb-3 flex items-center justify-between">
-                    <span className="text-xs font-semibold text-neutral-200">Settings</span>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-xs font-semibold text-neutral-200">fragments</span>
+                      <span data-app-version className="text-[11px] text-neutral-500">v{__APP_VERSION__}</span>
+                    </div>
                     <button onClick={() => setShowSettingsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-3.5 w-3.5" /></button>
                   </div>
 

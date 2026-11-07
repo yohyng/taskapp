@@ -1,7 +1,7 @@
 {
   "name": "taskspace-sync-lab",
   "private": true,
-  "version": "0.28.8",
+  "version": "0.28.9",
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev.mjs",
