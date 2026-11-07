@@ -3756,8 +3756,11 @@ function App() {
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </button>
+              {/* 帯が折り返しても下へ開く。固定の上端位置ではボタン列を覆ってしまう。 */}
               {showSettingsPanel && (
-                <div className="fixed right-2 top-14 z-50 w-72 rounded-lg border border-white/15 ts-surface p-3 shadow-2xl max-h-[calc(100vh-4rem)] overflow-y-auto md:absolute md:right-0 md:top-full md:mt-1 md:w-64 md:max-h-[80vh]">
+                <div
+                  data-header-settings
+                  className="absolute right-0 top-full z-50 mt-1 w-72 rounded-lg border border-white/15 ts-surface p-3 shadow-2xl max-h-[60dvh] overflow-y-auto md:w-64">
                   <div className="mb-3 flex items-center justify-between">
                     <span className="text-xs font-semibold text-neutral-200">Settings</span>
                     <button onClick={() => setShowSettingsPanel(false)} className="text-neutral-500 hover:text-neutral-200"><X className="h-3.5 w-3.5" /></button>
@@ -9003,7 +9006,8 @@ function useKeepScreen(todayLeft = 0) {
 
     // Safari は作った映像（MediaStream）を小窓に出せない。
     // 「この映像は小窓に対応していない」と断られるので、小さな動画を回す。
-    if (useClip || flavor === "webkit") {
+    // 設定を開いた時点でも準備するため、未対応の映像APIで画面全体を落とさない。
+    if (useClip || flavor === "webkit" || typeof HTMLCanvasElement.prototype.captureStream !== "function") {
       // 機械によって再生できる形が違う。出せるほうを選ぶ。
       const mp4 = video.canPlayType('video/mp4; codecs="avc1.42E01E"');
       video.src = `${import.meta.env.BASE_URL}keep-awake.${mp4 ? "mp4" : "webm"}`;
