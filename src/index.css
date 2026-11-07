@@ -111,6 +111,15 @@ body {
   border-color: color-mix(in srgb, var(--ts-text) 15%, transparent);
   border-bottom-color: color-mix(in srgb, var(--ts-bg) 92%, var(--ts-text) 8%);
 }
+.ts-pane-tab[data-pane-visible="false"] {
+  background-color: transparent;
+  border-color: transparent;
+  color: color-mix(in srgb, var(--ts-text) 55%, transparent);
+}
+.ts-pane-tab:focus-within {
+  outline: 1px solid color-mix(in srgb, var(--ts-text) 45%, transparent);
+  outline-offset: -2px;
+}
 
 
 /* ── 指で触る機械むけ ──────────────────────────────

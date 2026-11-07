@@ -2,7 +2,10 @@ import { test, expect } from "./helpers.js";
 
 // 画面の枠（ペイン）。1つなら全画面、増やすと横に並べて分け合う。
 const panes = (page) => page.locator("[data-pane-id]");
-const addPane = (page) => page.locator("[data-pane-add]").click();
+const addPane = async (page) => {
+  await page.locator("[data-pane-add]").click();
+  await page.locator("[data-pane-add-split]").click();
+};
 const modeOf = (page, i) => page.locator("[data-pane-mode]").nth(i);
 const boxes = (page) => page.evaluate(() =>
   [...document.querySelectorAll("[data-pane-id]")].map((e) => {
@@ -40,7 +43,7 @@ test.describe("枠を増やして分ける", () => {
   });
 
   test("増やしすぎない", async ({ page }) => {
-    for (let i = 0; i < 6; i++) await page.locator("[data-pane-add]").click({ force: true });
+    for (let i = 0; i < 3; i++) await addPane(page);
     await expect(panes(page)).toHaveCount(4);
     await expect(page.locator("[data-pane-add]")).toBeDisabled();
   });
@@ -126,7 +129,7 @@ test.describe("狭い画面", () => {
   test.use({ viewport: { width: 420, height: 900 } });
 
   test("横に割らず、縦に積む", async ({ page }) => {
-    await page.locator("[data-pane-add]").click();
+    await addPane(page);
     const got = await boxes(page);
     expect(got).toHaveLength(2);
     expect(got[1].top).toBeGreaterThan(got[0].top); // 縦に積む
@@ -275,7 +278,7 @@ test.describe("縦に積んだときの上下のつまみ", () => {
   const panes = (page) => page.locator("[data-pane-id]");
 
   test.beforeEach(async ({ page }) => {
-    await page.locator("[data-pane-add]").click();
+    await addPane(page);
     await expect(panes(page)).toHaveCount(2);
   });
 
@@ -330,7 +333,7 @@ test.describe("縦に積んだときの上下のつまみ", () => {
 
 test.describe("枠のつまみと範囲選択", () => {
   test.beforeEach(async ({ page }) => {
-    await page.locator("[data-pane-add]").click();
+    await addPane(page);
     await expect(page.locator("[data-pane-id]")).toHaveCount(2);
   });
 
