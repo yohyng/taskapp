@@ -15,6 +15,9 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
+import SketchPad from "./SketchPad";
+import { readSketchDraft, sketchFile, SKETCH_DRAFT_KEY } from "./lib/sketch";
+import { hasDrive, uploadToDrive } from "./lib/drive";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
 import { supabase, isSupabaseEnabled } from "./lib/supabase";
 import { toDateKey, getWeekDays, weekDateKeys, isToday as schedIsToday, isThisWeek as schedIsThisWeek, isThisWeekUnscheduled, rootTasksForDay, ruleMatchesWeekday } from "./lib/scheduling";
@@ -1030,8 +1033,28 @@ function App() {
   const [quickAddTitle, setQuickAddTitle] = useState("");
   const quickAddInputRef = useRef(null);
   const quickAddVoice = useVoiceInput({ enabled: quickAddOpen, value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
+  const [quickAddSketch, setQuickAddSketch] = useState(readSketchDraft);
+  const [sketchOpen, setSketchOpen] = useState(() => readSketchDraft().length > 0);
+  const [sketchSaving, setSketchSaving] = useState(false);
+  const [sketchMessage, setSketchMessage] = useState("");
+  const sketchUploadRef = useRef(null), sketchUploadedRef = useRef(null);
+  useEffect(() => () => { sketchUploadRef.current?.abort(); sketchUploadRef.current = null; }, []);
+  function changeSketch(strokes) {
+    setQuickAddSketch(strokes);
+    if (strokes.length) rememberKind("memo");
+    setSketchMessage("");
+    try {
+      if (strokes.length) localStorage.setItem(SKETCH_DRAFT_KEY, JSON.stringify(strokes));
+      else localStorage.removeItem(SKETCH_DRAFT_KEY);
+    } catch { setSketchMessage("下書きを端末に保存できません。画面を閉じずにメモへ追加してください。"); }
+  }
   function closeQuickAdd() {
     quickAddVoice.cancel();
+    const controller = sketchUploadRef.current;
+    sketchUploadRef.current = null;
+    controller?.abort();
+    setSketchSaving(false);
+    setSketchMessage("");
     setQuickAddOpen(false);
     setQuickAddTitle("");
   }
@@ -3184,17 +3207,50 @@ function App() {
   //（受け取ると、アウトラインで1文字打つたびに画面ぜんたいが描き直される）。
   const outline = useOutlineApi();
   const [quickAddKind, setQuickAddKind] = useState(() => {
+    if (readSketchDraft().length) return "memo";
     try { return localStorage.getItem(QUICK_ADD_KIND_KEY) === "memo" ? "memo" : "task"; } catch { return "task"; }
   });
   function rememberKind(kind) {
     setQuickAddKind(kind);
     try { localStorage.setItem(QUICK_ADD_KIND_KEY, kind); } catch { /* noop */ }
   }
-  function submitQuickAdd(kind) {
+  async function submitQuickAdd(kind) {
     const title = quickAddTitle.trim();
-    if (!title) return;
+    const strokes = quickAddSketch;
+    if ((!title && !strokes.length) || sketchUploadRef.current) return;
     // 追加後の空欄へ遅れて届いた認識結果を入れない。
     quickAddVoice.cancel();
+    if (strokes.length) {
+      if (!hasDrive()) { setSketchMessage("画像の置き場を設定すると追加できます。手書きの下書きは残っています。"); return; }
+      const controller = new AbortController();
+      sketchUploadRef.current = controller;
+      setSketchSaving(true);
+      setSketchMessage("画像を保存しています…");
+      const timer = setTimeout(() => controller.abort(), 30000);
+      try {
+        let url = sketchUploadedRef.current?.strokes === strokes ? sketchUploadedRef.current.url : null;
+        if (!url) {
+          const file = await sketchFile(strokes);
+          if (controller.signal.aborted) return;
+          const got = await uploadToDrive(file, undefined, { hint: title || "手書きのメモ", where: "ノート" }, { signal: controller.signal });
+          url = got.url;
+        }
+        // 閉じたり次の入力へ進んだ後には、遅い転送結果を追加しない。
+        if (sketchUploadRef.current !== controller || controller.signal.aborted) return;
+        sketchUploadedRef.current = { strokes, url };
+        if (!addMemo(title, url)) { setSketchMessage("追加できる状態になるまで下書きを残しています。もう一度追加してください。"); return; }
+        rememberKind("memo");
+        setQuickAddTitle("");
+        changeSketch([]);
+        sketchUploadedRef.current = null;
+      } catch {
+        if (sketchUploadRef.current === controller) setSketchMessage("手書きは下書きに残っています。つながってからもう一度追加してください。");
+      } finally {
+        clearTimeout(timer);
+        if (sketchUploadRef.current === controller) { sketchUploadRef.current = null; setSketchSaving(false); }
+      }
+      return;
+    }
     rememberKind(kind);
     if (kind === "memo") {
       if (!addMemo(title)) return;
@@ -3209,9 +3265,9 @@ function App() {
   }
 
   // きょうの日付の行に、メモを足す
-  function addMemo(text) {
+  function addMemo(text, image) {
     const label = toDateKey(new Date());
-    if (!outline.addMemo(label, text)) {
+    if (!outline.addMemo(label, text, image)) {
       setToast("アウトラインは別のタブで編集中です。入力はそのまま残しています");
       return false;
     }
@@ -4436,6 +4492,7 @@ function App() {
               <textarea
                 ref={quickAddInputRef}
                 autoFocus
+                disabled={sketchSaving}
                 value={quickAddTitle}
                 style={{ height: quickAddHeight }}
                 onChange={(e) => { quickAddVoice.cancel(); setQuickAddTitle(e.target.value); }}
@@ -4484,12 +4541,15 @@ function App() {
               </div>
 
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <button type="button" data-quick-add-voice data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={quickAddVoice.phase === "stopping"} className={classNames("flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
+                <button type="button" data-quick-add-voice data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={sketchSaving || quickAddVoice.phase === "stopping"} className={classNames("flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
                   {quickAddVoice.phase !== "idle" ? <Square aria-hidden="true" className="h-3.5 w-3.5" /> : <Mic aria-hidden="true" className="h-3.5 w-3.5" />}
                   {quickAddVoice.phase === "stopping" ? "確定中" : quickAddVoice.phase !== "idle" ? "停止" : "音声入力"}
                 </button>
+                <button type="button" data-quick-add-sketch aria-expanded={sketchOpen} disabled={sketchSaving} onClick={() => setSketchOpen((value) => !value)} className="flex min-h-10 items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-xs text-neutral-300 hover:bg-white/10"><Pencil aria-hidden="true" className="h-3.5 w-3.5" />手書き{quickAddSketch.length > 0 && "・下書きあり"}</button>
                 <span data-quick-add-voice-status role="status" className="min-w-0 flex-1 text-[11px] text-neutral-500">{quickAddVoice.message}</span>
               </div>
+              {sketchOpen && <SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} />}
+              {sketchMessage && <div data-sketch-status role="status" className="mt-2 text-xs text-neutral-400">{sketchMessage}</div>}
 
               <div className={classNames("mt-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
                 {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
@@ -4513,7 +4573,7 @@ function App() {
                 <button
                   type="button"
                   data-add-task
-                  disabled={!quickAddTitle.trim()}
+                  disabled={sketchSaving || quickAddSketch.length > 0 || !quickAddTitle.trim()}
                   onClick={() => submitQuickAdd("task")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
@@ -4527,7 +4587,7 @@ function App() {
                 <button
                   type="button"
                   data-add-memo
-                  disabled={!quickAddTitle.trim()}
+                  disabled={sketchSaving || (!quickAddTitle.trim() && !quickAddSketch.length)}
                   onClick={() => submitQuickAdd("memo")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",

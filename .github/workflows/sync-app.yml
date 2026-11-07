@@ -40,7 +40,7 @@ jobs:
       - name: 通常入口の合成PWAを生成
         run: pnpm prepare:app
       - name: 普段の画面と全HTTP停止からの復帰を5回ずつ確認
-        run: pnpm test tests/app-screen.spec.js tests/app-tabs.spec.js tests/app-touch.spec.js tests/app-voice.spec.js tests/app-pwa.spec.js --repeat-each=5 --max-failures=2 --reporter=line,json > app-output.log 2>&1
+        run: pnpm test tests/app-screen.spec.js tests/app-tabs.spec.js tests/app-touch.spec.js tests/app-voice.spec.js tests/app-sketch.spec.js tests/app-pwa.spec.js --repeat-each=5 --max-failures=2 --reporter=line,json > app-output.log 2>&1
         env:
           PLAYWRIGHT_JSON_OUTPUT_NAME: app-results.json
       - name: 失敗していたWebKitの通常復帰を20回反復する

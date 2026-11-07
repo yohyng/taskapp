@@ -922,9 +922,9 @@ export function OutlineProvider({ children }) {
   }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal, contentReady, backupState, runBackup]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
-    addMemo: (dateLabel, text) => {
+    addMemo: (dateLabel, text, image) => {
       if (!ownerRef.current || stoppedRef.current) return null;
-      const got = addMemoUnderDate(nodesRef.current, dateLabel, text);
+      const got = addMemoUnderDate(nodesRef.current, dateLabel, text, image);
       apply(() => got.nodes);
       return got;
     },

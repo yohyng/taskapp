@@ -24,11 +24,11 @@ export function ProductOutline({ children, tools = true }) {
   });
   useEffect(() => { try { localStorage.setItem('taskspace-outline-view', JSON.stringify(view)); } catch { /* 表示設定の保存失敗で本文入力を止めない。 */ } }, [view]);
   // Appは木を購読しない。メモ追加の時点で稼働中の文書を読み、同じ変更経路へ一度だけ渡す。
-  const api = useMemo(() => ({ addMemo(date, text) {
+  const api = useMemo(() => ({ addMemo(date, text, image) {
     const engine = engineRef.current;
     if (!engine || sessions.snapshot()?.user?.id !== ownerId) return null;
     let result;
-    engine.changeOutline((nodes) => { result = addMemoUnderDate(nodes, date, text); return result.nodes; });
+    engine.changeOutline((nodes) => { result = addMemoUnderDate(nodes, date, text, image); return result.nodes; });
     return result;
   } }), [ownerId]);
   useEffect(() => {
