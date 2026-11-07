@@ -104,6 +104,14 @@ body {
   color: var(--ts-text);
 }
 
+/* 同時に開いている枠なので、単一の選択状態を付けず各タブを同じ面で示す。 */
+.ts-pane-tab {
+  margin-bottom: -1px;
+  background-color: color-mix(in srgb, var(--ts-bg) 92%, var(--ts-text) 8%);
+  border-color: color-mix(in srgb, var(--ts-text) 15%, transparent);
+  border-bottom-color: color-mix(in srgb, var(--ts-bg) 92%, var(--ts-text) 8%);
+}
+
 
 /* ── 指で触る機械むけ ──────────────────────────────
    マウスが無い＝ホバーが無いので、ホバー前提の作りがそのままだと
