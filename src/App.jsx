@@ -3693,7 +3693,7 @@ function App() {
       <div className="mx-auto flex h-full w-full max-w-[2400px] min-h-0 flex-col gap-2 px-3 py-2">
         <header className="sticky top-0 z-30 -mx-2 flex flex-wrap items-center gap-2 border-b border-white/10 ts-bg-veil px-2 py-2 backdrop-blur">
           <div className="mr-3 flex items-baseline gap-2">
-            <h1 className="text-base font-semibold tracking-tight sm:text-xl">⚡ Task Space</h1>
+            <h1 className="flex items-center gap-2 text-base font-semibold tracking-tight sm:text-xl"><img src="/favicon.svg" alt="" className="h-6 w-6 shrink-0 rounded" />fragments</h1>
             <span className="hidden text-[11px] text-neutral-500 sm:inline">v{__APP_VERSION__}</span>
           </div>
 
@@ -9034,7 +9034,7 @@ function useKeepScreen(todayLeft = 0) {
         ctx.fillText(noteRef.current, 160, 132);
         ctx.fillStyle = "#525252";
         ctx.font = "12px sans-serif";
-        ctx.fillText("Task Space", 160, 160);
+        ctx.fillText("fragments", 160, 160);
         rafRef.current = requestAnimationFrame(draw);
       }
       draw(); // 1枚描いてから流す。空のまま渡すと中身が無いと断られる

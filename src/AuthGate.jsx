@@ -48,7 +48,8 @@ export default function AuthGate({ children }) {
     <div className="flex h-screen items-center justify-center bg-neutral-950 p-4">
       <div className="w-full max-w-sm rounded-xl border border-white/10 bg-neutral-900 p-6 shadow-2xl">
         <div className="mb-6 text-center">
-          <div className="mb-1 text-lg font-semibold text-neutral-100">Task Space</div>
+          <img src="/favicon.svg" alt="" className="mx-auto mb-3 h-12 w-12 rounded-xl" />
+          <div className="mb-1 text-lg font-semibold text-neutral-100">fragments</div>
           <div className="text-xs text-neutral-500">サインインして続ける</div>
         </div>
 

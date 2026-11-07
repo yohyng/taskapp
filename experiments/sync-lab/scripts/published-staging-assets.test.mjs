@@ -9,7 +9,7 @@ function fixture() {
   const config = { ...vercelBuildPlan({ VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: stagingBranch,
     VERCEL_GIT_REPO_OWNER: 'yohyng', VERCEL_GIT_REPO_SLUG: 'taskapp', VERCEL_GIT_COMMIT_SHA: ref }).config };
   const files = { 'index.html': '<h1>合成検証</h1>', 'sw.js': '/* 合成Worker */',
-    'manifest.webmanifest': JSON.stringify({ name: 'Task Space 検証', start_url: '/', display: 'standalone' }), 'assets/engine.wasm': '合成WASM' };
+    'manifest.webmanifest': JSON.stringify({ name: 'fragments 検証', start_url: '/', display: 'standalone' }), 'assets/engine.wasm': '合成WASM' };
   const manifest = { format: 1, kind: 'published-staging-app', synthetic: true, branch: stagingBranch, ref, config,
     files: Object.fromEntries(Object.entries(files).map(([path, value]) => [path, fileHash(value)])) };
   let requests = 0;

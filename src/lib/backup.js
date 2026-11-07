@@ -7,7 +7,7 @@ const TASK_KEY = "notion-like-taskdb-prototype-v4";
 export function readTaskspaceBackup(value) {
   const payload = typeof value === "string" ? JSON.parse(value) : value;
   if (!payload || payload.app !== "taskspace" || !payload.store
-    || typeof payload.store !== "object" || Array.isArray(payload.store)) throw new Error("Task Spaceの控えを読めません");
+    || typeof payload.store !== "object" || Array.isArray(payload.store)) throw new Error("fragmentsの控えを読めません");
   if (typeof payload.store[OUTLINE_KEY] !== "string") throw new Error("控えにアウトラインがありません");
   const outline = readOutlineSnapshot(JSON.parse(payload.store[OUTLINE_KEY]));
   if (!outline) throw new Error("控えのアウトラインを読めません");
