@@ -1,6 +1,29 @@
 import { test, expect } from '@playwright/test';
 import { appFixture } from './support/app-fixture.mjs';
 
+test('スマホのアクセント：色を選びoutlinerの操作色へ反映し、再起動後も保つ', async ({ browser }) => {
+  const f = await appFixture({ newContext: (options) => browser.newContext({ ...options, viewport: { width: 320, height: 780 }, isMobile: true, hasTouch: true }) });
+  try {
+    const page = await f.open();
+    const note = page.locator('[data-quick-add]');
+    const initial = await note.evaluate((el) => getComputedStyle(el).color);
+    const settings = page.getByTitle('Settings', { exact: true });
+    await settings.tap();
+    await page.locator('[data-app-accent="#a78bfa"]').tap();
+    await expect.poll(() => note.evaluate((el) => getComputedStyle(el).color)).not.toBe(initial);
+    await expect(page.locator('[data-app-accent="#a78bfa"]')).toHaveAttribute('aria-pressed', 'true');
+    await settings.tap();
+    const date = page.locator('[data-date-view]');
+    await date.tap();
+    await expect.poll(() => date.evaluate((el) => getComputedStyle(el).borderColor)).not.toBe('rgba(0, 0, 0, 0)');
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--ts-accent').trim())).toBe('#a78bfa');
+    await page.reload();
+    await settings.tap();
+    await expect(page.locator('[data-app-accent-custom]')).toHaveValue('#a78bfa');
+    expect(f.errors).toEqual([]);
+  } finally { await f.close(); }
+});
+
 test('スマホの上端：ノートと設定を指で開閉し、狭い画面でもボタンを覆わない', async ({ browser }) => {
   const f = await appFixture({ newContext: (options) => browser.newContext({ ...options, viewport: { width: 393, height: 780 }, isMobile: true, hasTouch: true }) });
   try {

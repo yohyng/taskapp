@@ -1849,7 +1849,7 @@ export default function Outliner() {
           title="日付の順に並べて見る（元の並びは変わりません）"
           className={classNames(
             "shrink-0 rounded-md border px-2 py-1 text-[11px] transition",
-            dateView ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-500 hover:bg-white/[0.07] hover:text-neutral-200",
+            dateView ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-500 hover:bg-white/[0.07] hover:text-neutral-200",
           )}
         >
           日付
@@ -2035,7 +2035,7 @@ export default function Outliner() {
                 onClick={() => setView({ immersive: !view.immersive })}
                 className={classNames(
                   "mb-1 flex w-full items-center justify-between rounded border px-2 py-1.5 text-[11px] transition",
-                  view.immersive ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                  view.immersive ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
                 )}
               >
                 <span>書くことに集中</span>
@@ -2051,7 +2051,7 @@ export default function Outliner() {
                 onClick={() => setView({ typewriter: !view.typewriter })}
                 className={classNames(
                   "flex w-full items-center justify-between rounded border px-2 py-1.5 text-[11px] transition",
-                  view.typewriter ? "border-sky-400/40 bg-sky-400/10 text-sky-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
+                  view.typewriter ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
                 )}
               >
                 <span>タイプライター</span>
@@ -2333,7 +2333,7 @@ alter table outline_nodes disable row level security;
       {band && (
         <div
           data-select-band
-          className="pointer-events-none fixed z-[60] rounded border border-sky-400/60 bg-sky-400/10"
+          className="pointer-events-none fixed z-[60] rounded border border-accent-400/60 bg-accent-400/10"
           style={{ left: band.left, top: band.top, width: band.width, height: band.height }}
         />
       )}
@@ -2373,7 +2373,7 @@ alter table outline_nodes disable row level security;
         {drag && (
           <div
             data-drop-line
-            className="pointer-events-none absolute right-0 z-20 h-[2px] rounded bg-sky-400"
+            className="pointer-events-none absolute right-0 z-20 h-[2px] rounded bg-accent-400"
             style={{ top: drag.top - 1, left: drag.depth * INDENT + 24 }}
           />
         )}
@@ -2426,7 +2426,7 @@ alter table outline_nodes disable row level security;
               className={classNames(
                 "group/row relative flex items-start gap-1 rounded py-[3px] pr-1 transition-opacity duration-500 hover:bg-white/[0.03]",
                 drag?.id === node.id && "opacity-40",
-                pickedSet.has(node.id) && "bg-sky-400/15 ring-1 ring-sky-400/30",
+                pickedSet.has(node.id) && "bg-accent-400/15 ring-1 ring-accent-400/30",
                 // 書くことに集中：いま打っている行のまわりだけ残す
                 calm && editingId !== node.id && "opacity-25",
               )}
@@ -2752,7 +2752,7 @@ alter table outline_nodes disable row level security;
           data-pick-bar
           className="sticky bottom-2 z-30 mt-2 flex flex-wrap items-center gap-1 rounded-xl border border-white/15 ts-surface px-2 py-1.5 shadow-2xl"
         >
-          <span className="rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
+          <span className="rounded-full border border-accent-400/30 bg-accent-500/15 px-2 py-0.5 text-[10px] text-accent-100">
             {picked.length}件
           </span>
           <button data-pick-outdent onClick={() => bulkIndent(true)} title="字下げを戻す（Shift+Tab）" className="rounded px-2 py-1 text-[11px] text-neutral-300 transition hover:bg-white/[0.07]">←</button>

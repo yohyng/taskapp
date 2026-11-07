@@ -459,6 +459,17 @@ const DEFAULT_PAGES = [{ id: "page-1", title: "はじめてのページ", icon: 
 // アプリ全体の配色。--ts-bg / --ts-text に流し込むと、面や枠は
 // alpha 指定なので自動で追従する。
 const APP_THEME_SETTING_KEY = "app_theme";
+const APP_ACCENT_SETTING_KEY = "app_accent";
+const DEFAULT_APP_ACCENT = "#34d399";
+const APP_ACCENT_PRESETS = [
+  { name: "グリーン", color: "#34d399" },
+  { name: "ブルー", color: "#60a5fa" },
+  { name: "パープル", color: "#a78bfa" },
+  { name: "ローズ", color: "#fb7185" },
+  { name: "アンバー", color: "#fbbf24" },
+  { name: "グレー", color: "#a3a3a3" },
+];
+const isAccentColor = (value) => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value);
 const DEFAULT_APP_THEME = { bg: "#0a0a0a", text: "#f5f5f5" };
 const APP_THEME_PRESETS = [
   { name: "既定", bg: "#0a0a0a", text: "#f5f5f5" },
@@ -921,6 +932,22 @@ function App() {
     } catch { /* 壊れていたら既定 */ }
     return DEFAULT_APP_THEME;
   });
+  const [appAccent, setAppAccent] = useState(() => {
+    try {
+      const saved = localStorage.getItem("taskspace-app-accent");
+      if (isAccentColor(saved)) return saved;
+    } catch { /* 保存が使えない場合も既定色で開く */ }
+    return DEFAULT_APP_ACCENT;
+  });
+  useEffect(() => {
+    document.documentElement.style.setProperty("--ts-accent", appAccent);
+  }, [appAccent]);
+  const persistAppAccent = useCallback((color) => {
+    if (!isAccentColor(color)) return;
+    setAppAccent(color);
+    try { localStorage.setItem("taskspace-app-accent", color); } catch { /* quota */ }
+    dbSaveSetting(APP_ACCENT_SETTING_KEY, color);
+  }, []);
 
   // DragOverlay などルート div の外に出る要素にも効かせるため html 要素に置く
   useEffect(() => {
@@ -1659,6 +1686,11 @@ function App() {
         addSyncLog("🔗 Notion DB ID を同期しました");
       }
       const remoteTheme = settings?.[APP_THEME_SETTING_KEY];
+      const remoteAccent = settings?.[APP_ACCENT_SETTING_KEY];
+      if (isAccentColor(remoteAccent)) {
+        setAppAccent(remoteAccent);
+        try { localStorage.setItem("taskspace-app-accent", remoteAccent); } catch { /* quota */ }
+      }
       if (remoteTheme) {
         try {
           const parsed = typeof remoteTheme === "string" ? JSON.parse(remoteTheme) : remoteTheme;
@@ -3786,7 +3818,7 @@ function App() {
               onClick={() => setQuickAddOpen(true)}
               title="タスクかメモを書きとめる"
               data-quick-add
-              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-emerald-400/40 bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 sm:flex-none"
+              className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-accent-400/40 bg-accent-500/15 px-3 py-1.5 text-xs font-medium text-accent-300 transition hover:bg-accent-500/25 sm:flex-none"
             >
               <NotebookPen className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">ノート</span>
@@ -3868,6 +3900,22 @@ function App() {
                     )}
                   </div>
 
+                  <div data-app-accent-settings className="mb-3">
+                    <div className="mb-1.5 text-[11px] text-neutral-500">アクセントカラー</div>
+                    <div className="mb-2 grid grid-cols-6 gap-1">
+                      {APP_ACCENT_PRESETS.map((preset) => (
+                        <button key={preset.color} type="button" data-app-accent={preset.color} aria-label={preset.name} aria-pressed={appAccent.toLowerCase() === preset.color} title={preset.name} onClick={() => persistAppAccent(preset.color)} className="flex h-8 items-center justify-center rounded border border-white/15 aria-pressed:border-white aria-pressed:ring-1 aria-pressed:ring-white/50">
+                          <span className="h-4 w-4 rounded-full" style={{ backgroundColor: preset.color }} />
+                        </button>
+                      ))}
+                    </div>
+                    <label className="flex items-center gap-2 text-[10px] text-neutral-500">
+                      好きな色
+                      <input data-app-accent-custom aria-label="アクセントカラー" type="color" value={appAccent} onChange={(event) => persistAppAccent(event.target.value)} className="h-7 min-w-0 flex-1 rounded border border-white/10 bg-transparent" />
+                    </label>
+                    {appAccent !== DEFAULT_APP_ACCENT && <button type="button" data-app-accent-reset onClick={() => persistAppAccent(DEFAULT_APP_ACCENT)} className="mt-1.5 w-full rounded border border-white/10 py-1 text-[10px] text-neutral-500 hover:bg-white/[0.07]">アクセントを既定に戻す</button>}
+                  </div>
+
                   {/* Zoom */}
                   <div className="mb-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">表示サイズ</div>
@@ -3891,7 +3939,7 @@ function App() {
 
                   <div className="mb-3 border-t border-white/10 pt-3">
                     <div className="mb-1.5 text-[11px] text-neutral-500">表示</div>
-                    <button onClick={() => setShowDone((v) => !v)} className={classNames("mb-1.5 w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
+                    <button onClick={() => setShowDone((v) => !v)} className={classNames("mb-1.5 w-full rounded border px-2 py-1.5 text-left text-xs transition", showDone ? "border-accent-400/30 bg-accent-400/10 text-accent-200" : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]")}>
                       {showDone ? "✓ 完了タスクを表示中" : "完了タスクを非表示中"}
                     </button>
                   </div>
@@ -3989,7 +4037,7 @@ function App() {
                           "mb-1 flex w-full items-center justify-between rounded border px-2 py-1.5 text-left text-xs transition",
                           hiddenPanels.has(key)
                             ? "border-white/10 bg-white/[0.03] text-neutral-500 hover:bg-white/[0.07]"
-                            : "border-emerald-400/30 bg-emerald-400/10 text-emerald-200",
+                            : "border-accent-400/30 bg-accent-400/10 text-accent-200",
                         )}
                       >
                         <span>{label}</span>
@@ -4180,7 +4228,7 @@ function App() {
                       "h-2 w-full cursor-row-resize lg:h-auto lg:w-2 lg:cursor-col-resize",
                     )}
                   >
-                    <span className="h-[3px] w-10 rounded-full bg-white/10 transition group-hover/handle:bg-sky-400/60 lg:h-10 lg:w-[3px]" />
+                    <span className="h-[3px] w-10 rounded-full bg-white/10 transition group-hover/handle:bg-accent-400/60 lg:h-10 lg:w-[3px]" />
                   </div>
                 )}
                 <div
@@ -4209,7 +4257,7 @@ function App() {
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
           <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-white/20 ts-surface px-3 py-2.5 shadow-2xl max-w-[calc(100vw-1.5rem)] overflow-x-auto scrollbar-none">
-            <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-sky-400/30 bg-sky-500/15 px-2 py-0.5 text-[10px] text-sky-100">
+            <span className="flex-shrink-0 whitespace-nowrap rounded-full border border-accent-400/30 bg-accent-500/15 px-2 py-0.5 text-[10px] text-accent-100">
               {selectedIds.size + selectedTrayIds.size}件選択中{selectedTrayIds.size > 0 && selectedIds.size > 0 && <span className="ml-1 text-neutral-400">({selectedTrayIds.size})</span>}
             </span>
             {getWeekDays().map((date, i) => {
@@ -4221,11 +4269,11 @@ function App() {
                   if (selectedTrayIds.size > 0) { const ids = [...selectedTrayIds]; ids.forEach((id) => acceptInboxItem(id, "", "", { scheduledDate: dKey, plain: true })); }
                   setToast(`${selectedIds.size + selectedTrayIds.size}件を${DAY_LABELS[i]}に追加しました`);
                   exitSelectMode();
-                }} className={classNames("flex-shrink-0 rounded-md border px-2 py-1.5 text-xs transition", isToday ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-200 hover:bg-emerald-500/25" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>{DAY_LABELS[i]}</button>
+                }} className={classNames("flex-shrink-0 rounded-md border px-2 py-1.5 text-xs transition", isToday ? "border-accent-400/40 bg-accent-500/15 text-accent-200 hover:bg-accent-500/25" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>{DAY_LABELS[i]}</button>
               );
             })}
             <div className="relative flex-shrink-0">
-              <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-sky-400/40 bg-sky-500/15 text-sky-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
+              <button onClick={() => setShowMovePanel((v) => !v)} className={classNames("rounded-md border px-2.5 py-1.5 text-xs transition", showMovePanel ? "border-accent-400/40 bg-accent-500/15 text-accent-200" : "border-white/10 bg-white/[0.05] text-neutral-200 hover:bg-white/[0.12]")}>Move…</button>
             </div>
             {selectedIds.size > 0 && (
               <div className="flex flex-shrink-0 items-center gap-1 rounded-md border border-white/10 bg-white/[0.05] px-1.5 py-1">
@@ -4384,7 +4432,7 @@ function App() {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
                 }}
                 placeholder="やること（Enter で追加・Shift+Enter で改行）"
-                className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text placeholder-neutral-600 outline-none focus:border-emerald-400/50"
+                className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text placeholder-neutral-600 outline-none focus:border-accent-400/50"
               />
               {/* 下の帯をつかんで、入力欄の高さを変える。指でも動かせるように
                   ブラウザ標準のつまみではなく自前で持つ。 */}
@@ -4431,7 +4479,7 @@ function App() {
                     className={classNames(
                       "rounded-full border px-3 py-1.5 text-xs transition",
                       quickAddWhen === value
-                        ? "border-emerald-400/50 bg-emerald-500/20 text-emerald-100"
+                        ? "border-accent-400/50 bg-accent-500/20 text-accent-100"
                         : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
                     )}
                   >
@@ -4449,8 +4497,8 @@ function App() {
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
                     quickAddKind === "task"
-                      ? "border-emerald-400/50 bg-emerald-500/25 text-emerald-100 hover:bg-emerald-500/35"
-                      : "border-emerald-400/20 bg-emerald-500/10 text-emerald-200/70 hover:bg-emerald-500/20",
+                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
+                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
                   )}
                 >
                   タスクに追加
@@ -4463,8 +4511,8 @@ function App() {
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
                     quickAddKind === "memo"
-                      ? "border-sky-400/50 bg-sky-500/25 text-sky-100 hover:bg-sky-500/35"
-                      : "border-sky-400/20 bg-sky-500/10 text-sky-200/70 hover:bg-sky-500/20",
+                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
+                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
                   )}
                 >
                   メモに追加
@@ -4494,8 +4542,8 @@ function App() {
       <span data-drag-ghost />
       {activeDrag?.type === "task" && (
         selectedIds.size > 1 && selectedIds.has(activeDrag.id) ? (
-          <div className="flex items-center gap-2 rounded-md border border-sky-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">
-            <span className="rounded-full border border-sky-400/40 bg-sky-500/20 px-1.5 text-[10px] text-sky-100">{selectedIds.size}</span>
+          <div className="flex items-center gap-2 rounded-md border border-accent-400/50 bg-neutral-800/95 px-2 py-1.5 text-[12.5px] font-medium ts-text shadow-2xl opacity-95">
+            <span className="rounded-full border border-accent-400/40 bg-accent-500/20 px-1.5 text-[10px] text-accent-100">{selectedIds.size}</span>
             <span className="max-w-xs truncate">{taskMap.get(activeDrag.id)?.title || "…"}</span>
             <span className="text-[10px] text-neutral-400">ほか{selectedIds.size - 1}件</span>
           </div>
@@ -4948,14 +4996,14 @@ function TrayItem({ item, updateInboxItem, removeInboxItem, moveInboxItem, accep
         "group rounded-md border bg-black/20 p-2 transition hover:border-white/20 hover:bg-white/[0.045]",
         isOver ? "border-white/30 bg-white/[0.06]" : "border-white/10",
         isTrayDragging && "opacity-40",
-        isSelected && "border-sky-500/50 bg-sky-500/10",
+        isSelected && "border-accent-500/50 bg-accent-500/10",
         selectMode && "cursor-pointer",
       )}
     >
       <div className="flex items-start gap-2">
         {selectMode ? (
-          <div className={classNames("mt-0.5 h-3.5 w-3.5 shrink-0 rounded border flex items-center justify-center transition", isSelected ? "border-sky-400 bg-sky-500/30" : "border-neutral-600")}>
-            {isSelected && <div className="h-2 w-2 rounded-sm bg-sky-400" />}
+          <div className={classNames("mt-0.5 h-3.5 w-3.5 shrink-0 rounded border flex items-center justify-center transition", isSelected ? "border-accent-400 bg-accent-500/30" : "border-neutral-600")}>
+            {isSelected && <div className="h-2 w-2 rounded-sm bg-accent-400" />}
           </div>
         ) : (
           <GripVertical className="mt-0.5 h-3.5 w-3.5 shrink-0 cursor-grab text-neutral-600 opacity-50 transition group-hover:opacity-100" />
@@ -6022,14 +6070,14 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         rowClassName={(b) => classNames(
           "rounded px-1 py-[3px] transition hover:bg-white/[0.035]",
           b.focusRingClass,
-          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isSelected && "bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/40",
           b.isDragging && "opacity-30",
           // 入る場所を線で出す。上下なら並べ替え、左右ならそこに列ができる。
           b.dropHint && "relative",
           b.dropHint === "left" && "[box-shadow:inset_3px_0_0_rgb(96,165,250)]",
           b.dropHint === "right" && "[box-shadow:inset_-3px_0_0_rgb(96,165,250)]",
           // 中に入る合図は、字下げの位置に縦線を出す
-          b.dropHint === "inside" && "[box-shadow:inset_16px_0_0_-13px_rgb(52,211,153)] bg-emerald-400/[0.07]",
+          b.dropHint === "inside" && "[box-shadow:inset_16px_0_0_-13px_var(--ts-accent)] bg-accent-400/[0.07]",
         )}
         textareaClassName={() => "ts-block-text w-full resize-none overflow-hidden bg-transparent text-[14px] leading-relaxed ts-text outline-none"}
         titleClassName={(b) => classNames(
@@ -6040,7 +6088,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
         leading={() => (
           <button
             onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
-            className={classNames("mt-1 shrink-0 transition", task.status === "完了" ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+            className={classNames("mt-1 shrink-0 transition", task.status === "完了" ? "text-accent-400" : "text-neutral-600 hover:text-neutral-300")}
           >
             {task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
           </button>
@@ -6426,7 +6474,7 @@ function BlockTailZone({ pageId, onClick, className, children }) {
       ref={setNodeRef}
       data-block-tail
       onClick={onClick}
-      className={classNames(className, isOver && "rounded bg-sky-400/[0.07] ring-1 ring-inset ring-sky-400/30")}
+      className={classNames(className, isOver && "rounded bg-accent-400/[0.07] ring-1 ring-inset ring-accent-400/30")}
     >
       {children}
     </div>
@@ -6854,7 +6902,7 @@ function TaskBlock({
         className={classNames(
           "group/block flex items-start gap-1 rounded px-1 py-[3px] outline-none transition",
           b.focusRingClass,
-          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isSelected && "bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/40",
           b.isDragging && "opacity-30",
         )}
       >
@@ -6891,7 +6939,7 @@ function TaskBlock({
         className={classNames(
           "group/block flex items-start gap-1 rounded px-1 py-[3px] outline-none transition",
           b.focusRingClass,
-          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isSelected && "bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/40",
           b.isDragging && "opacity-30",
         )}
       >
@@ -6919,7 +6967,7 @@ function TaskBlock({
         className={classNames(
           "group/block flex items-center gap-1 px-1.5 py-1.5 outline-none",
           b.focusRingClass,
-          b.isSelected && "rounded bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isSelected && "rounded bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/40",
           b.isDragging && "opacity-30",
         )}
       >
@@ -6945,7 +6993,7 @@ function TaskBlock({
       {(b.dropHint === "top" || b.dropHint === "bottom") && (
         <div
           data-drop-line
-          className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-sky-400"
+          className="pointer-events-none absolute left-0 right-0 h-[2px] rounded-full bg-accent-400"
           style={b.dropHint === "top" ? { top: -1 } : { bottom: -1 }}
         />
       )}
@@ -7474,7 +7522,7 @@ function TaskCard({ task, listNumber, taskMap, categoryTone, children = [], chil
         }}
         rowClassName={(b) => classNames(
           "group rounded-md border px-1.5 py-1 transition",
-          b.isSelected ? "border-sky-400/40 bg-sky-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : b.isOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
+          b.isSelected ? "border-accent-400/40 bg-accent-500/[0.08]" : selected ? "border-white/35 bg-white/[0.07]" : b.isOver ? "border-white/25 bg-white/[0.06]" : "border-transparent bg-transparent hover:border-white/10 hover:bg-white/[0.045]",
           b.focusRingClass,
           task.status === "完了" && "mt-1 border-t border-t-white/25 pt-2 opacity-45",
           b.isDragging && "opacity-40",
@@ -7493,12 +7541,12 @@ function TaskCard({ task, listNumber, taskMap, categoryTone, children = [], chil
             {selectMode && (
               <button
                 onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }}
-                className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300"
+                className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-accent-300"
               >
-                <CheckSquare className={classNames("h-3.5 w-3.5", b.isSelected ? "text-sky-400" : "opacity-30")} />
+                <CheckSquare className={classNames("h-3.5 w-3.5", b.isSelected ? "text-accent-400" : "opacity-30")} />
               </button>
             )}
-            <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-emerald-300">
+            <button onClick={(e) => { e.stopPropagation(); toggleDone(task); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-accent-300">
               {task.status === "完了" ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
             </button>
             {hasChildren ? (
@@ -7595,7 +7643,7 @@ function ArchiveSection({ tasks, upsertTask, removeTask, categoryTone }) {
               const tone = categoryTone(task.category);
               return (
                 <div key={task.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-xs text-neutral-400 hover:bg-white/[0.03]">
-                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-500/50" />
+                  <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-accent-500/50" />
                   <span className="min-w-0 flex-1 truncate line-through opacity-50">{task.title}</span>
                   {task.category && (
                     <span className={classNames("shrink-0 rounded border px-1.5 py-0.5 text-[10px]", tone.tag)}>{task.category}</span>
@@ -8126,7 +8174,7 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
           "flex items-start gap-1 rounded px-1.5 py-1 text-[12.5px] transition",
           b.focusRingClass,
           selectMode ? "cursor-pointer" : b.editing ? "cursor-text" : "cursor-grab",
-          b.isSelected ? "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
+          b.isSelected ? "bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/30" : selectedTaskId === task.id && "bg-white/[0.09]",
           b.editing && "bg-white/[0.07]",
           b.isDragging && "opacity-30",
           b.isOver && !b.isDragging && "ring-1 ring-inset ring-white/20 bg-white/[0.05]",
@@ -8138,14 +8186,14 @@ function TrayTask({ task, listNumber, depth = 0, toggleDone, upsertTask, removeT
           isDone && "line-through opacity-40",
         )}
         leading={(b) => selectMode ? (
-          <button onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-sky-300">
-            <CheckSquare className={classNames("h-3 w-3", b.isSelected && "text-sky-400")} />
+          <button onClick={(e) => { e.stopPropagation(); b.blockProps.onClick(); }} className="mt-0.5 shrink-0 text-neutral-500 transition hover:text-accent-300">
+            <CheckSquare className={classNames("h-3 w-3", b.isSelected && "text-accent-400")} />
           </button>
         ) : (
           <button
             onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
             aria-label={isDone ? "未完了に戻す" : "完了にする"}
-            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-accent-400" : "text-neutral-600 hover:text-neutral-300")}
           >
             {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
           </button>
@@ -8249,7 +8297,7 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
           "flex items-start gap-1 rounded px-1.5 py-1 text-[11px] transition hover:bg-white/[0.07] outline-none",
           b.focusRingClass,
           b.editing ? "cursor-text" : "cursor-grab",
-          b.isSelected && "bg-sky-500/[0.12] ring-1 ring-inset ring-sky-400/40",
+          b.isSelected && "bg-accent-500/[0.12] ring-1 ring-inset ring-accent-400/40",
           selectedTaskId === task.id && "bg-white/[0.09]",
           b.isOver && "ring-1 ring-inset ring-cyan-300/40 bg-cyan-300/[0.06]",
           b.isDragging && "opacity-30",
@@ -8265,7 +8313,7 @@ function DayTask({ task, listNumber, depth = 0, hideProject = false, childrenOf,
           <button
             onClick={(e) => { e.stopPropagation(); toggleDone(task); }}
             aria-label={isDone ? "未完了に戻す" : "完了にする"}
-            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-emerald-400" : "text-neutral-600 hover:text-neutral-300")}
+            className={classNames("mt-0.5 shrink-0 transition", isDone ? "text-accent-400" : "text-neutral-600 hover:text-neutral-300")}
           >
             {isDone ? <CheckCircle2 className="h-3 w-3" /> : <Circle className="h-3 w-3" />}
           </button>
@@ -8414,7 +8462,7 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
   }
 
   const headColor = isToday
-    ? "text-emerald-300 border-emerald-400/50"
+    ? "text-accent-300 border-accent-400/50"
     : isSun ? "text-rose-300 border-white/10"
     : isSat ? "text-sky-300 border-white/10"
     : "text-neutral-300 border-white/10";
@@ -8439,12 +8487,12 @@ function DayColumn({ dateKey, label, date, isToday, isSat, isSun, stacked = fals
         className={classNames(
           "mb-1 flex items-baseline gap-1.5 rounded-t border-b px-1 pb-1 transition",
           headColor,
-          headOver && "bg-sky-400/20 ring-1 ring-sky-300/50",
+          headOver && "bg-accent-400/20 ring-1 ring-accent-300/50",
         )}
       >
         <span className="text-sm font-bold">{label}</span>
         <span className="text-[10px] opacity-60">{date.getMonth() + 1}/{date.getDate()}</span>
-        {headOver && <span className="ml-auto text-[9px] text-sky-100">終日にする</span>}
+        {headOver && <span className="ml-auto text-[9px] text-accent-100">終日にする</span>}
         {!headOver && isToday && <span className="ml-auto text-[9px] opacity-80">TODAY</span>}
       </div>
 
@@ -8589,12 +8637,12 @@ function CalendarView({ month, setMonth, tasks, projectRules, categoryTone, setS
               className={classNames(
                 "min-h-[96px] ts-bg p-1 align-top md:min-h-[140px] md:p-1.5",
                 !inMonth && "opacity-35",
-                isToday && "relative ring-2 ring-emerald-300/60 ring-inset bg-emerald-300/[0.055]"
+                isToday && "relative ring-2 ring-accent-300/60 ring-inset bg-accent-300/[0.055]"
               )}
             >
-              <div className={classNames("mb-1 flex items-center justify-between gap-1 text-[10px]", isToday ? "text-emerald-100" : "text-neutral-500")}>
-                <span className={classNames(isToday && "rounded-full bg-emerald-300/20 px-1.5 py-0.5 font-semibold text-emerald-100")}>{d.getDate()}</span>
-                {isToday && <span className="rounded-full border border-emerald-200/25 px-1.5 py-0.5 text-[9px] font-medium text-emerald-100">Today</span>}
+              <div className={classNames("mb-1 flex items-center justify-between gap-1 text-[10px]", isToday ? "text-accent-100" : "text-neutral-500")}>
+                <span className={classNames(isToday && "rounded-full bg-accent-300/20 px-1.5 py-0.5 font-semibold text-accent-100")}>{d.getDate()}</span>
+                {isToday && <span className="rounded-full border border-accent-200/25 px-1.5 py-0.5 text-[9px] font-medium text-accent-100">Today</span>}
               </div>
               <div className="flex flex-col gap-1">
                 {list.map((item) => (
@@ -8803,8 +8851,8 @@ function DueDatePicker({ value, onChange }) {
                   onClick={() => { onChange(key); setOpen(false); }}
                   className={classNames(
                     "rounded py-1 text-[11px] transition",
-                    isSelected ? "bg-emerald-500 font-semibold text-white" :
-                    isToday ? "bg-emerald-500/20 font-semibold text-emerald-300 hover:bg-emerald-500/30" :
+                    isSelected ? "bg-accent-500 font-semibold text-white" :
+                    isToday ? "bg-accent-500/20 font-semibold text-accent-300 hover:bg-accent-500/30" :
                     dow === 0 ? "text-rose-300 hover:bg-white/10" :
                     dow === 6 ? "text-sky-300 hover:bg-white/10" :
                     "text-neutral-300 hover:bg-white/10"
@@ -8816,7 +8864,7 @@ function DueDatePicker({ value, onChange }) {
           {/* Today shortcut */}
           <button
             onClick={() => { onChange(todayKey); setOpen(false); }}
-            className="mt-2 w-full rounded-lg border border-emerald-400/25 bg-emerald-500/10 py-1 text-[11px] text-emerald-300 transition hover:bg-emerald-500/20"
+            className="mt-2 w-full rounded-lg border border-accent-400/25 bg-accent-500/10 py-1 text-[11px] text-accent-300 transition hover:bg-accent-500/20"
           >今日</button>
         </div>
       )}
@@ -8906,7 +8954,7 @@ function MarqueeSelect({ onSelect }) {
   return (
     <div
       data-marquee
-      className="pointer-events-none fixed z-[250] rounded-sm border border-sky-400/70 bg-sky-400/10"
+      className="pointer-events-none fixed z-[250] rounded-sm border border-accent-400/70 bg-accent-400/10"
       style={{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }}
     />
   );
@@ -9196,7 +9244,7 @@ function KeepAwakeSetting({ keep }) {
         className={classNames(
           "mb-1 flex w-full items-center justify-between gap-2 rounded border px-2 py-1.5 text-left text-xs transition",
           failed ? "border-red-400/40 bg-red-400/10 text-red-200"
-          : on ? "border-sky-400/40 bg-sky-400/10 text-sky-200"
+          : on ? "border-accent-400/40 bg-accent-400/10 text-accent-200"
           : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
         )}
       >
