@@ -99,3 +99,43 @@ test('未適用の受信と未知のイベントでも空の表示で成功扱�
     assert.ok(projection.stats().fullRebuilds > before.fullRebuilds);
   } finally { from.free(); source.free(); close(); }
 });
+
+
+test('構造変更：一万行の改行・インデントでも不変の本文を再利用し、同時に届く追記と色は読み直す', () => {
+  const doc = fixtureLoroDocument(10000), { projection, close } = watch(doc), remote = doc.fork();
+  try {
+    const before = projection.snapshot(), stats = projection.stats();
+    const parent = projection.node('row-1'), node = doc.getTree('outline').createNode(parent.id);
+    node.data.set('id', '追加行'); node.data.setContainer('text', new LoroText()).insert(0, '改行');
+    projection.node('row-0').data.get('text').insert(0, '同時入力：'); doc.commit(); equal(doc, projection);
+    assert.ok(projection.stats().cachedRowReads - stats.cachedRowReads >= 9999);
+    assert.equal(projection.stats().fullRowReads - stats.fullRowReads, 2);
+    assert.equal(before.find((row) => row.id === 'row-0').text, '最初のメモ');
+    const from = doc.oplogVersion();
+    try {
+      loroNode(remote, 'row-2').move(loroNode(remote, 'row-1'));
+      loroNode(remote, 'row-9999').data.get('text').insert(0, '遠隔：');
+      loroNode(remote, 'row-0').data.set('textColor', '#00ff00'); remote.commit();
+      doc.import(remote.export({ mode: 'update', from })); equal(doc, projection);
+      assert.equal(projection.snapshot().find((row) => row.id === 'row-0').textColor, '#00ff00');
+      assert.match(projection.snapshot().find((row) => row.id === 'row-9999').text, /^遠隔：/);
+    } finally { from.free(); }
+  } finally { remote.free(); close(); }
+});
+
+
+test('構造の再利用：作成途中の親は子ごと待ち、本文コンテナー置換と移動も取りこぼさない', () => {
+  const doc = fixtureLoroDocument(), { projection, close } = watch(doc), undo = new UndoManager(doc, { mergeInterval: 0 });
+  try {
+    const parent = doc.getTree('outline').createNode(); parent.data.set('id', '途中の親'); doc.commit(); equal(doc, projection);
+    const child = parent.createNode(); child.data.set('id', '途中の子'); child.data.setContainer('text', new LoroText()).insert(0, '子');
+    doc.commit(); equal(doc, projection); assert.ok(!projection.snapshot().some((row) => row.id === '途中の子'));
+    parent.data.setContainer('text', new LoroText()).insert(0, '親が到着');
+    projection.node('row-0').move(parent); doc.commit(); equal(doc, projection);
+    assert.ok(projection.snapshot().some((row) => row.id === '途中の子'));
+    parent.data.setContainer('text', new LoroText()).insert(0, '本文を置換');
+    parent.data.set('id', '置換した親'); child.move(undefined, 0); doc.commit(); equal(doc, projection);
+    undo.undo(); equal(doc, projection); undo.redo(); equal(doc, projection);
+    projection.node('置換した親').data.get('text').insert(0, '続き：'); doc.commit(); equal(doc, projection);
+  } finally { undo.free(); close(); }
+});
