@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { UndoManager } from 'loro-crdt';
-import { seedOutlineDocument, applyOutlineIntent, outlineNodes } from '../src/outline-model.js';
+import { seedOutlineDocument, applyOutlineIntent, outlineNodes, patchOutlineNode, createOutlineReader } from '../src/outline-model.js';
 import { loroViewRows } from '../src/loro-model.js';
 const original = [{ id: 'a', text: '本文', collapsed: true, favorite: true, completed: false, date: '2026-10-28', headingLevel: 2,
   textColor: '#00ff00', bgColor: '#111111', imageWidth: 640, createdAt: '2026-10-01', updatedAt: '2026-10-02',
@@ -59,4 +59,26 @@ test('本体の形：削除印の兄弟が残っていても、間への追加�
     applyOutlineIntent(doc, before, after); doc.commit();
     assert.deepEqual(nodes(doc).map((node) => node.id), ['a', 'between', 'b']);
   } finally { doc.free(); }
+});
+
+
+test('直接入力：受信の追記と色を保ち、Undoで自分の入力だけ戻す', () => {
+  const a = seedOutlineDocument(original), b = a.fork(), undo = new UndoManager(a, { mergeInterval: 0 }), from = a.oplogVersion();
+  try {
+    const target = (doc) => doc.getTree('outline').getNodes({ withDeleted: false }).find((node) => node.data.get('id') === 'a');
+    patchOutlineNode(target(a), { text: '本文・PC' }); a.commit();
+    patchOutlineNode(target(b), { text: 'スマホ・本文', textColor: '#0000ff' }); b.commit();
+    a.import(b.export({ mode: 'update', from })); b.import(a.export({ mode: 'update', from }));
+    assert.deepEqual(nodes(a), nodes(b)); assert.equal(nodes(a)[0].text, 'スマホ・本文・PC');
+    undo.undo(); assert.equal(nodes(a)[0].text, 'スマホ・本文'); assert.equal(nodes(a)[0].textColor, '#0000ff');
+    assert.throws(() => patchOutlineNode(target(a), { children: [] }), /属性以外/);
+  } finally { from.free(); undo.free(); a.free(); b.free(); }
+});
+
+test('表示の再利用：状態通知では同じ木を返し、本文と構造の変更では更新する', () => {
+  let rows = [{ id: 'a', text: '本文', parentId: null, order: 0 }];
+  const read = createOutlineReader(() => rows), first = read(); assert.equal(read(), first);
+  rows = [{ ...rows[0], text: '受信した本文' }]; assert.notEqual(read(), first); assert.equal(read()[0].text, '受信した本文');
+  rows = [{ ...rows[0], deleted: true }]; assert.deepEqual(read(), []);
+  rows = [{ ...rows[0], deleted: false }, { id: 'b', text: '子', parentId: 'a', order: 0 }]; assert.equal(read()[0].children[0].id, 'b');
 });

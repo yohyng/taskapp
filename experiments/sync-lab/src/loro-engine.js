@@ -6,7 +6,7 @@ import { analyzeTree, movePlacement } from './tree-model.js';
 import { scopedLoroSource } from './loro-binding.js';
 import { decodeLoroTransfer, loroSyncRequest } from './loro-transfer.js';
 import { loroTransport } from './loro-transport.js';
-import { applyOutlineIntent, outlineNodes } from './outline-model.js';
+import { applyOutlineIntent, createOutlineReader, patchOutlineNode } from './outline-model.js';
 
 export async function createEngine({ docId, offline, onChange, transport = loroTransport(), storageId = docId, signal, background = false, onError = (error) => { document.querySelector('[data-error]').textContent = `端末保存を確認できません：${error.message}`; } }) {
   const storage = await openLoroStorage(storageId);
@@ -22,6 +22,7 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
   const transfers = { snapshots: 0, updates: 0, receivedBytes: 0 };
   let projection, undo, stopLocal, stop;
   const selections = new Map(), node = (id) => projection.node(id), snapshot = () => projection.snapshot();
+  const readOutline = createOutlineReader(snapshot);
   const notify = () => {
     if (!projection) return;
     const state = { rows: snapshot(), connected, queued: !!fatal || saves > 0 || outbox.length > 0 };
@@ -222,8 +223,9 @@ export async function createEngine({ docId, offline, onChange, transport = loroT
       if (closing || signal?.aborted) throw new Error('画面が切り替わったため、控えを見送りました');
       return value;
     },
-    outline: () => outlineNodes(snapshot()),
-    changeOutline(makeNext) { local(() => { const before = outlineNodes(snapshot()); applyOutlineIntent(doc, before, typeof makeNext === 'function' ? makeNext(before) : makeNext); }); },
+    outline: readOutline,
+    patchOutline(id, patch) { local(() => patchOutlineNode(node(id), patch)); },
+    changeOutline(makeNext) { local(() => { const before = readOutline(); applyOutlineIntent(doc, before, typeof makeNext === 'function' ? makeNext(before) : makeNext); }); },
     canUndo: () => undo.canUndo(), canRedo: () => undo.canRedo(),
     serverState: () => transport.serverState(docId),
     async dispose() { closing = true; stopWatch?.(); clearTimeout(compactTimer); signal?.removeEventListener('abort', hide); window.removeEventListener('beforeunload', hide); window.removeEventListener('pagehide', hide); window.removeEventListener('pageshow', show); try { await disconnect(); await saving; await compacting?.catch(() => {}); } finally { unobserve(); doc.free(); storage.close(); } },
