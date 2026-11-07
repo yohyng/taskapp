@@ -1068,6 +1068,7 @@ export default function Outliner() {
     error: "同期エラー", retrying: "同期を再試行中", conflict: "確認が必要", partial: "一部未同期", "local-only": "この端末のみ",
   }[syncState];
   const [viewOpen, setViewOpen] = useState(false);
+  const [showSyncDetail, setShowSyncDetail] = useState(false);
   // 狭い画面では、設定を下から出すシートにする。
   // ぶら下げたままだと枠の外に出てしまい、指が届かない。
   const [narrow, setNarrow] = useState(() =>
@@ -1812,7 +1813,12 @@ export default function Outliner() {
             "shrink-0 text-[10px]",
             syncState === "synced" ? "text-emerald-300/80" : "text-neutral-500",
           )}
-        >{syncLabel}</span>
+        >{syncState === "synced" ? (
+          <button type="button" data-outline-sync-detail aria-label="同期済み：保存・送信の状態を確認" aria-expanded={showSyncDetail} onClick={() => setShowSyncDetail((value) => !value)} className="flex items-center gap-1 rounded px-1 py-1">
+            <Check aria-hidden="true" className="h-3.5 w-3.5" />
+            {showSyncDetail && <span>同期済み</span>}
+          </button>
+        ) : syncLabel}</span>
         <button
           data-outline-link
           data-link={link}

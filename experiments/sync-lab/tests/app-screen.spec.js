@@ -7,6 +7,11 @@ test('接続ランプ：同期済みは緑の丸を表示し、切断中は待�
     const a = await f.open(), b = await f.open();
     const link = a.locator('[data-outline-link]'), status = a.locator('[data-sync]');
     await expect(status).toHaveAttribute('data-sync', 'synced');
+    await expect(status).toHaveText('');
+    await a.locator('[data-outline-sync-detail]').click();
+    await expect(status).toHaveText('同期済み');
+    await a.locator('[data-outline-sync-detail]').click();
+    await expect(status).toHaveText('');
     await expect(link).toHaveAttribute('data-link', 'live');
     await expect(link).toHaveText('●');
     await expect(link).toHaveAttribute('title', 'ほかの端末とつながっています（押すと読み直す）');
@@ -44,6 +49,7 @@ test('通常の入口：タスク・分割画面・メモ追加を新同期へ�
     await a.locator('[data-add-memo]').click(); await a.locator('[data-quick-add-dialog] textarea').press('Escape');
     await expect.poll(() => b.evaluate(() => window.lab.snapshot().filter((row) => row.text === 'タスク画面からメモへ追加🌿').length)).toBe(1);
     await a.locator('[data-pane-add]').click();
+    await a.locator('[data-pane-add-split]').click();
     await expect(a.locator('[data-outliner]')).toHaveCount(2);
     await expect(a.locator('[data-row="memo"] [data-row-text]')).toHaveCount(2);
     await a.locator('[data-outline-view]').first().click();

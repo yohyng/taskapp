@@ -3180,7 +3180,7 @@ function App() {
     todayTasks.filter((t) => t.status !== "完了").length,
   );
 
-  // 枠（ペイン）。1つなら全画面、2つなら横に二分割…と分け合う。
+  // 既存の分割は同じグループへ移し、タブ追加だけで配置を変えない。
   const [panes, setPanes] = useState(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(PANES_KEY) || "null");
@@ -3189,30 +3189,64 @@ function App() {
           id: p?.id || `pane-${i}`,
           mode: p?.mode === "outline" ? "outline" : "tasks",
           weight: Number(p?.weight) > 0 ? Number(p.weight) : 1,
+          group: typeof p?.group === "string" ? p.group : "legacy",
         }));
       }
     } catch { /* 壊れていたら作り直す */ }
-    return [{ id: "pane-0", mode: "tasks", weight: 1 }];
+    return [{ id: "pane-0", mode: "tasks", weight: 1, group: "legacy" }];
   });
+  const [activePaneId, setActivePaneId] = useState(() => {
+    try { return localStorage.getItem("taskspace-active-pane-v1"); } catch { return null; }
+  });
+  const activePane = panes.find((p) => p.id === activePaneId) || panes[0];
+  const visiblePanes = panes.filter((p) => p.group === activePane.group);
+  const [showPaneAdd, setShowPaneAdd] = useState(false);
+  const paneAddRef = useRef(null);
+  useEffect(() => {
+    if (!showPaneAdd) return;
+    const dismiss = (event) => {
+      if (event.type === "keydown" ? event.key === "Escape" : !paneAddRef.current?.contains(event.target)) setShowPaneAdd(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", dismiss);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", dismiss);
+    };
+  }, [showPaneAdd]);
+  function activatePane(id) {
+    setActivePaneId(id);
+    try { localStorage.setItem("taskspace-active-pane-v1", id); } catch { /* noop */ }
+  }
   const rememberPanes = (next) => {
     try { localStorage.setItem(PANES_KEY, JSON.stringify(next)); } catch { /* noop */ }
     return next;
   };
-  function addPane() {
+  function addPane(split) {
+    if (panes.length >= MAX_PANES) return;
+    const id = `pane-${uid()}`;
     setPanes((prev) => {
       if (prev.length >= MAX_PANES) return prev;
-      // 増やした枠は、いま開いている最後の枠と同じ中身で始める。
-      // ただしタスクは1枠だけなので、その場合はアウトラインにする。
-      const last = prev[prev.length - 1]?.mode || "tasks";
+      // 作業中の種類を引き継ぐ。taskからはすぐメモを書けるoutlinerを開く。
+      const last = activePane.mode;
       const mode = last === "tasks" && prev.some((p) => p.mode === "tasks") ? "outline" : last;
-      // 増やしたら、いったん均等に分け直す
-      return rememberPanes([...prev, { id: `pane-${uid()}`, mode }].map((p) => ({ ...p, weight: 1 })));
+      // 分割するグループだけ均等にし、別タブの取り分は変えない。
+      return rememberPanes([...prev, { id, mode, group: split ? activePane.group : id, weight: 1 }].map((p) => split && p.group === activePane.group ? { ...p, weight: 1 } : p));
     });
+    activatePane(id);
+    setShowPaneAdd(false);
   }
   function closePane(id) {
+    if (panes.length <= 1) return;
+    const closing = panes.find((p) => p.id === id);
+    if (id === activePane.id) {
+      const remaining = panes.filter((p) => p.id !== id);
+      const next = remaining.find((p) => p.group === activePane.group) || remaining[Math.max(0, panes.findIndex((p) => p.id === id) - 1)];
+      activatePane(next.id);
+    }
     setPanes((prev) => (prev.length <= 1
       ? prev
-      : rememberPanes(prev.filter((p) => p.id !== id).map((p) => ({ ...p, weight: 1 })))));
+      : rememberPanes(prev.filter((p) => p.id !== id).map((p) => p.group === closing?.group ? { ...p, weight: 1 } : p))));
   }
   // 枠と枠のあいだをつまんで、取り分を付け替える。
   // 横に並んでいるときは左右、縦に積んでいるときは上下。
@@ -3226,15 +3260,15 @@ function App() {
     const upright = getComputedStyle(row).flexDirection.startsWith("column");
     const total = upright ? box.height : box.width;
     const from = upright ? e.clientY : e.clientX;
-    const base = panes.map((p) => p.weight ?? 1);
+    const base = visiblePanes.map((p) => p.weight ?? 1);
     const sum = base[index - 1] + base[index];
     const move = (ev) => {
       // 動かした距離を、2つの枠が分け合っている取り分に換算する
-      const share = (((upright ? ev.clientY : ev.clientX) - from) / total) * panes.length;
+      const share = (((upright ? ev.clientY : ev.clientX) - from) / total) * visiblePanes.length;
       const left = Math.max(0.25, Math.min(sum - 0.25, base[index - 1] + share));
-      setPanes((prev) => prev.map((p, i) => {
-        if (i === index - 1) return { ...p, weight: left };
-        if (i === index) return { ...p, weight: sum - left };
+      setPanes((prev) => prev.map((p) => {
+        if (p.id === visiblePanes[index - 1].id) return { ...p, weight: left };
+        if (p.id === visiblePanes[index].id) return { ...p, weight: sum - left };
         return p;
       }));
     };
@@ -3247,11 +3281,12 @@ function App() {
     window.addEventListener("pointerup", up);
   }
   function evenPanes() {
-    setPanes((prev) => rememberPanes(prev.map((p) => ({ ...p, weight: 1 }))));
+    setPanes((prev) => rememberPanes(prev.map((p) => p.group === activePane.group ? { ...p, weight: 1 } : p)));
   }
 
   function setPaneMode(id, mode) {
     setPanes((prev) => rememberPanes(prev.map((p) => (p.id === id ? { ...p, mode } : p))));
+    activatePane(id);
   }
 
   const [typeEditor, setTypeEditor] = useState(false);
@@ -3695,17 +3730,23 @@ function App() {
           {/* 枠（ペイン）。1つなら全画面、増やすと横に並べて分け合う。 */}
           <div data-panes-bar aria-label="表示する枠" className="flex max-w-full flex-wrap items-end gap-1 border-b border-white/15 px-1 pt-1">
             {panes.map((pane) => (
-              <div key={pane.id} data-pane-chip={pane.id} className="ts-pane-tab flex min-w-0 items-center gap-1 rounded-t-lg border px-1.5">
+              <div key={pane.id} data-pane-chip={pane.id} data-pane-visible={pane.group === activePane.group ? "true" : "false"} className="ts-pane-tab flex min-w-0 items-center rounded-t-lg border px-1">
+                <button data-pane-tab={pane.id} type="button" aria-pressed={pane.group === activePane.group} onClick={() => activatePane(pane.id)} className="min-h-9 rounded-t-md px-2 text-xs">
+                  {pane.mode === "tasks" ? "task" : "outliner"}
+                </button>
+                <div className="relative flex h-9 w-6 items-center justify-center [@media(pointer:coarse)]:h-10 [@media(pointer:coarse)]:w-8">
+                  <span aria-hidden="true" className="px-1 text-xs text-neutral-500">⌄</span>
                 <select
                   data-pane-mode={pane.id}
                   value={pane.mode}
                   onChange={(e) => setPaneMode(pane.id, e.target.value)}
                   aria-label="枠の種類"
-                  className="min-h-9 rounded-t-md bg-transparent px-2 py-1.5 text-xs ts-text focus-visible:outline focus-visible:outline-1 [&>option]:bg-neutral-900"
+                  className="absolute inset-0 h-full w-full opacity-0"
                 >
-                  <option value="tasks">タスク</option>
-                  <option value="outline">アウトライン</option>
+                  <option value="tasks">task</option>
+                  <option value="outline">outliner</option>
                 </select>
+                </div>
                 {panes.length > 1 && (
                   <button
                     data-pane-close={pane.id}
@@ -3719,16 +3760,25 @@ function App() {
                 )}
               </div>
             ))}
+            <div ref={paneAddRef}>
             <button
               data-pane-add
-              onClick={addPane}
+              onClick={() => setShowPaneAdd((value) => !value)}
               disabled={panes.length >= MAX_PANES}
-              title="枠を増やす（横に並びます）"
+              title="タブか分割を追加"
+              aria-expanded={showPaneAdd}
               aria-label="枠を追加"
               className="mb-1 flex h-8 w-8 items-center justify-center rounded-md text-neutral-500 transition hover:bg-white/[0.07] hover:text-neutral-200 disabled:opacity-30"
             >
               ＋
             </button>
+            {showPaneAdd && (
+              <div data-pane-add-menu className="absolute left-0 top-full z-50 mt-1 w-44 rounded-lg border border-white/15 ts-surface p-1 shadow-xl">
+                <button data-pane-add-tab type="button" onClick={() => addPane(false)} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">タブで開く</button>
+                <button data-pane-add-split type="button" onClick={() => addPane(true)} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">画面を分割する</button>
+              </div>
+            )}
+            </div>
           </div>
 
           <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
@@ -4106,16 +4156,18 @@ function App() {
           className={classNames(
             // 残りの高さをぜんぶ使い、はみ出しは枠の中で見る
             "flex min-h-0 flex-1 flex-col gap-2",
-            panes.length > 1 && "lg:flex-row lg:items-stretch",
+            visiblePanes.length > 1 && "lg:flex-row lg:items-stretch",
           )}
         >
-          {panes.map((pane, i) => {
+          {panes.map((pane) => {
+            const i = visiblePanes.findIndex((p) => p.id === pane.id);
+            const visible = i >= 0;
             // タスク画面は1つの枠にだけ出せる（同じものを2枚描くと、
             // ドラッグの行き先が重なって動かなくなるため）
-            const dupTask = pane.mode === "tasks" && panes.findIndex((p) => p.mode === "tasks") !== i;
+            const dupTask = pane.mode === "tasks" && visiblePanes.findIndex((p) => p.mode === "tasks") !== i;
             return (
               <React.Fragment key={pane.id}>
-                {i > 0 && panes.length > 1 && (
+                {visible && i > 0 && visiblePanes.length > 1 && (
                   // 枠と枠のあいだのつまみ。狭い画面では縦に積むので出さない。
                   <div
                     data-pane-handle={i}
@@ -4134,14 +4186,14 @@ function App() {
                 <div
                   data-pane={pane.mode}
                   data-pane-id={pane.id}
-                  style={panes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
+                  style={!visible ? { display: "none" } : visiblePanes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
                   className={classNames(
                     // 枠ごとに転がす。隣や画面ぜんたいを巻き込まない。
                     "ts-pane min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain",
-                    panes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
+                    visiblePanes.length > 1 && "rounded-lg border border-white/[0.07] p-1",
                   )}
                 >
-                  {dupTask ? (
+                  {pane.mode === "tasks" && !visible ? null : dupTask ? (
                     <div data-pane-dup className="p-4 text-[11px] leading-relaxed text-neutral-600">
                       タスクは1つの枠にだけ出せます。この枠はアウトラインに切り替えてください。
                     </div>
@@ -4152,7 +4204,7 @@ function App() {
           })}
         </div>
 
-        {panes.some((p) => p.mode === "tasks") && <MarqueeSelect onSelect={handleMarqueeSelect} />}
+        {visiblePanes.some((p) => p.mode === "tasks") && <MarqueeSelect onSelect={handleMarqueeSelect} />}
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
