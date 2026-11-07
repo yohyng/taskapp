@@ -63,7 +63,7 @@ export function tidyName(file, hint = "", at = new Date()) {
   return [stamp, label, tail].filter(Boolean).join("_") + `.${ext}`;
 }
 
-export async function uploadToDrive(file, setting = readDriveSetting(), about = {}) {
+export async function uploadToDrive(file, setting = readDriveSetting(), about = {}, { signal } = {}) {
   if (!setting.url) throw new Error("置き場が決まっていません（設定で GAS の URL を入れてください）");
   const at = new Date();
   const payload = {
@@ -76,7 +76,7 @@ export async function uploadToDrive(file, setting = readDriveSetting(), about = 
     note: [about.hint, about.where].filter(Boolean).join(" / ").slice(0, 300),
     dataBase64: await toBase64(file),
   };
-  const res = await fetch(setting.url, { method: "POST", body: JSON.stringify(payload) });
+  const res = await fetch(setting.url, { method: "POST", body: JSON.stringify(payload), ...(signal ? { signal } : {}) });
   if (!res.ok) throw new Error(`置き場が答えません（${res.status}）`);
   const got = await res.json().catch(() => { throw new Error("置き場の返事を読めませんでした"); });
   if (got.error) throw new Error(got.error);

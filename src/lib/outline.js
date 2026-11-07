@@ -727,8 +727,9 @@ export function mergeOutline(localNodes, remoteNodes, deletedIds = new Set(), kn
 
 // その日のメモを足す。日付の行が無ければ作って、いちばん上に置く
 // （新しい日が手元に来るように）。中では後ろに足していく。
-export function addMemoUnderDate(nodes, dateLabel, text) {
-  const made = makeNode(text);
+export function addMemoUnderDate(nodes, dateLabel, text, image = null) {
+  const made = makeNode(text || image || "");
+  if (text && image) made.children = [makeNode(image)];
   const at = nodes.findIndex((n) => String(n.text || "").trim() === dateLabel);
   if (at >= 0) {
     const next = clone(nodes);
