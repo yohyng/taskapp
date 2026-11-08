@@ -3889,7 +3889,7 @@ function App() {
               className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-accent-400/40 bg-accent-500/15 px-3 py-1.5 text-xs font-medium text-accent-300 transition hover:bg-accent-500/25 sm:flex-none"
             >
               <NotebookPen className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">ノート</span>
+              <span className="truncate">note</span>
             </button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
@@ -4503,7 +4503,7 @@ function App() {
                       : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
                   )}
                 >
-                  タスクに追加
+                  add task
                 </button>
                 <button
                   type="button"
@@ -4517,11 +4517,11 @@ function App() {
                       : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
                   )}
                 >
-                  メモに追加
+                  add memo
                 </button>
               </div>
               <div className={classNames("mb-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
-                {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
+                {[["today", toDateKey(new Date())], ["tomorrow", toDateKey(new Date(Date.now() + 86400000))], ["no date", "none"]].map(([label, value]) => (
                   <button
                     key={label}
                     type="button"

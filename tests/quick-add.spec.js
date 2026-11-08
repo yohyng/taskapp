@@ -39,7 +39,7 @@ test.describe("タスク追加のポップアップ", () => {
 
   test("「日付なし」を選ぶと TRAY に入る", async ({ page }) => {
     await open(page);
-    await dialog(page).getByRole("button", { name: "日付なし" }).click();
+    await dialog(page).getByRole("button", { name: "no date" }).click();
     await dialog(page).locator("textarea").fill("いつかやる");
     await dialog(page).locator("[data-add-task]").click();
     await expect.poll(async () => (await titled(page, "いつかやる"))?.scheduledDate).toBe("");
@@ -210,8 +210,8 @@ test.describe("メモに書きとめる", () => {
     return Array.isArray(saved) ? saved : saved.nodes;
   });
 
-  test("ヘッダーのボタンは「ノート」", async ({ page }) => {
-    await expect(page.locator("[data-quick-add]")).toContainText("ノート");
+  test("ヘッダーのボタンは「note」", async ({ page }) => {
+    await expect(page.locator("[data-quick-add]")).toContainText("note");
   });
 
   test("メモに追加すると、今日の日付の下に入る", async ({ page }) => {
