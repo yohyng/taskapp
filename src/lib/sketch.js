@@ -6,7 +6,7 @@ export function readSketchDraft(key = SKETCH_DRAFT_KEY) {
   try {
     const strokes = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && (stroke.pressureStyle === undefined || stroke.pressureStyle === "light") && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && (stroke.pressureStyle === undefined || ["light", "core"].includes(stroke.pressureStyle)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
 }
 
@@ -21,7 +21,11 @@ export function appendSketch(canvas, stroke, from = 0) {
   const size = (a, b = a) => {
     const pressure = ((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2;
     // 軽い筆圧を拾いつつ、弱く入れた線と強く入れた線の差を広げる。線ごとに設定を残す。
-    return stroke.width * scale * (!stroke.pressure ? 1 : stroke.pressureStyle === "light" ? 0.32 + 1.8 * Math.sqrt(pressure) : 0.55 + 0.9 * pressure);
+    if (!stroke.pressure) return stroke.width * scale;
+    const response = stroke.pressureStyle === "core"
+      ? 1.1 + 0.25 * (1 - Math.exp(-pressure / 0.06)) + 0.35 * Math.pow(Math.max(0, (pressure - 0.55) / 0.45), 1.2)
+      : stroke.pressureStyle === "light" ? 0.32 + 1.8 * Math.sqrt(pressure) : 0.55 + 0.9 * pressure;
+    return stroke.width * scale * response;
   };
   if (from === 0 && stroke.points.length) {
     const a = stroke.points[0];

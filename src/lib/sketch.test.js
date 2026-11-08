@@ -51,4 +51,19 @@ describe('ペンの線と下書き', () => {
     expect(widths.at(-1)).toBeGreaterThan(previous.at(-1));
   });
 
+  it('芯のあるペンは軽い力でも細くなりすぎず、普段の筆圧では太さを安定させる', () => {
+    const widths = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo() {}, stroke() { widths.push(this.lineWidth); } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (pressure, pressureStyle) => ({ color: '#202020', width: 3, pressure: true, pressureStyle, points: [[0.1, 0.1, pressure], [0.2, 0.2, pressure]] });
+    const strokes = [line(0.02, 'core'), line(0.15, 'core'), line(0.5, 'core'), line(0.95, 'core'), line(0.02, 'light')];
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(strokes) });
+    paintSketch(canvas, readSketchDraft());
+    expect(widths).toHaveLength(5);
+    expect(widths[0]).toBeGreaterThan(3);
+    expect(widths[0]).toBeGreaterThan(widths[4] * 1.8);
+    expect(widths[2] / widths[1]).toBeLessThan(1.03);
+    expect(widths[3]).toBeGreaterThan(widths[2]);
+    expect(widths[3] / widths[2]).toBeLessThan(1.3);
+  });
+
 });

@@ -16,7 +16,7 @@ export default function PenLab() {
   }
   return <main className="mx-auto max-w-2xl p-4 ts-text">
     <h1 className="mb-2 text-lg font-semibold">fragments 書き味の比較</h1>
-    <p className="mb-4 text-sm text-neutral-300">同じ文字や丸を、2つのペンで書き比べてみてください。このページは同期せず、本番のメモには追加しません。</p>
+    <p className="mb-4 text-sm text-neutral-300">ペンを切り替えて、同じ文字や丸を書き比べてみてください。このページは同期せず、本番のメモには追加しません。</p>
     <SketchPad experimental strokes={strokes} onChange={setStrokes} />
     <div className="mt-4 flex flex-wrap gap-2 text-sm">
       <button data-pen-lab-save onClick={() => { try { localStorage.setItem(KEY, JSON.stringify(strokes)); setMessage("この端末に下書きを保存しました"); } catch { setMessage("下書きを保存できませんでした"); } }} className="rounded border border-white/20 px-3 py-2">下書きを残す</button>

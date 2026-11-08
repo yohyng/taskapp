@@ -6,7 +6,7 @@ export function filterSketchPoint(state, raw, time) {
   const elapsed = Math.max(1, Math.min(32, Number.isFinite(time - state.time) ? time - state.time : 8));
   const distance = Math.hypot((raw[0] - state.raw[0]) * state.width, (raw[1] - state.raw[1]) * state.height);
   const speed = distance / elapsed;
-  const light = state.feel === "light";
+  const light = ["light", "core"].includes(state.feel);
   const response = (light ? 4 : 14) / (1 + speed / (light ? 0.15 : 0.3));
   const amount = 1 - Math.exp(-elapsed / response);
   const next = raw.map((value, index) => index < 2 ? state.point[index] + (value - state.point[index]) * amount : value);
