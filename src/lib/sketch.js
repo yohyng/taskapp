@@ -2,9 +2,9 @@ export const SKETCH_WIDTH = 600;
 export const SKETCH_HEIGHT = 360;
 export const SKETCH_DRAFT_KEY = "taskspace-quick-sketch-v1";
 
-export function readSketchDraft() {
+export function readSketchDraft(key = SKETCH_DRAFT_KEY) {
   try {
-    const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
+    const strokes = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(strokes)) return [];
     return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }

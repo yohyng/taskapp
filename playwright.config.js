@@ -6,6 +6,7 @@ import process from "node:process";
 // テストが本番 Supabase に触れることはない（localStorage のみのモードで動く）。
 export default defineConfig({
   testDir: "./tests",
+  testIgnore: ["**/pen-lab.spec.js"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

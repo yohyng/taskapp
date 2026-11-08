@@ -41,3 +41,9 @@ test('本番配信：有効化した共通原本と本番ブランチ・公開�
   }
   assert.equal(vercelBuildPlan(preview, release).staging, true);
 });
+
+
+test('書き味の検証配信：専用Previewは同期なしの手書きページだけを生成する', () => {
+  const plan = vercelBuildPlan({ ...preview, VERCEL_GIT_COMMIT_REF: 'codex/pen-feel-preview' });
+  assert.deepEqual(plan, { staging: false, viteArgs: ['build', '--mode', 'pen-preview'] });
+});

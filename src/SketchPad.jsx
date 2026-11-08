@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
 
+import { createSketchFilter, filterSketchPoint } from "./lib/sketch-feel";
+
 const COLORS = [{ name: "黒", color: "#202020" }, { name: "青", color: "#2563eb" }, { name: "赤", color: "#dc2626" }, { name: "緑", color: "#15803d" }];
 const HEIGHT_KEY = "taskspace-sketch-ratio";
 function savedRatio() {
@@ -10,7 +12,7 @@ function preference(key) {
   try { return localStorage.getItem(key) === "true"; } catch { return false; }
 }
 
-export default function SketchPad({ strokes, onChange, disabled }) {
+export default function SketchPad({ strokes, onChange, disabled, experimental = false }) {
   const canvasRef = useRef(null), drawingRef = useRef(null);
   const resizeRef = useRef(null);
   const [ratio, setRatio] = useState(() => strokes.reduce((maximum, stroke) => Math.max(maximum, (stroke.height || SKETCH_HEIGHT) / SKETCH_WIDTH), savedRatio()));
@@ -20,8 +22,34 @@ export default function SketchPad({ strokes, onChange, disabled }) {
   const [width, setWidth] = useState(3);
   const [cleared, setCleared] = useState(null);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
+  const [feel, setFeel] = useState(() => { try { return localStorage.getItem("taskspace-sketch-feel") === "soft" ? "soft" : "raw"; } catch { return "raw"; } });
+  const [lowLatency, setLowLatency] = useState(false);
+  const [contextVersion, setContextVersion] = useState(0);
+  const [measuring, setMeasuring] = useState(false);
+  const [frequency, setFrequency] = useState(null);
+  const [latencySupported, setLatencySupported] = useState(false);
+  useEffect(() => {
+    const ctx = canvasRef.current.getContext("2d", experimental ? { desynchronized: lowLatency, alpha: false } : undefined);
+    setLatencySupported(!!ctx.getContextAttributes?.().desynchronized);
+    paintSketch(canvasRef.current, strokes);
+  }, [contextVersion, experimental, lowLatency, strokes, pixelHeight]);
+  useEffect(() => {
+    if (!measuring) return;
+    let frame, previous, started, gaps = [];
+    const tick = (time) => {
+      if (previous !== undefined && time - previous > 0 && time - previous < 100) gaps.push(time - previous);
+      previous = time; started ??= time;
+      if (time - started >= 1000) {
+        gaps.sort((a, b) => a - b);
+        setFrequency(gaps.length >= 20 ? Math.round(1000 / gaps[Math.floor(gaps.length / 2)]) : null);
+        gaps = []; started = time;
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [measuring]);
   const [pressure, setPressure] = useState(() => preference("taskspace-sketch-pressure"));
-  useEffect(() => { paintSketch(canvasRef.current, strokes); }, [strokes, pixelHeight]);
   function finishResize(event) {
     const resize = resizeRef.current;
     if (!resize || resize.id !== event.pointerId) return;
@@ -44,7 +72,11 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       try { samples = native.getCoalescedEvents?.() || []; } catch { /* 未対応なら通常の座標を使う */ }
     }
     for (const sample of [...samples, native]) {
-      const p = point(sample, rect, stroke.pressure, final), last = stroke.points.at(-1);
+      const raw = point(sample, rect, stroke.pressure, final);
+      if (!final && drawing.sample && sample.timeStamp <= drawing.sample.time && raw[0] === drawing.sample.point[0] && raw[1] === drawing.sample.point[1]) continue;
+      drawing.sample = { point: raw, time: sample.timeStamp };
+      const p = drawing.filter && !final ? filterSketchPoint(drawing.filter, raw, sample.timeStamp) : raw;
+      const last = stroke.points.at(-1);
       if (p[0] !== last[0] || p[1] !== last[1]) stroke.points.push(p);
     }
     appendSketch(canvasRef.current, stroke, from);
@@ -69,14 +101,27 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pen-only type="checkbox" checked={penOnly} disabled={disabled} onChange={(event) => { setPenOnly(event.target.checked); try { localStorage.setItem("taskspace-sketch-pen-only", String(event.target.checked)); } catch { /* この画面では使える */ } }} />ペン専用</label>
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
-    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: `${SKETCH_WIDTH * 2} / ${pixelHeight}` }}
+    {experimental && <div className="mb-2 space-y-2 text-xs text-neutral-300">
+      <label className="flex items-center gap-2">書き味<select data-sketch-feel aria-label="書き味" value={feel} disabled={disabled} onChange={(event) => { if (drawingRef.current) return; setFeel(event.target.value); try { localStorage.setItem("taskspace-sketch-feel", event.target.value); } catch { /* この画面では試せる */ } }} className="h-9 rounded border border-white/15 ts-surface px-2"><option value="raw">現在のペン</option><option value="soft">少し粘るペン</option></select></label>
+      <details data-sketch-diagnostics onToggle={(event) => { setMeasuring(event.currentTarget.open); setFrequency(null); }}>
+        <summary className="cursor-pointer py-2">描画の動作を確認</summary>
+        <div className="space-y-2 py-2">
+          <label className="flex min-h-9 items-center gap-2"><input data-sketch-low-latency type="checkbox" checked={lowLatency} disabled={disabled} onChange={(event) => { if (drawingRef.current || resizeRef.current) return; setLowLatency(event.target.checked); setContextVersion((value) => value + 1); }} />低遅延の描画を試す</label>
+          <div data-sketch-latency-status>{lowLatency ? latencySupported ? "低遅延の描画：ブラウザーが受け付けました" : "低遅延の描画：通常方式で動作中" : "通常の描画"}</div>
+          <div data-sketch-frequency>画面更新の目安：{frequency === null ? "計測中…" : `約${frequency}Hz`}</div>
+          <p className="text-[11px] text-neutral-500">表示更新の機会を測っています。線の描画頻度や、ペン先から表示までの遅延を示す数値ではありません。</p>
+        </div>
+      </details>
+    </div>}
+    <canvas key={contextVersion} ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: `${SKETCH_WIDTH * 2} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         if (disabled || drawingRef.current || resizeRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
         const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen };
+        const rect = event.currentTarget.getBoundingClientRect();
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel === "soft" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height) : null };
         appendSketch(canvasRef.current, stroke);
       }}
       onPointerMove={(event) => {
