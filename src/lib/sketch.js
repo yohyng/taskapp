@@ -6,7 +6,7 @@ export function readSketchDraft() {
   try {
     const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
 }
 
@@ -14,21 +14,23 @@ export function readSketchDraft() {
 export function appendSketch(canvas, stroke, from = 0) {
   const ctx = canvas.getContext("2d");
   const scale = canvas.width / SKETCH_WIDTH;
+  // 縦に紙を足しても、それまでの線を引き伸ばさない。
+  const height = (stroke.height || SKETCH_HEIGHT) * scale;
   ctx.lineCap = ctx.lineJoin = "round";
   ctx.strokeStyle = ctx.fillStyle = stroke.color;
   const size = (a, b = a) => stroke.width * scale * (stroke.pressure ? 0.55 + 0.9 * (((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2) : 1);
   if (from === 0 && stroke.points.length) {
     const a = stroke.points[0];
     ctx.beginPath();
-    ctx.arc(a[0] * canvas.width, a[1] * canvas.height, size(a) / 2, 0, 2 * Math.PI);
+    ctx.arc(a[0] * canvas.width, a[1] * height, size(a) / 2, 0, 2 * Math.PI);
     ctx.fill();
   }
   for (let i = Math.max(1, from); i < stroke.points.length; i++) {
     const a = stroke.points[i - 1], b = stroke.points[i];
     ctx.lineWidth = size(a, b);
     ctx.beginPath();
-    ctx.moveTo(a[0] * canvas.width, a[1] * canvas.height);
-    ctx.lineTo(b[0] * canvas.width, b[1] * canvas.height);
+    ctx.moveTo(a[0] * canvas.width, a[1] * height);
+    ctx.lineTo(b[0] * canvas.width, b[1] * height);
     ctx.stroke();
   }
 }
@@ -43,7 +45,7 @@ export function paintSketch(canvas, strokes) {
 export async function sketchFile(strokes) {
   const canvas = document.createElement("canvas");
   canvas.width = SKETCH_WIDTH * 2;
-  canvas.height = SKETCH_HEIGHT * 2;
+  canvas.height = Math.ceil(strokes.reduce((height, stroke) => Math.max(height, stroke.height || SKETCH_HEIGHT), SKETCH_HEIGHT) * 2);
   paintSketch(canvas, strokes);
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("画像を作れませんでした");

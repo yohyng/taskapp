@@ -82,3 +82,39 @@ test('手書き：転送中に閉じたら追加せず、描いた下書きを�
   await expect(page.locator('[data-sketch-status]')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('taskspace-outline-v1'))).not.toContain('canceled.png');
 });
+
+
+test('手書き：下へ広げても線を伸ばさず、広げた場所も復元・画像化できる', async ({ page }) => {
+  await draw(page);
+  const canvas = page.locator('[data-sketch-canvas]');
+  const inkBottom = () => canvas.evaluate((el) => {
+    const pixels = el.getContext('2d').getImageData(0, 0, el.width, el.height).data;
+    for (let y = el.height - 1; y >= 0; y--) for (let x = 0; x < el.width; x++) if (pixels[(y * el.width + x) * 4] < 200) return y;
+    return -1;
+  });
+  const before = await canvas.boundingBox(), ink = await inkBottom();
+  const grip = page.locator('[data-sketch-resize]');
+  await grip.scrollIntoViewIfNeeded();
+  const box = await grip.boundingBox();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 120, { steps: 8 });
+  await page.mouse.up();
+  expect((await canvas.boundingBox()).height).toBeGreaterThan(before.height + 100);
+  expect(await inkBottom()).toBe(ink);
+  await draw(page);
+  const fullHeight = await canvas.getAttribute('height');
+  expect(await inkBottom()).toBeGreaterThan(Number(fullHeight) * 0.6);
+  await page.reload(); await page.locator('[data-quick-add]').click();
+  await expect(canvas).toHaveAttribute('height', fullHeight);
+  expect(await inkBottom()).toBeGreaterThan(Number(fullHeight) * 0.6);
+  await page.evaluate(() => localStorage.setItem('taskspace-drive-url', 'https://sketch.invalid/upload'));
+  let imageHeight;
+  await page.route('https://sketch.invalid/upload', async (route) => {
+    const png = Buffer.from(route.request().postDataJSON().dataBase64, 'base64');
+    imageHeight = png.readUInt32BE(20);
+    await route.fulfill({ json: { url: 'https://sketch.invalid/resized.png' } });
+  });
+  await page.locator('[data-add-memo]').click();
+  await expect.poll(() => imageHeight).toBe(Number(fullHeight));
+});
