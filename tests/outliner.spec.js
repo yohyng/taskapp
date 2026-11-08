@@ -611,6 +611,23 @@ test.describe("まとめて選ぶ", () => {
   const pickedIds = (page) => page.evaluate(() =>
     [...document.querySelectorAll("[data-picked]")].map((e) => e.getAttribute("data-row")));
 
+  test("選択バーは範囲のすぐ下に付き、低い画面でも収まる", async ({ page }) => {
+    await text(page, "a").click();
+    await text(page, "c").click({ modifiers: ["Shift"] });
+    const bar = page.locator("[data-pick-bar]");
+    await expect(bar).toBeVisible();
+    await expect.poll(async () => {
+      const row = await page.locator('[data-row="c"]').boundingBox();
+      const box = await bar.boundingBox();
+      return Math.round(box.y - row.y - row.height);
+    }).toBe(10);
+    await page.setViewportSize({ width: 800, height: 350 });
+    await expect.poll(async () => {
+      const box = await bar.boundingBox();
+      return box.y + box.height;
+    }).toBeLessThanOrEqual(342);
+  });
+
   test("Shift+クリックで、あいだをまとめて選ぶ", async ({ page }) => {
     await text(page, "a").click();
     await text(page, "c").click({ modifiers: ["Shift"] });
@@ -619,8 +636,10 @@ test.describe("まとめて選ぶ", () => {
   });
 
   test("⌘クリックで、飛び飛びに選ぶ", async ({ page }) => {
-    await text(page, "a").click({ modifiers: ["ControlOrMeta"] });
-    await text(page, "c").click({ modifiers: ["ControlOrMeta"] });
+    await page.keyboard.down("ControlOrMeta");
+    await text(page, "a").click();
+    await text(page, "c").click();
+    await page.keyboard.up("ControlOrMeta");
     expect(await pickedIds(page)).toEqual(["a", "c"]);
   });
 

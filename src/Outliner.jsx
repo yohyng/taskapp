@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2, Settings2 } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
@@ -1125,6 +1125,26 @@ export default function Outliner() {
   const searchRef = useRef(null);
   const fileRef = useRef(null);
   const listRef = useRef(null);
+  const pickBarRef = useRef(null);
+  const pickModifiersRef = useRef(false);
+  useEffect(() => {
+    // キーを押したまま選択を増やしても、その下の行をバーが覆わないようにする。
+    const modifiers = (event) => {
+      pickModifiersRef.current = !!(event.shiftKey || event.ctrlKey || event.metaKey);
+      if (pickBarRef.current) pickBarRef.current.style.pointerEvents = pickModifiersRef.current ? "none" : "";
+    };
+    const reset = () => modifiers({});
+    window.addEventListener("keydown", modifiers);
+    window.addEventListener("keyup", modifiers);
+    window.addEventListener("blur", reset);
+    return () => {
+      window.removeEventListener("keydown", modifiers);
+      window.removeEventListener("keyup", modifiers);
+      window.removeEventListener("blur", reset);
+    };
+  }, []);
+  const [pickBarPosition, setPickBarPosition] = useState(null);
+  const [pickBarSpace, setPickBarSpace] = useState(56);
   // 掴んでいるあいだの様子。落ちる場所は線で見せる。
   const dragRef = useRef(null);
   const [drag, setDrag] = useState(null);   // { id, top, depth }
@@ -1393,6 +1413,52 @@ export default function Outliner() {
 
   const allTags = useMemo(() => collectAllTags(nodes), [nodes]);
   const pickedSet = useMemo(() => new Set(picked), [picked]);
+  const lastPicked = useMemo(() => rows.filter(({ node }) => pickedSet.has(node.id)).at(-1)?.node.id, [rows, pickedSet]);
+  // 選んだ行から離れず操作できるようにし、スクロールや枠の分割にも追従する。
+  useLayoutEffect(() => {
+    if (!picked.length) return;
+    const list = listRef.current;
+    const bar = pickBarRef.current;
+    if (!list || !bar) return;
+    const pane = list.closest("[data-pane-id]") || list.parentElement;
+    let frame;
+    const place = () => {
+      const rows = [...list.querySelectorAll('[data-picked="true"]')];
+      if (!rows.length) { setPickBarPosition(null); return; }
+      const bounds = rows.map((row) => row.getBoundingClientRect());
+      const panel = pane.getBoundingClientRect();
+      const viewport = window.visualViewport;
+      const leftEdge = Math.max(panel.left, viewport?.offsetLeft || 0) + 8;
+      const rightEdge = Math.min(panel.right, (viewport?.offsetLeft || 0) + (viewport?.width || window.innerWidth)) - 8;
+      const topEdge = Math.max(panel.top, viewport?.offsetTop || 0) + 8;
+      const bottomEdge = Math.min(panel.bottom, (viewport?.offsetTop || 0) + (viewport?.height || window.innerHeight)) - 8;
+      const width = Math.max(0, Math.min(460, rightEdge - leftEdge));
+      bar.style.width = `${width}px`;
+      bar.style.pointerEvents = pickModifiersRef.current ? "none" : "";
+      const height = bar.getBoundingClientRect().height;
+      setPickBarSpace(height + 20);
+      const bottom = Math.max(...bounds.map((rect) => rect.bottom));
+      const top = Math.min(...bounds.map((rect) => rect.top));
+      const left = Math.max(leftEdge, Math.min(Math.min(...bounds.map((rect) => rect.left)), rightEdge - width));
+      const next = { left, top: Math.max(topEdge, Math.min(bottom + 10, bottomEdge - height)), width, visibility: bottom < topEdge || top > bottomEdge ? "hidden" : "visible" };
+      setPickBarPosition((previous) => previous && Object.keys(next).every((key) => previous[key] === next[key]) ? previous : next);
+    };
+    const schedule = () => { cancelAnimationFrame(frame); frame = requestAnimationFrame(place); };
+    place();
+    const observer = new ResizeObserver(schedule);
+    observer.observe(list); observer.observe(pane); observer.observe(bar);
+    window.addEventListener("scroll", schedule, true);
+    window.addEventListener("resize", schedule);
+    window.visualViewport?.addEventListener("resize", schedule);
+    window.visualViewport?.addEventListener("scroll", schedule);
+    return () => {
+      cancelAnimationFrame(frame); observer.disconnect();
+      window.removeEventListener("scroll", schedule, true);
+      window.removeEventListener("resize", schedule);
+      window.visualViewport?.removeEventListener("resize", schedule);
+      window.visualViewport?.removeEventListener("scroll", schedule);
+    };
+  }, [picked, nodes, query, zoomId, dateView]);
   function clearPick() { setPicked([]); anchorRef.current = null; }
 
   // Shift+クリックで、起点からここまでをまとめて選ぶ
@@ -2413,6 +2479,8 @@ alter table outline_nodes disable row level security;
               data-picked={pickedSet.has(node.id) ? "true" : undefined}
               data-heading={node.headingLevel || ""}
               style={{
+                // 選択を終えてからバーの居場所を空け、次の行の編集を妨げない。
+                marginBottom: !band && node.id === lastPicked ? pickBarSpace : undefined,
                 paddingLeft: depth * INDENT + 4,
                 background: node.bgColor || undefined,
                 // 親のところに縦線を引く（WorkFlowy と同じ見え方）
@@ -2750,7 +2818,9 @@ alter table outline_nodes disable row level security;
       {picked.length > 0 && (
         <div
           data-pick-bar
-          className="sticky bottom-2 z-30 mt-2 flex flex-wrap items-center gap-1 rounded-xl border border-white/15 ts-surface px-2 py-1.5 shadow-2xl"
+          ref={pickBarRef}
+          style={{ ...(pickBarPosition || { visibility: "hidden" }), ...(band ? { visibility: "hidden" } : {}) }}
+          className="fixed z-30 flex flex-wrap items-center gap-1 rounded-xl border border-white/15 ts-surface px-2 py-1.5 shadow-2xl"
         >
           <span className="rounded-full border border-accent-400/30 bg-accent-500/15 px-2 py-0.5 text-[10px] text-accent-100">
             {picked.length}件
