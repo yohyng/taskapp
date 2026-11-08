@@ -116,6 +116,8 @@ test.describe("入力欄の大きさを変える", () => {
     await page.mouse.move(g.x + g.width / 2, g.y - 400, { steps: 8 });
     await page.mouse.up();
 
+    // 背景まで引いて離しても、サイズ変更中のダイアログは閉じない。
+    await expect(dialog(page)).toBeVisible();
     const now = await h(page);
     expect(now).toBeLessThan(96);
     expect(now).toBeGreaterThanOrEqual(72); // 潰れない

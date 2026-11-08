@@ -4479,14 +4479,63 @@ function App() {
               className="max-h-[80dvh] w-full max-w-md overflow-y-auto overscroll-contain rounded-2xl border border-white/20 ts-surface p-4 shadow-[0_18px_50px_-12px_rgba(0,0,0,0.8)]"
             >
               <div className="mb-3 flex items-center justify-between">
-                <span className="text-sm font-semibold ts-text">書きとめる</span>
+                <span className="text-sm font-semibold ts-text">note</span>
                 <button
                   type="button"
                   onClick={closeQuickAdd}
+                  aria-label="閉じる"
                   className="rounded-md border border-white/10 p-1.5 text-neutral-400 transition hover:bg-white/[0.07]"
                 >
                   <X className="h-4 w-4" />
                 </button>
+              </div>
+
+              <div className="mb-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  data-add-task
+                  disabled={sketchSaving || quickAddSketch.length > 0 || !quickAddTitle.trim()}
+                  onClick={() => submitQuickAdd("task")}
+                  className={classNames(
+                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
+                    quickAddKind === "task"
+                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
+                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
+                  )}
+                >
+                  タスクに追加
+                </button>
+                <button
+                  type="button"
+                  data-add-memo
+                  disabled={sketchSaving || (!quickAddTitle.trim() && !quickAddSketch.length)}
+                  onClick={() => submitQuickAdd("memo")}
+                  className={classNames(
+                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
+                    quickAddKind === "memo"
+                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
+                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
+                  )}
+                >
+                  メモに追加
+                </button>
+              </div>
+              <div className={classNames("mb-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
+                {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    onClick={() => setQuickAddWhen(value)}
+                    className={classNames(
+                      "rounded-full border px-3 py-1.5 text-xs transition",
+                      quickAddWhen === value
+                        ? "border-accent-400/50 bg-accent-500/20 text-accent-100"
+                        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
               </div>
 
               <textarea
@@ -4501,8 +4550,8 @@ function App() {
                   // Enter で追加、Shift+Enter で改行
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.form?.requestSubmit(); }
                 }}
-                placeholder="やること（Enter で追加・Shift+Enter で改行）"
-                className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text placeholder-neutral-600 outline-none focus:border-accent-400/50"
+                aria-label="noteの本文"
+                className="w-full resize-none rounded-xl border border-white/15 bg-black/25 px-3 py-2.5 text-base ts-text outline-none focus:border-accent-400/50"
               />
               {/* 下の帯をつかんで、入力欄の高さを変える。指でも動かせるように
                   ブラウザ標準のつまみではなく自前で持つ。 */}
@@ -4512,6 +4561,8 @@ function App() {
                   e.preventDefault();
                   // 後ろの一覧に伝わると、範囲選択やブロックの移動が始まってしまう
                   e.stopPropagation();
+                  // 帯の外まで引いても、指を離したクリックで背景が閉じないようにする。
+                  e.currentTarget.setPointerCapture(e.pointerId);
                   const from = e.clientY;
                   const base = quickAddHeight;
                   const max = Math.max(160, window.innerHeight * 0.6);
@@ -4541,71 +4592,15 @@ function App() {
               </div>
 
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <button type="button" data-quick-add-voice data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={sketchSaving || quickAddVoice.phase === "stopping"} className={classNames("flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
+                <button type="button" data-quick-add-voice aria-label={quickAddVoice.phase === "idle" ? "音声入力" : quickAddVoice.phase === "stopping" ? "音声を確定中" : "音声入力を停止"} title="音声入力" data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={sketchSaving || quickAddVoice.phase === "stopping"} className={classNames("flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
                   {quickAddVoice.phase !== "idle" ? <Square aria-hidden="true" className="h-3.5 w-3.5" /> : <Mic aria-hidden="true" className="h-3.5 w-3.5" />}
-                  {quickAddVoice.phase === "stopping" ? "確定中" : quickAddVoice.phase !== "idle" ? "停止" : "音声入力"}
                 </button>
-                <button type="button" data-quick-add-sketch aria-expanded={sketchOpen} disabled={sketchSaving} onClick={() => setSketchOpen((value) => !value)} className="flex min-h-10 items-center gap-2 rounded-lg border border-white/15 px-3 py-2 text-xs text-neutral-300 hover:bg-white/10"><Pencil aria-hidden="true" className="h-3.5 w-3.5" />手書き{quickAddSketch.length > 0 && "・下書きあり"}</button>
+                <button type="button" data-quick-add-sketch aria-label={quickAddSketch.length > 0 ? "手書き（下書きあり）" : "手書き"} title="手書き" aria-expanded={sketchOpen} aria-pressed={sketchOpen} aria-controls="note-sketch" disabled={sketchSaving} onClick={() => setSketchOpen((value) => !value)} className={classNames("relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50", sketchOpen ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}><Pencil aria-hidden="true" className="h-4 w-4" />{quickAddSketch.length > 0 && <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent-400" />}</button>
                 <span data-quick-add-voice-status role="status" className="min-w-0 flex-1 text-[11px] text-neutral-500">{quickAddVoice.message}</span>
               </div>
-              {sketchOpen && <SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} />}
+              {sketchOpen && <div id="note-sketch"><SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} /></div>}
               {sketchMessage && <div data-sketch-status role="status" className="mt-2 text-xs text-neutral-400">{sketchMessage}</div>}
 
-              <div className={classNames("mt-3 flex-wrap gap-1.5", quickAddKind === "task" ? "flex" : "hidden")}>
-                {[["今日", toDateKey(new Date())], ["明日", toDateKey(new Date(Date.now() + 86400000))], ["日付なし", "none"]].map(([label, value]) => (
-                  <button
-                    key={label}
-                    type="button"
-                    onClick={() => setQuickAddWhen(value)}
-                    className={classNames(
-                      "rounded-full border px-3 py-1.5 text-xs transition",
-                      quickAddWhen === value
-                        ? "border-accent-400/50 bg-accent-500/20 text-accent-100"
-                        : "border-white/10 bg-white/[0.03] text-neutral-400 hover:bg-white/[0.07]",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              <div className="mt-4 flex items-center gap-2">
-                <button
-                  type="button"
-                  data-add-task
-                  disabled={sketchSaving || quickAddSketch.length > 0 || !quickAddTitle.trim()}
-                  onClick={() => submitQuickAdd("task")}
-                  className={classNames(
-                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
-                    quickAddKind === "task"
-                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
-                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
-                  )}
-                >
-                  タスクに追加
-                </button>
-                <button
-                  type="button"
-                  data-add-memo
-                  disabled={sketchSaving || (!quickAddTitle.trim() && !quickAddSketch.length)}
-                  onClick={() => submitQuickAdd("memo")}
-                  className={classNames(
-                    "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
-                    quickAddKind === "memo"
-                      ? "border-accent-400/50 bg-accent-500/25 text-accent-100 hover:bg-accent-500/35"
-                      : "border-accent-400/20 bg-accent-500/10 text-accent-200/70 hover:bg-accent-500/20",
-                  )}
-                >
-                  メモに追加
-                </button>
-                <button
-                  type="button"
-                  onClick={closeQuickAdd}
-                  className="rounded-xl border border-white/10 px-3 py-2.5 text-sm text-neutral-400 transition hover:bg-white/[0.07]"
-                >
-                  閉じる
-                </button>
-              </div>
               <div className="mt-2 text-[10px] leading-relaxed text-neutral-600">
                 {quickAddKind === "memo"
                   ? `メモは アウトライン の「${toDateKey(new Date())}」の下に入ります。`
