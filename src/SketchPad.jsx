@@ -4,6 +4,7 @@ import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sk
 import { createSketchFilter, filterSketchPoint } from "./lib/sketch-feel";
 
 const COLORS = [{ name: "黒", color: "#202020" }, { name: "青", color: "#2563eb" }, { name: "赤", color: "#dc2626" }, { name: "緑", color: "#15803d" }];
+const FEEL_KEY = "taskspace-sketch-feel-v2";
 const HEIGHT_KEY = "taskspace-sketch-ratio";
 function savedRatio() {
   try { const value = Number(localStorage.getItem(HEIGHT_KEY)); return value >= 0.35 && value <= 2 ? value : SKETCH_HEIGHT / SKETCH_WIDTH; } catch { return SKETCH_HEIGHT / SKETCH_WIDTH; }
@@ -22,7 +23,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
   const [width, setWidth] = useState(3);
   const [cleared, setCleared] = useState(null);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
-  const [feel, setFeel] = useState(() => { try { return localStorage.getItem("taskspace-sketch-feel") === "soft" ? "soft" : "raw"; } catch { return "raw"; } });
+  const [feel, setFeel] = useState(() => { try { const saved = localStorage.getItem(FEEL_KEY); return ["raw", "soft", "light"].includes(saved) ? saved : experimental ? "light" : "raw"; } catch { return experimental ? "light" : "raw"; } });
   const [lowLatency, setLowLatency] = useState(false);
   const [contextVersion, setContextVersion] = useState(0);
   const [measuring, setMeasuring] = useState(false);
@@ -49,7 +50,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
   }, [measuring]);
-  const [pressure, setPressure] = useState(() => preference("taskspace-sketch-pressure"));
+  const [pressure, setPressure] = useState(() => experimental && feel === "light" || preference("taskspace-sketch-pressure"));
   function finishResize(event) {
     const resize = resizeRef.current;
     if (!resize || resize.id !== event.pointerId) return;
@@ -102,7 +103,8 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
     {experimental && <div className="mb-2 space-y-2 text-xs text-neutral-300">
-      <label className="flex items-center gap-2">書き味<select data-sketch-feel aria-label="書き味" value={feel} disabled={disabled} onChange={(event) => { if (drawingRef.current) return; setFeel(event.target.value); try { localStorage.setItem("taskspace-sketch-feel", event.target.value); } catch { /* この画面では試せる */ } }} className="h-9 rounded border border-white/15 ts-surface px-2"><option value="raw">現在のペン</option><option value="soft">少し粘るペン</option></select></label>
+      <label className="flex items-center gap-2">書き味<select data-sketch-feel aria-label="書き味" value={feel} disabled={disabled} onChange={(event) => { if (drawingRef.current) return; setFeel(event.target.value); if (event.target.value === "light") setPressure(true); try { localStorage.setItem(FEEL_KEY, event.target.value); } catch { /* この画面では試せる */ } }} className="h-9 rounded border border-white/15 ts-surface px-2"><option value="light">軽やかなペン</option><option value="raw">現在のペン</option><option value="soft">少し粘るペン</option></select></label>
+      {feel === "light" && <p className="text-[11px] text-neutral-400">軽い筆圧でも強弱を付け、細かな動きに速く追従します。</p>}
       <details data-sketch-diagnostics onToggle={(event) => { setMeasuring(event.currentTarget.open); setFrequency(null); }}>
         <summary className="cursor-pointer py-2">描画の動作を確認</summary>
         <div className="space-y-2 py-2">
@@ -119,9 +121,9 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
+        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && feel === "light" ? { pressureStyle: "light" } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
         const rect = event.currentTarget.getBoundingClientRect();
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel === "soft" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height) : null };
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel !== "raw" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height, feel) : null };
         appendSketch(canvasRef.current, stroke);
       }}
       onPointerMove={(event) => {

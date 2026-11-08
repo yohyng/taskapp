@@ -38,4 +38,17 @@ describe('ペンの線と下書き', () => {
     expect(readSketchDraft()).toEqual([{ ...old, height: 720 }]);
   });
 
+  it('軽い筆圧の線を拾い、筆圧の強弱を広げたまま下書きから戻せる', () => {
+    const widths = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo() {}, stroke() { widths.push(this.lineWidth); } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const stroke = { color: '#202020', width: 3, pressure: true, points: [[0.1, 0.2, 0.02], [0.3, 0.4, 0.02], [0.5, 0.6, 0.9], [0.7, 0.8, 0.9]] };
+    paintSketch(canvas, [stroke]); const previous = [...widths]; widths.length = 0;
+    const light = { ...stroke, pressureStyle: 'light' };
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([light]) });
+    paintSketch(canvas, readSketchDraft());
+    expect(widths[0]).toBeGreaterThan(0);
+    expect(widths.at(-1) / widths[0]).toBeGreaterThan(previous.at(-1) / previous[0]);
+    expect(widths.at(-1)).toBeGreaterThan(previous.at(-1));
+  });
+
 });
