@@ -1,19 +1,33 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
 
 const COLORS = [{ name: "黒", color: "#202020" }, { name: "青", color: "#2563eb" }, { name: "赤", color: "#dc2626" }, { name: "緑", color: "#15803d" }];
+const HEIGHT_KEY = "taskspace-sketch-ratio";
+function savedRatio() {
+  try { const value = Number(localStorage.getItem(HEIGHT_KEY)); return value >= 0.35 && value <= 2 ? value : SKETCH_HEIGHT / SKETCH_WIDTH; } catch { return SKETCH_HEIGHT / SKETCH_WIDTH; }
+}
 function preference(key) {
   try { return localStorage.getItem(key) === "true"; } catch { return false; }
 }
 
 export default function SketchPad({ strokes, onChange, disabled }) {
   const canvasRef = useRef(null), drawingRef = useRef(null);
+  const resizeRef = useRef(null);
+  const [ratio, setRatio] = useState(() => strokes.reduce((maximum, stroke) => Math.max(maximum, (stroke.height || SKETCH_HEIGHT) / SKETCH_WIDTH), savedRatio()));
+  const minRatio = useMemo(() => strokes.reduce((maximum, stroke) => stroke.points.reduce((height, point) => Math.max(height, point[1] * (stroke.height || SKETCH_HEIGHT) / SKETCH_WIDTH + 0.02), maximum), 0.35), [strokes]);
+  const pixelHeight = Math.round(SKETCH_WIDTH * 2 * ratio);
   const [color, setColor] = useState(COLORS[0].color);
   const [width, setWidth] = useState(3);
   const [cleared, setCleared] = useState(null);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
   const [pressure, setPressure] = useState(() => preference("taskspace-sketch-pressure"));
-  useEffect(() => { paintSketch(canvasRef.current, strokes); }, [strokes]);
+  useEffect(() => { paintSketch(canvasRef.current, strokes); }, [strokes, pixelHeight]);
+  function finishResize(event) {
+    const resize = resizeRef.current;
+    if (!resize || resize.id !== event.pointerId) return;
+    resizeRef.current = null;
+    try { localStorage.setItem(HEIGHT_KEY, String(resize.next ?? resize.ratio)); } catch { /* この画面では広げられる */ }
+  }
   function point(event, rect, withPressure, final = false) {
     const p = [(event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height].map((n) => Math.round(Math.max(0, Math.min(1, n)) * 10000) / 10000);
     // ペンを離すイベントの0は筆圧ではないので、線の端を急に細くしない。
@@ -55,13 +69,13 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pen-only type="checkbox" checked={penOnly} disabled={disabled} onChange={(event) => { setPenOnly(event.target.checked); try { localStorage.setItem("taskspace-sketch-pen-only", String(event.target.checked)); } catch { /* この画面では使える */ } }} />ペン専用</label>
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
-    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={SKETCH_HEIGHT * 2} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: "5 / 3" }}
+    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: `${SKETCH_WIDTH * 2} / ${pixelHeight}` }}
       onPointerDown={(event) => {
-        if (disabled || drawingRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
+        if (disabled || drawingRef.current || resizeRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, pressure: pen && pressure, points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
+        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
         drawingRef.current = { pointerId: event.pointerId, stroke, pen };
         appendSketch(canvasRef.current, stroke);
       }}
@@ -73,6 +87,30 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       }}
       onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
     />
+    <div data-sketch-resize role="separator" aria-label="手書き欄の高さ" aria-orientation="horizontal" aria-valuemin={35} aria-valuemax={200} aria-valuenow={Math.round(ratio * 100)} tabIndex={disabled ? -1 : 0}
+      className="mx-auto flex h-7 w-24 cursor-ns-resize touch-none items-center justify-center rounded focus-visible:outline focus-visible:outline-accent-400"
+      onPointerDown={(event) => {
+        if (disabled || drawingRef.current || !event.isPrimary || event.button !== 0) return;
+        event.preventDefault(); event.stopPropagation();
+        event.currentTarget.setPointerCapture(event.pointerId);
+        resizeRef.current = { id: event.pointerId, y: event.clientY, ratio, width: canvasRef.current.getBoundingClientRect().width };
+      }}
+      onPointerMove={(event) => {
+        const start = resizeRef.current;
+        if (!start || start.id !== event.pointerId) return;
+        event.preventDefault(); event.stopPropagation();
+        const next = Math.min(2, Math.max(minRatio, start.ratio + (event.clientY - start.y) / start.width));
+        start.next = next;
+        setRatio(next);
+      }}
+      onPointerUp={finishResize} onPointerCancel={finishResize} onLostPointerCapture={finishResize}
+      onKeyDown={(event) => {
+        if (disabled || !["ArrowUp", "ArrowDown"].includes(event.key)) return;
+        event.preventDefault(); event.stopPropagation();
+        const next = Math.min(2, Math.max(minRatio, ratio + (event.key === "ArrowDown" ? 0.1 : -0.1)));
+        setRatio(next); try { localStorage.setItem(HEIGHT_KEY, String(next)); } catch { /* この画面では広げられる */ }
+      }}
+    ><span className="h-1 w-10 rounded-full bg-white/20" /></div>
     <div className="mt-1 text-[11px] text-neutral-500">手書きは画像としてメモに追加されます</div>
   </div>;
 }

@@ -20,9 +20,15 @@ test('手書きメモ：スマホでPNGを追加し、説明と画像を別端�
     await a.locator('[data-quick-add-dialog] textarea').fill('手で描いたアイデア');
     await a.locator('[data-quick-add-sketch]').tap();
     const canvas = a.locator('[data-sketch-canvas]');
+    const resize = a.locator('[data-sketch-resize]');
+    await resize.focus();
+    await resize.press('ArrowDown');
+    await resize.press('ArrowDown');
+    const paperHeight = Number(await canvas.getAttribute('height'));
+    expect(paperHeight).toBeGreaterThan(720);
     await canvas.scrollIntoViewIfNeeded();
     const box = await canvas.boundingBox();
-    await a.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+    await a.touchscreen.tap(box.x + box.width / 2, box.y + box.height * 0.8);
     await a.locator('[data-add-memo]').tap();
     await expect.poll(() => b.evaluate(() => {
       const rows = window.lab.snapshot(), note = rows.find((row) => row.text === '手で描いたアイデア');
@@ -30,6 +36,7 @@ test('手書きメモ：スマホでPNGを追加し、説明と画像を別端�
     })).toBe(true);
     await expect(b.locator('[data-row-image]')).toBeVisible();
     await expect.poll(() => b.locator('[data-row-image]').evaluate((img) => img.naturalWidth)).toBe(1200);
+    await expect.poll(() => b.locator('[data-row-image]').evaluate((img) => img.naturalHeight)).toBe(paperHeight);
     expect(uploads).toBe(1);
     expect(await a.evaluate(() => localStorage.getItem('taskspace-quick-sketch-v1'))).toBeNull();
     expect(f.errors).toEqual([]);

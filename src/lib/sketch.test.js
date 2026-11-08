@@ -24,4 +24,18 @@ describe('ペンの線と下書き', () => {
     expect(widths[0]).toBeLessThan(3);
     expect(widths.at(-1)).toBeGreaterThan(3);
   });
+  it('紙を縦に広げても従来の線の位置と大きさを保つ', () => {
+    const ends = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo(x, y) { ends.push([x, y]); }, stroke() {} };
+    const old = { color: '#202020', width: 3, points: [[0.1, 0.2], [0.3, 0.4]] };
+    const canvas = { width: 1200, height: 720, getContext: () => ctx };
+    paintSketch(canvas, [old]);
+    const original = [...ends]; ends.length = 0;
+    canvas.height = 1440;
+    paintSketch(canvas, [old, { ...old, height: 720, points: [[0.1, 0.7], [0.3, 0.8]] }]);
+    expect(ends[0]).toEqual(original[0]);
+    expect(ends[1]).toEqual([360, 1152]);
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([{ ...old, height: 720 }, { ...old, height: -1 }]) });
+    expect(readSketchDraft()).toEqual([{ ...old, height: 720 }]);
+  });
+
 });
