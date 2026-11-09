@@ -92,4 +92,16 @@ describe('ペンの線と下書き', () => {
     expect(radii[3] / radii[2]).toBeGreaterThan(radii[1] / radii[0]);
   });
 
+  it('太い芯のペンは普段の筆圧で変化し、旧版の線と丸い端を保つ', () => {
+    const radii = [];
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (p, version) => ({ color: '#202020', width: 6, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, p]] });
+    paintSketch(canvas, [line(0.05, 2), line(0.05, 3), line(0.2, 3), line(0.4, 3)]);
+    expect(radii[1]).toBeGreaterThan(radii[0] * 2);
+    expect(radii[2]).toBeGreaterThan(radii[1] * 1.5);
+    expect(radii[3]).toBeGreaterThan(radii[2]);
+    expect(radii.every(Number.isFinite)).toBe(true);
+  });
+
 });

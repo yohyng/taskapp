@@ -104,7 +104,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
     </div>
     {experimental && <div className="mb-2 space-y-2 text-xs text-neutral-300">
       <label className="flex items-center gap-2">書き味<select data-sketch-feel aria-label="書き味" value={feel} disabled={disabled} onChange={(event) => { if (drawingRef.current) return; setFeel(event.target.value); if (["light", "core", "flow"].includes(event.target.value)) setPressure(true); try { localStorage.setItem(FEEL_KEY, event.target.value); } catch { /* この画面では試せる */ } }} className="h-9 rounded border border-white/15 ts-surface px-2"><option value="flow">なめらかな芯のあるペン</option><option value="core">芯のあるペン（前の設定）</option><option value="light">軽やかなペン（前の設定）</option><option value="raw">現在のペン</option><option value="soft">少し粘るペン</option></select></label>
-      {feel === "flow" && <p className="text-[11px] text-neutral-400">芯のある太さを保ち、線の強弱をなめらかにつなぎます。</p>}
+      {feel === "flow" && <p className="text-[11px] text-neutral-400">太い芯と丸い端を保ち、軽い筆圧から強弱をつけます。</p>}
       {feel === "core" && <p className="text-[11px] text-neutral-400">軽い力でもくっきり。普通の筆圧では太さが安定し、強く押すと少し太くなります。</p>}
       {feel === "light" && <p className="text-[11px] text-neutral-400">軽い筆圧でも強弱を付け、細かな動きに速く追従します。</p>}
       <details data-sketch-diagnostics onToggle={(event) => { setMeasuring(event.currentTarget.open); setFrequency(null); }}>
@@ -123,7 +123,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel, ...(feel === "flow" ? { pressureVersion: 2 } : {}) } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
+        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel, ...(feel === "flow" ? { pressureVersion: 3 } : {}) } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
         const rect = event.currentTarget.getBoundingClientRect();
         drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel !== "raw" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height, feel) : null };
         appendSketch(canvasRef.current, stroke);
