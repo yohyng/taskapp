@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
+import { paintSketch, appendSketch, finishSketchStroke, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
 
 import { createSketchFilter, filterSketchPoint } from "./lib/sketch-feel";
 
@@ -75,17 +75,24 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
     for (const sample of [...samples, native]) {
       const raw = point(sample, rect, stroke.pressure, final);
       if (!final && drawing.sample && sample.timeStamp <= drawing.sample.time && raw[0] === drawing.sample.point[0] && raw[1] === drawing.sample.point[1]) continue;
-      drawing.sample = { point: raw, time: sample.timeStamp };
+      if (!final && drawing.sample) {
+        const elapsed = sample.timeStamp - drawing.sample.time;
+        if (elapsed > 0) drawing.speed = Math.hypot((raw[0] - drawing.sample.point[0]) * rect.width, (raw[1] - drawing.sample.point[1]) * rect.height) / elapsed;
+      }
+      if (!final) drawing.sample = { point: raw, time: sample.timeStamp };
       const p = drawing.filter && !final ? filterSketchPoint(drawing.filter, raw, sample.timeStamp) : raw;
       const last = stroke.points.at(-1);
-      if (p[0] !== last[0] || p[1] !== last[1]) stroke.points.push(p);
+      if (p[0] !== last[0] || p[1] !== last[1] || (stroke.pressureVersion === 4 && p[2] !== last[2])) stroke.points.push(p);
     }
     appendSketch(canvasRef.current, stroke, from);
   }
   function finish(event) {
     const drawing = drawingRef.current;
     if (!drawing || drawing.pointerId !== event.pointerId) return;
-    if (event.type === "pointerup") addPoints(event, true);
+    if (event.type === "pointerup") {
+      addPoints(event, true);
+      finishSketchStroke(drawing.stroke, drawing.speed ?? 0, event.timeStamp - (drawing.sample?.time ?? event.timeStamp) > 50);
+    }
     drawingRef.current = null;
     onChange([...strokes, drawing.stroke]);
     setCleared(null);
@@ -104,7 +111,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
     </div>
     {experimental && <div className="mb-2 space-y-2 text-xs text-neutral-300">
       <label className="flex items-center gap-2">書き味<select data-sketch-feel aria-label="書き味" value={feel} disabled={disabled} onChange={(event) => { if (drawingRef.current) return; setFeel(event.target.value); if (["light", "core", "flow"].includes(event.target.value)) setPressure(true); try { localStorage.setItem(FEEL_KEY, event.target.value); } catch { /* この画面では試せる */ } }} className="h-9 rounded border border-white/15 ts-surface px-2"><option value="flow">なめらかな芯のあるペン</option><option value="core">芯のあるペン（前の設定）</option><option value="light">軽やかなペン（前の設定）</option><option value="raw">現在のペン</option><option value="soft">少し粘るペン</option></select></label>
-      {feel === "flow" && <p className="text-[11px] text-neutral-400">太い芯と丸い端を保ち、軽い筆圧から強弱をつけます。</p>}
+      {feel === "flow" && <p className="text-[11px] text-neutral-400">入りはふっくら、止めは丸く。抜いた線は筆圧に合わせて細くなります。</p>}
       {feel === "core" && <p className="text-[11px] text-neutral-400">軽い力でもくっきり。普通の筆圧では太さが安定し、強く押すと少し太くなります。</p>}
       {feel === "light" && <p className="text-[11px] text-neutral-400">軽い筆圧でも強弱を付け、細かな動きに速く追従します。</p>}
       <details data-sketch-diagnostics onToggle={(event) => { setMeasuring(event.currentTarget.open); setFrequency(null); }}>
@@ -123,9 +130,9 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel, ...(feel === "flow" ? { pressureVersion: 3 } : {}) } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
+        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel, ...(feel === "flow" ? { pressureVersion: 4 } : {}) } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
         const rect = event.currentTarget.getBoundingClientRect();
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel !== "raw" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height, feel) : null };
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, sample: { point: stroke.points[0], time: event.timeStamp }, filter: experimental && feel !== "raw" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height, feel) : null };
         appendSketch(canvasRef.current, stroke);
       }}
       onPointerMove={(event) => {

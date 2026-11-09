@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { paintSketch, readSketchDraft } from './sketch';
+import { paintSketch, readSketchDraft, finishSketchStroke } from './sketch';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('ペンの線と下書き', () => {
@@ -102,6 +102,20 @@ describe('ペンの線と下書き', () => {
     expect(radii[2]).toBeGreaterThan(radii[1] * 1.5);
     expect(radii[3]).toBeGreaterThan(radii[2]);
     expect(radii.every(Number.isFinite)).toBe(true);
+  });
+
+  it('止めだけを膨らませ、軽く抜いた払いと旧版は変更しない', () => {
+    const line = (p, version = 4) => ({ color: '#202020', width: 6, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, 0.02], [0.2, 0.2, p]] });
+    const stop = line(0.3), flick = line(0.04), fast = line(0.3), old = line(0.3, 3);
+    finishSketchStroke(stop, 0.05, false); finishSketchStroke(flick, 0, true);
+    finishSketchStroke(fast, 1, false); finishSketchStroke(old, 0, true);
+    expect(stop.endStyle).toBe('stop'); expect(flick.endStyle).toBe('release');
+    expect(fast.endStyle).toBe('release'); expect(old.endStyle).toBeUndefined();
+    const radii = [], ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {}, moveTo() {}, lineTo() {}, closePath() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    paintSketch(canvas, [stop]); const stopped = radii.at(-1), start = radii[0]; radii.length = 0;
+    paintSketch(canvas, [fast]); expect(stopped / radii.at(-1)).toBeCloseTo(1.18);
+    radii.length = 0; paintSketch(canvas, [old]); expect(start).toBeGreaterThan(radii[0]);
   });
 
 });
