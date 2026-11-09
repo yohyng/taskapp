@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { paintSketch, readSketchDraft } from './sketch';
+import { paintSketch, readSketchDraft, finishSketchStroke } from './sketch';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('ペンの線と下書き', () => {
@@ -36,6 +36,86 @@ describe('ペンの線と下書き', () => {
     expect(ends[1]).toEqual([360, 1152]);
     vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([{ ...old, height: 720 }, { ...old, height: -1 }]) });
     expect(readSketchDraft()).toEqual([{ ...old, height: 720 }]);
+  });
+
+  it('軽い筆圧の線を拾い、筆圧の強弱を広げたまま下書きから戻せる', () => {
+    const widths = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo() {}, stroke() { widths.push(this.lineWidth); } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const stroke = { color: '#202020', width: 3, pressure: true, points: [[0.1, 0.2, 0.02], [0.3, 0.4, 0.02], [0.5, 0.6, 0.9], [0.7, 0.8, 0.9]] };
+    paintSketch(canvas, [stroke]); const previous = [...widths]; widths.length = 0;
+    const light = { ...stroke, pressureStyle: 'light' };
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([light]) });
+    paintSketch(canvas, readSketchDraft());
+    expect(widths[0]).toBeGreaterThan(0);
+    expect(widths.at(-1) / widths[0]).toBeGreaterThan(previous.at(-1) / previous[0]);
+    expect(widths.at(-1)).toBeGreaterThan(previous.at(-1));
+  });
+
+  it('芯のあるペンは軽い力でも細くなりすぎず、普段の筆圧では太さを安定させる', () => {
+    const widths = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo() {}, stroke() { widths.push(this.lineWidth); } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (pressure, pressureStyle) => ({ color: '#202020', width: 3, pressure: true, pressureStyle, points: [[0.1, 0.1, pressure], [0.2, 0.2, pressure]] });
+    const strokes = [line(0.02, 'core'), line(0.15, 'core'), line(0.5, 'core'), line(0.95, 'core'), line(0.02, 'light')];
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify(strokes) });
+    paintSketch(canvas, readSketchDraft());
+    expect(widths).toHaveLength(5);
+    expect(widths[0]).toBeGreaterThan(3);
+    expect(widths[0]).toBeGreaterThan(widths[4] * 1.8);
+    expect(widths[2] / widths[1]).toBeLessThan(1.03);
+    expect(widths[3]).toBeGreaterThan(widths[2]);
+    expect(widths[3] / widths[2]).toBeLessThan(1.3);
+  });
+
+  it('なめらかな線は線分の両端の太さをつなぎ、丸い端と復元時の設定を保つ', () => {
+    const moves = [], lines = [], radii = []; let closed = 0;
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, radius) { radii.push(radius); }, fill() {}, moveTo(x, y) { moves.push([x, y]); }, lineTo(x, y) { lines.push([x, y]); }, closePath() { closed++; } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const stroke = { color: '#202020', width: 3, pressure: true, pressureStyle: 'flow', points: [[0.1, 0.5, 0.1], [0.9, 0.5, 0.9]] };
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([stroke]) });
+    paintSketch(canvas, readSketchDraft());
+    expect(closed).toBe(1);
+    expect(radii).toHaveLength(2);
+    expect(radii[1]).toBeGreaterThan(radii[0]);
+    expect(moves[0]).toEqual([60, 180 + radii[0]]);
+    expect(lines[0]).toEqual([540, 180 + radii[1]]);
+    expect(lines[1]).toEqual([540, 180 - radii[1]]);
+  });
+
+  it('新しい強弱は軽い線の芯を残して差を広げ、以前の下書きの太さを保つ', () => {
+    const radii = [];
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (p, version) => ({ color: '#202020', width: 3, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, p]] });
+    paintSketch(canvas, [line(0.02), line(0.9), line(0.02, 2), line(0.9, 2)]);
+    expect(radii[2]).toBeGreaterThan(1.4);
+    expect(radii[3] / radii[2]).toBeGreaterThan(2);
+    expect(radii[3] / radii[2]).toBeGreaterThan(radii[1] / radii[0]);
+  });
+
+  it('太い芯のペンは普段の筆圧で変化し、旧版の線と丸い端を保つ', () => {
+    const radii = [];
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (p, version) => ({ color: '#202020', width: 6, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, p]] });
+    paintSketch(canvas, [line(0.05, 2), line(0.05, 3), line(0.2, 3), line(0.4, 3)]);
+    expect(radii[1]).toBeGreaterThan(radii[0] * 2);
+    expect(radii[2]).toBeGreaterThan(radii[1] * 1.5);
+    expect(radii[3]).toBeGreaterThan(radii[2]);
+    expect(radii.every(Number.isFinite)).toBe(true);
+  });
+
+  it('止めだけを膨らませ、軽く抜いた払いと旧版は変更しない', () => {
+    const line = (p, version = 4) => ({ color: '#202020', width: 6, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, 0.02], [0.2, 0.2, p]] });
+    const stop = line(0.3), flick = line(0.04), fast = line(0.3), old = line(0.3, 3);
+    finishSketchStroke(stop, 0.05, false); finishSketchStroke(flick, 0, true);
+    finishSketchStroke(fast, 1, false); finishSketchStroke(old, 0, true);
+    expect(stop.endStyle).toBe('stop'); expect(flick.endStyle).toBe('release');
+    expect(fast.endStyle).toBe('release'); expect(old.endStyle).toBeUndefined();
+    const radii = [], ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {}, moveTo() {}, lineTo() {}, closePath() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    paintSketch(canvas, [stop]); const stopped = radii.at(-1), start = radii[0]; radii.length = 0;
+    paintSketch(canvas, [fast]); expect(stopped / radii.at(-1)).toBeCloseTo(1.18);
+    radii.length = 0; paintSketch(canvas, [old]); expect(start).toBeGreaterThan(radii[0]);
   });
 
 });

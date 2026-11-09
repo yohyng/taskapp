@@ -2,11 +2,11 @@ export const SKETCH_WIDTH = 600;
 export const SKETCH_HEIGHT = 360;
 export const SKETCH_DRAFT_KEY = "taskspace-quick-sketch-v1";
 
-export function readSketchDraft() {
+export function readSketchDraft(key = SKETCH_DRAFT_KEY) {
   try {
-    const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
+    const strokes = JSON.parse(localStorage.getItem(key) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && (stroke.pressureStyle === undefined || ["light", "core", "flow"].includes(stroke.pressureStyle)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
 }
 
@@ -18,7 +18,28 @@ export function appendSketch(canvas, stroke, from = 0) {
   const height = (stroke.height || SKETCH_HEIGHT) * scale;
   ctx.lineCap = ctx.lineJoin = "round";
   ctx.strokeStyle = ctx.fillStyle = stroke.color;
-  const size = (a, b = a) => stroke.width * scale * (stroke.pressure ? 0.55 + 0.9 * (((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2) : 1);
+  const size = (a, b = a) => {
+    const pressure = ((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2;
+    // 軽い筆圧を拾いつつ、弱く入れた線と強く入れた線の差を広げる。線ごとに設定を残す。
+    // 以前の下書きは変えず、新しいペンだけ表示上の芯を太くする。
+    const base = stroke.width * scale * (stroke.pressureStyle === "flow" && stroke.pressureVersion >= 3 ? 2.6 : 1);
+    if (!stroke.pressure) return base;
+    const response = stroke.pressureStyle === "flow" && stroke.pressureVersion === 5
+      ? 0.8 + 1.4 * Math.pow(pressure, 0.65)
+      : stroke.pressureStyle === "flow" && stroke.pressureVersion >= 3
+      ? 0.65 + 1.25 * (1 - Math.exp(-pressure / 0.2)) + 0.35 * pressure
+      : stroke.pressureStyle === "flow" && stroke.pressureVersion === 2
+      ? 0.85 + 0.35 * (1 - Math.exp(-pressure / 0.06)) + 1.05 * Math.pow(pressure, 1.25)
+      : ["core", "flow"].includes(stroke.pressureStyle)
+      ? 1.1 + 0.25 * (1 - Math.exp(-pressure / 0.06)) + 0.35 * Math.pow(Math.max(0, (pressure - 0.55) / 0.45), 1.2)
+      : stroke.pressureStyle === "light" ? 0.32 + 1.8 * Math.sqrt(pressure) : 0.55 + 0.9 * pressure;
+    // 入りは接触直後の低い値だけで痩せさせず、次の線分へ丸くつなぐ。
+    if (stroke.pressureStyle === "flow" && stroke.pressureVersion >= 4) {
+      if (a === stroke.points[0]) return base * Math.max(response, 1.55) * 1.08;
+      if (a === stroke.points.at(-1) && stroke.endStyle === "stop") return base * response * 1.18;
+    }
+    return base * response;
+  };
   if (from === 0 && stroke.points.length) {
     const a = stroke.points[0];
     ctx.beginPath();
@@ -27,6 +48,26 @@ export function appendSketch(canvas, stroke, from = 0) {
   }
   for (let i = Math.max(1, from); i < stroke.points.length; i++) {
     const a = stroke.points[i - 1], b = stroke.points[i];
+    if (stroke.pressureStyle === "flow") {
+      // 線分ごとの一定幅を重ねず、両端の太さを連続して結んで段差をなくす。
+      const ax = a[0] * canvas.width, ay = a[1] * height;
+      const bx = b[0] * canvas.width, by = b[1] * height;
+      const distance = Math.hypot(bx - ax, by - ay);
+      if (!distance) {
+        ctx.beginPath(); ctx.arc(bx, by, size(b) / 2, 0, 2 * Math.PI); ctx.fill();
+        continue;
+      }
+      const nx = -(by - ay) / distance, ny = (bx - ax) / distance;
+      const ra = size(a) / 2, rb = size(b) / 2;
+      ctx.beginPath();
+      ctx.moveTo(ax + nx * ra, ay + ny * ra);
+      ctx.lineTo(bx + nx * rb, by + ny * rb);
+      ctx.lineTo(bx - nx * rb, by - ny * rb);
+      ctx.lineTo(ax - nx * ra, ay - ny * ra);
+      ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.arc(bx, by, rb, 0, 2 * Math.PI); ctx.fill();
+      continue;
+    }
     ctx.lineWidth = size(a, b);
     ctx.beginPath();
     ctx.moveTo(a[0] * canvas.width, a[1] * height);
@@ -50,4 +91,11 @@ export async function sketchFile(strokes) {
   const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("画像を作れませんでした");
   return new File([blob], "手書き.png", { type: "image/png" });
+}
+
+// 離したイベントの筆圧0では判定せず、直前の動きと筆圧で止めと払いを分ける。
+export function finishSketchStroke(stroke, speed, paused) {
+  if (stroke.pressureStyle !== "flow" || ![4, 5].includes(stroke.pressureVersion) || !stroke.pressure) return;
+  const pressure = stroke.points.at(-1)?.[2] ?? 0;
+  stroke.endStyle = pressure >= 0.12 && (paused || speed < 0.12) ? "stop" : "release";
 }

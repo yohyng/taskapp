@@ -27,6 +27,7 @@ export function vercelBuildPlan(env, release = productionRelease) {
     const config = releaseConfig({ ...env, VITE_OUTLINE_DOCUMENT_ID: release.documentId, VITE_OUTLINE_CUTOVER: '1' });
     return { staging: false, release: true, viteArgs: ['build', '--mode', 'sync-release'], config };
   }
+  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === 'codex/pen-feel-preview') return { staging: false, viteArgs: ['build', '--mode', 'pen-preview'] };
   if (env.VERCEL_GIT_COMMIT_REF !== stagingBranch) return { staging: false, viteArgs: ['build'] };
   // ブランチ名だけでは本番への誤配信を防げない。環境とリポジトリも揃わなければ停止する。
   if (env.VERCEL !== '1' || env.VERCEL_ENV !== 'preview' || env.VERCEL_GIT_REPO_OWNER !== 'yohyng'
