@@ -81,3 +81,18 @@ for (const style of ["light", "core", "flow"]) test(`${style === "flow" ? "な�
   const png = await readFile(await (await pending).path());
   expect(`data:image/png;base64,${png.toString("base64")}`).toBe(pixels);
 });
+
+
+test("直前の筆圧と補正値を端末だけで取り出せる", async ({ page }) => {
+  await page.goto("/pen-lab.html");
+  await draw(page, [0.05, 0.2, 0.35, 0.25, 0.4]);
+  await page.locator("[data-sketch-diagnostics] summary").click();
+  await expect(page.locator("[data-sketch-input-trace]")).toContainText("筆圧");
+  const pending = page.waitForEvent("download");
+  await page.locator("[data-sketch-export-trace]").click();
+  const trace = JSON.parse(await readFile(await (await pending).path(), "utf8"));
+  expect(trace.version).toBe("1.22.7");
+  expect(trace.samples.length).toBeGreaterThan(0);
+  expect(trace.samples.length).toBeLessThanOrEqual(4096);
+  expect(trace.samples.some((s) => s.raw[2] !== s.filtered[2])).toBe(true);
+});

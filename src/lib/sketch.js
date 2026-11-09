@@ -24,7 +24,9 @@ export function appendSketch(canvas, stroke, from = 0) {
     // 以前の下書きは変えず、新しいペンだけ表示上の芯を太くする。
     const base = stroke.width * scale * (stroke.pressureStyle === "flow" && stroke.pressureVersion >= 3 ? 2.6 : 1);
     if (!stroke.pressure) return base;
-    const response = stroke.pressureStyle === "flow" && stroke.pressureVersion >= 3
+    const response = stroke.pressureStyle === "flow" && stroke.pressureVersion === 5
+      ? 0.8 + 1.4 * Math.pow(pressure, 0.65)
+      : stroke.pressureStyle === "flow" && stroke.pressureVersion >= 3
       ? 0.65 + 1.25 * (1 - Math.exp(-pressure / 0.2)) + 0.35 * pressure
       : stroke.pressureStyle === "flow" && stroke.pressureVersion === 2
       ? 0.85 + 0.35 * (1 - Math.exp(-pressure / 0.06)) + 1.05 * Math.pow(pressure, 1.25)
@@ -32,7 +34,7 @@ export function appendSketch(canvas, stroke, from = 0) {
       ? 1.1 + 0.25 * (1 - Math.exp(-pressure / 0.06)) + 0.35 * Math.pow(Math.max(0, (pressure - 0.55) / 0.45), 1.2)
       : stroke.pressureStyle === "light" ? 0.32 + 1.8 * Math.sqrt(pressure) : 0.55 + 0.9 * pressure;
     // 入りは接触直後の低い値だけで痩せさせず、次の線分へ丸くつなぐ。
-    if (stroke.pressureStyle === "flow" && stroke.pressureVersion === 4) {
+    if (stroke.pressureStyle === "flow" && stroke.pressureVersion >= 4) {
       if (a === stroke.points[0]) return base * Math.max(response, 1.55) * 1.08;
       if (a === stroke.points.at(-1) && stroke.endStyle === "stop") return base * response * 1.18;
     }
@@ -93,7 +95,7 @@ export async function sketchFile(strokes) {
 
 // 離したイベントの筆圧0では判定せず、直前の動きと筆圧で止めと払いを分ける。
 export function finishSketchStroke(stroke, speed, paused) {
-  if (stroke.pressureStyle !== "flow" || stroke.pressureVersion !== 4 || !stroke.pressure) return;
+  if (stroke.pressureStyle !== "flow" || ![4, 5].includes(stroke.pressureVersion) || !stroke.pressure) return;
   const pressure = stroke.points.at(-1)?.[2] ?? 0;
   stroke.endStyle = pressure >= 0.12 && (paused || speed < 0.12) ? "stop" : "release";
 }

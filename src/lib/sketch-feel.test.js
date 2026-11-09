@@ -41,4 +41,18 @@ describe("少し粘るペン", () => {
     expect(next[2]).toBeGreaterThan(a[2]); expect(next[2]).toBeLessThan(0.9);
   });
 
+  it("細かな筆圧の変化を残し、座標の追従と筆圧の範囲を保つ", () => {
+    const detail = createSketchFilter([0.1, 0.1, 0.3], 0, 600, 360, "flow", true);
+    const old = createSketchFilter([0.1, 0.1, 0.3], 0, 600, 360, "flow");
+    let fineChange = 0, oldChange = 0;
+    for (let i = 1; i <= 20; i++) {
+      const raw = [0.1 + i * 0.001, 0.1, i % 2 ? 0.35 : 0.25];
+      const a = filterSketchPoint(detail, raw, i * 4), b = filterSketchPoint(old, raw, i * 4);
+      expect(a.slice(0, 2)).toEqual(b.slice(0, 2));
+      expect(a[2]).toBeGreaterThanOrEqual(0.25); expect(a[2]).toBeLessThanOrEqual(0.35);
+      fineChange += Math.abs(a[2] - 0.3); oldChange += Math.abs(b[2] - 0.3);
+    }
+    expect(fineChange).toBeGreaterThan(oldChange * 2);
+  });
+
 });
