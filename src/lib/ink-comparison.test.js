@@ -23,4 +23,15 @@ describe('連続輪郭の比較ペン', () => {
     expect(readInkDraft(JSON.stringify([valid, { ...valid, mode: 'other' }, { ...valid, samples: [{ x: -1, y: 0, t: 0, p: 0.5 }] }]))).toEqual([valid]);
     expect(readInkDraft('broken')).toEqual([]);
   });
+  it('未調整の線は同じ形を保ち、強弱ゼロなら筆圧で幅を変えない', () => {
+    const stroke = { mode: 'pressure', width: 10, samples: samples(1) };
+    expect(inkOutline(stroke)).toEqual(inkOutline({ ...stroke, settings: { thinning: 0.6, response: 16, streamline: 0.15 } }));
+    const low = { ...stroke, settings: { thinning: 0 }, samples: stroke.samples.map((s) => ({ ...s, p: 0.1 })) };
+    const high = { ...low, samples: low.samples.map((s) => ({ ...s, p: 0.9 })) };
+    expect(inkOutline(low)).toEqual(inkOutline(high));
+    const fast = inkPoints(samples(1), 'speed', { response: 4 });
+    const slow = inkPoints(samples(1), 'speed', { response: 64 });
+    expect(fast[1][2]).toBeLessThan(slow[1][2]);
+  });
+
 });

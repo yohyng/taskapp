@@ -98,3 +98,30 @@ test('鉛筆の濃淡と紙目を保ち、復元とPNGで同じ表示になる',
   expect(masses[1]).toBeGreaterThan(masses[0] * 1.2);
 
 });
+
+
+test('スライダーは見本と次の線へ適用し、基準と端末の設定を保存する', async ({ page }) => {
+  await page.goto('/ink-lab.html'); await draw(page);
+  const base = await page.locator('[data-ink-base]').evaluate((c) => c.toDataURL());
+  const preview = await page.locator('[data-ink-tuning]').evaluate((c) => c.toDataURL());
+  await page.locator('[data-ink-width]').focus(); await page.locator('[data-ink-width]').press('End');
+  await expect(page.locator('[data-ink-width-value]')).toHaveText('40.0');
+  expect(await page.locator('[data-ink-tuning]').evaluate((c) => c.toDataURL())).not.toBe(preview);
+  expect(await page.locator('[data-ink-base]').evaluate((c) => c.toDataURL())).toBe(base);
+  await page.locator('[data-ink-controls] summary').click();
+  for (const name of ['thinning', 'response', 'streamline']) {
+    await page.locator(`[data-ink-${name}]`).focus(); await page.locator(`[data-ink-${name}]`).press('End');
+  }
+  await draw(page); await page.locator('[data-ink-save]').click();
+  const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('fragments-ink-comparison-v1')));
+  expect(saved[0].width).toBe(10); expect(saved[1].width).toBe(40);
+  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 64, streamline: 0.6 });
+  await page.reload(); await expect(page.locator('[data-ink-width]')).toHaveValue('40');
+  await page.locator('[data-ink-controls] summary').click();
+  await expect(page.locator('[data-ink-response]')).toHaveValue('64');
+  await page.locator('[data-ink-reset]').click();
+  await expect(page.locator('[data-ink-width]')).toHaveValue('10');
+  await expect(page.locator('[data-ink-thinning]')).toHaveValue('60');
+  await expect(page.locator('[data-ink-response]')).toHaveValue('16');
+  await expect(page.locator('[data-ink-streamline]')).toHaveValue('15');
+});
