@@ -16,6 +16,7 @@ export default function PenLab() {
   }
   return <main className="mx-auto max-w-2xl p-4 ts-text">
     <h1 className="mb-2 text-lg font-semibold">fragments 書き味の比較</h1>
+    <a href="/ink-lab.html" className="mb-3 inline-block rounded border border-white/20 px-3 py-2 text-sm">新しいペンの比較ページへ</a>
     <p className="mb-4 text-sm text-neutral-300">ペンを切り替えて、同じ文字や丸を書き比べてみてください。このページは同期せず、本番のメモには追加しません。</p>
     <SketchPad experimental strokes={strokes} onChange={setStrokes} />
     <div className="mt-4 flex flex-wrap gap-2 text-sm">

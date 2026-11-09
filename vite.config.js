@@ -21,7 +21,7 @@ export default defineConfig(({ mode }) => {
   const sessionClient = fileURLToPath(new URL('src/session-client.js', lab))
   const productSource = fileURLToPath(new URL('./src/', import.meta.url)).replaceAll('\\', '/')
   return {
-  ...(penPreview ? { build: { rollupOptions: { input: fileURLToPath(new URL('./pen-lab.html', import.meta.url)) } } } : {}),
+  ...(penPreview ? { build: { rollupOptions: { input: { pen: fileURLToPath(new URL('./pen-lab.html', import.meta.url)), ink: fileURLToPath(new URL('./ink-lab.html', import.meta.url)) } } } } : {}),
   envPrefix: newSync ? 'LAB_BROWSER_UNUSED_' : 'VITE_',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
