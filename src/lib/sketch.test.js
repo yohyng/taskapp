@@ -81,4 +81,15 @@ describe('ペンの線と下書き', () => {
     expect(lines[1]).toEqual([540, 180 - radii[1]]);
   });
 
+  it('新しい強弱は軽い線の芯を残して差を広げ、以前の下書きの太さを保つ', () => {
+    const radii = [];
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, r) { radii.push(r); }, fill() {} };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const line = (p, version) => ({ color: '#202020', width: 3, pressure: true, pressureStyle: 'flow', pressureVersion: version, points: [[0.1, 0.1, p]] });
+    paintSketch(canvas, [line(0.02), line(0.9), line(0.02, 2), line(0.9, 2)]);
+    expect(radii[2]).toBeGreaterThan(1.4);
+    expect(radii[3] / radii[2]).toBeGreaterThan(2);
+    expect(radii[3] / radii[2]).toBeGreaterThan(radii[1] / radii[0]);
+  });
+
 });

@@ -123,7 +123,7 @@ export default function SketchPad({ strokes, onChange, disabled, experimental = 
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
+        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, ...(experimental && ["light", "core", "flow"].includes(feel) ? { pressureStyle: feel, ...(feel === "flow" ? { pressureVersion: 2 } : {}) } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
         const rect = event.currentTarget.getBoundingClientRect();
         drawingRef.current = { pointerId: event.pointerId, stroke, pen, filter: experimental && feel !== "raw" ? createSketchFilter(stroke.points[0], event.timeStamp, rect.width, rect.height, feel) : null };
         appendSketch(canvasRef.current, stroke);

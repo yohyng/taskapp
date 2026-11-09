@@ -22,7 +22,9 @@ export function appendSketch(canvas, stroke, from = 0) {
     const pressure = ((a[2] ?? 0.5) + (b[2] ?? 0.5)) / 2;
     // 軽い筆圧を拾いつつ、弱く入れた線と強く入れた線の差を広げる。線ごとに設定を残す。
     if (!stroke.pressure) return stroke.width * scale;
-    const response = ["core", "flow"].includes(stroke.pressureStyle)
+    const response = stroke.pressureStyle === "flow" && stroke.pressureVersion === 2
+      ? 0.85 + 0.35 * (1 - Math.exp(-pressure / 0.06)) + 1.05 * Math.pow(pressure, 1.25)
+      : ["core", "flow"].includes(stroke.pressureStyle)
       ? 1.1 + 0.25 * (1 - Math.exp(-pressure / 0.06)) + 0.35 * Math.pow(Math.max(0, (pressure - 0.55) / 0.45), 1.2)
       : stroke.pressureStyle === "light" ? 0.32 + 1.8 * Math.sqrt(pressure) : 0.55 + 0.9 * pressure;
     return stroke.width * scale * response;
