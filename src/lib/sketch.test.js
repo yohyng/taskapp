@@ -66,4 +66,19 @@ describe('ペンの線と下書き', () => {
     expect(widths[3] / widths[2]).toBeLessThan(1.3);
   });
 
+  it('なめらかな線は線分の両端の太さをつなぎ、丸い端と復元時の設定を保つ', () => {
+    const moves = [], lines = [], radii = []; let closed = 0;
+    const ctx = { fillRect() {}, beginPath() {}, arc(x, y, radius) { radii.push(radius); }, fill() {}, moveTo(x, y) { moves.push([x, y]); }, lineTo(x, y) { lines.push([x, y]); }, closePath() { closed++; } };
+    const canvas = { width: 600, height: 360, getContext: () => ctx };
+    const stroke = { color: '#202020', width: 3, pressure: true, pressureStyle: 'flow', points: [[0.1, 0.5, 0.1], [0.9, 0.5, 0.9]] };
+    vi.stubGlobal('localStorage', { getItem: () => JSON.stringify([stroke]) });
+    paintSketch(canvas, readSketchDraft());
+    expect(closed).toBe(1);
+    expect(radii).toHaveLength(2);
+    expect(radii[1]).toBeGreaterThan(radii[0]);
+    expect(moves[0]).toEqual([60, 180 + radii[0]]);
+    expect(lines[0]).toEqual([540, 180 + radii[1]]);
+    expect(lines[1]).toEqual([540, 180 - radii[1]]);
+  });
+
 });

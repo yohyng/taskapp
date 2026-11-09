@@ -30,4 +30,15 @@ describe("少し粘るペン", () => {
     expect(gap(light)).toBeLessThanOrEqual(1.00001);
   });
 
+  it("太さの急変だけをならし、芯のあるペンの座標追従を保つ", () => {
+    const flow = createSketchFilter([0.1, 0.1, 0.1], 0, 600, 360, "flow");
+    const core = createSketchFilter([0.1, 0.1, 0.1], 0, 600, 360, "core");
+    const a = filterSketchPoint(flow, [0.2, 0.15, 0.9], 8);
+    const b = filterSketchPoint(core, [0.2, 0.15, 0.9], 8);
+    expect(a.slice(0, 2)).toEqual(b.slice(0, 2));
+    expect(a[2]).toBeGreaterThan(0.1); expect(a[2]).toBeLessThan(0.9);
+    const next = filterSketchPoint(flow, [0.3, 0.2, 0.9], 16);
+    expect(next[2]).toBeGreaterThan(a[2]); expect(next[2]).toBeLessThan(0.9);
+  });
+
 });

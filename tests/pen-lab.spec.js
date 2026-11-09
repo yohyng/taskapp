@@ -24,7 +24,7 @@ test("書き味：現在の線を保ち、粘る線の終点・下書き・PNG�
   page.on("request", (request) => { if (/supabase|script.google/.test(request.url())) network.push(request.url()); });
   await page.goto("/pen-lab.html");
   const feel = page.locator("[data-sketch-feel]");
-  await expect(feel).toHaveValue("core");
+  await expect(feel).toHaveValue("flow");
   await feel.selectOption("raw");
   await draw(page); await page.locator("[data-pen-lab-save]").click();
   const raw = await page.evaluate(() => JSON.parse(localStorage.getItem("fragments-pen-lab-draft")));
@@ -62,9 +62,9 @@ test("描画の確認：低遅延方式の切替で線を消さず、更新頻�
 });
 
 
-for (const style of ["light", "core"]) test(`${style === "core" ? "芯のある" : "軽やかな"}ペン：筆圧と復元・PNGの見た目を保つ`, async ({ page }) => {
+for (const style of ["light", "core", "flow"]) test(`${style === "flow" ? "なめらかな芯のある" : style === "core" ? "芯のある" : "軽やかな"}ペン：筆圧と復元・PNGの見た目を保つ`, async ({ page }) => {
   await page.goto("/pen-lab.html");
-  await expect(page.locator("[data-sketch-feel]")).toHaveValue("core");
+  await expect(page.locator("[data-sketch-feel]")).toHaveValue("flow");
   await page.locator("[data-sketch-feel]").selectOption(style);
   await expect(page.locator("[data-sketch-pressure]")).toBeChecked();
   await draw(page, [0.02, 0.08, 0.3, 0.6, 0.9]);
@@ -72,7 +72,7 @@ for (const style of ["light", "core"]) test(`${style === "core" ? "芯のある"
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem("fragments-pen-lab-draft")));
   expect(saved[0].pressureStyle).toBe(style);
   expect(saved[0].points[0][2]).toBeLessThan(0.03);
-  expect(saved[0].points.at(-1)[2]).toBeGreaterThan(0.89);
+  expect(saved[0].points.at(-1)[2]).toBeGreaterThan(style === "flow" ? 0.3 : 0.89);
   const pixels = await page.locator("canvas").evaluate((canvas) => canvas.toDataURL());
   await page.reload(); await page.locator("[data-pen-lab-restore]").click();
   await expect.poll(() => page.locator("canvas").evaluate((canvas) => canvas.toDataURL())).toBe(pixels);
