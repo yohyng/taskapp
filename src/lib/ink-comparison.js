@@ -1,17 +1,18 @@
 import { getStroke } from 'perfect-freehand';
 
 export const INK_MODES = { speed: 'Concepts風・速度ペン', pencil: 'Goodnotes風・鉛筆', pressure: '実筆圧ペン', fixed: '一定幅ペン' };
-export const INK_DEFAULTS = { thinning: 0.6, response: 16, streamline: 0.15 };
+export const INK_DEFAULTS = { thinning: 0.6, response: 16, responseThin: 16, responseThick: 16, streamline: 0.15 };
 export function inkSettings(settings = {}) {
   const limit = (value, min, max, fallback) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
-  return { thinning: limit(settings?.thinning, 0, 0.9, 0.6), response: limit(settings?.response, 4, 64, 16), streamline: limit(settings?.streamline, 0, 0.6, 0.15) };
+  const response = limit(settings?.response, 4, 64, 16);
+  return { responseThin: limit(settings?.responseThin, 4, 64, response), responseThick: limit(settings?.responseThick, 4, 64, response), thinning: limit(settings?.thinning, 0, 0.9, 0.6), response: limit(settings?.response, 4, 64, 16), streamline: limit(settings?.streamline, 0, 0.6, 0.15) };
 }
 export const INK_WIDTH = 600;
 export const INK_HEIGHT = 400;
 
 // 時刻を使って速度を求め、イベントの届く頻度だけで太さが変わるのを避ける。
 export function inkPoints(samples, mode, settings) {
-  const { response } = inkSettings(settings);
+  const { responseThin, responseThick } = inkSettings(settings);
   let speed = 0.5;
   return samples.map((sample, index) => {
     if (index) {
@@ -19,6 +20,8 @@ export function inkPoints(samples, mode, settings) {
       const elapsed = sample.t - previous.t;
       if (elapsed > 0) {
         const measured = Math.min(4, Math.hypot(sample.x - previous.x, sample.y - previous.y) / elapsed);
+        // 加速で細くなる側と減速で太くなる側を分ける。旧設定は両方へ同じ値を使う。
+        const response = measured > speed ? responseThin : responseThick;
         speed += (measured - speed) * (1 - Math.exp(-elapsed / response));
       }
     }

@@ -71,7 +71,7 @@ export default function InkLab() {
     link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
   return <main className="mx-auto max-w-3xl p-4 ts-text">
-    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.25.0</span></h1>
+    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.25.1</span></h1>
     <p className="my-3 text-sm text-neutral-300">速度で太さが変わるペンと、筆圧で濃淡が変わる鉛筆を選べます。本番のノートには追加されません。</p>
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="ペンの方式">
       {Object.entries(INK_MODES).map(([value, label]) => <button key={value} data-ink-mode={value} aria-pressed={mode === value} className={`${button} aria-pressed:bg-white/20`} onClick={() => setMode(value)}>{label}</button>)}
@@ -82,7 +82,11 @@ export default function InkLab() {
       <details className="w-full" data-ink-controls><summary className="cursor-pointer py-2">書き味を調整</summary>
         <div className="space-y-4 rounded-lg border border-white/15 p-3">
           {(mode === 'speed' || mode === 'pressure') && <label className="block">強弱の大きさ <output className="float-right">{Math.round(settings.thinning * 100)}%</output><input data-ink-thinning aria-label="強弱の大きさ" type="range" min="0" max="90" value={settings.thinning * 100} onChange={(e) => setSettings({ ...settings, thinning: Number(e.target.value) / 100 })} className="mt-2 w-full" /><span className="text-xs text-neutral-400">0で一定幅。大きくすると細い部分と太い部分の差が広がります。</span></label>}
-          {mode === 'speed' && <label className="block">強弱の反応 <output className="float-right">{settings.response} ms</output><input data-ink-response aria-label="強弱の反応" type="range" min="4" max="64" value={settings.response} onChange={(e) => setSettings({ ...settings, response: Number(e.target.value) })} className="mt-2 w-full" /><span className="text-xs text-neutral-400">小さいほど敏感。大きいほど太さがゆったり変化します。座標の追従には影響しません。</span></label>}
+          {mode === 'speed' && <>
+            <label className="block">細くなる反応 <output className="float-right">{settings.responseThin} ms</output><input data-ink-response-thin aria-label="細くなる反応" type="range" min="4" max="64" value={settings.responseThin} onChange={(e) => setSettings({ ...settings, responseThin: Number(e.target.value) })} className="mt-2 w-full" /><span className="text-xs text-neutral-400">加速したときの変化。小さいほどすぐ細く、大きいほど太さが残ります。</span></label>
+            <label className="block">太く戻る反応 <output className="float-right">{settings.responseThick} ms</output><input data-ink-response-thick aria-label="太く戻る反応" type="range" min="4" max="64" value={settings.responseThick} onChange={(e) => setSettings({ ...settings, responseThick: Number(e.target.value) })} className="mt-2 w-full" /><span className="text-xs text-neutral-400">減速したときの変化。小さいほどすぐ太く、大きいほどゆったり戻ります。座標の追従は変えません。</span></label>
+            <button data-ink-gentle-return className={button} onClick={() => setSettings({ ...INK_DEFAULTS, responseThin: 12, responseThick: 28 })}>ゆったり戻る設定を試す</button>
+          </>}
           <label className="block">軌跡のなめらかさ <output className="float-right">{Math.round(settings.streamline * 100)}%</output><input data-ink-streamline aria-label="軌跡のなめらかさ" type="range" min="0" max="60" value={settings.streamline * 100} onChange={(e) => setSettings({ ...settings, streamline: Number(e.target.value) / 100 })} className="mt-2 w-full" /><span className="text-xs text-neutral-400">大きいほど揺れを抑えますが、追従や角の形にも影響します。Conceptsの%とは別の尺度です。</span></label>
           <button data-ink-reset className={button} onClick={() => { setSettings({ ...INK_DEFAULTS }); setWidth(10); }}>今の基準に戻す</button>
         </div>
@@ -105,7 +109,7 @@ export default function InkLab() {
       <button data-ink-save className={button} disabled={!count} onClick={() => { try { localStorage.setItem(KEY, JSON.stringify(strokes.current)); setMessage('この端末に下書きを保存しました'); } catch { setMessage('下書きを保存できませんでした'); } }}>下書きを残す</button>
       <button data-ink-restore className={button} onClick={() => { if (drawing.current) return; try { strokes.current = readInkDraft(localStorage.getItem(KEY)); setLast(strokes.current.at(-1) || null); repaint(); setMessage('下書きを戻しました'); } catch { setMessage('下書きを戻せませんでした'); } }}>下書きを戻す</button>
       <button data-ink-export className={button} disabled={!count} onClick={() => { const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 800; const ctx = reset(canvas, true); strokes.current.forEach((stroke) => drawInk(ctx, stroke)); canvas.toBlob((blob) => download(blob, 'ペンの比較.png')); }}>画像を保存</button>
-      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.25.0', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
+      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.25.1', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
     </div>
     <p role="status" className="text-xs">{message}</p>
     {last && <section className="mt-5"><h2 className="mb-2 text-sm">今の設定で直前の線を試す</h2><canvas data-ink-tuning width={600} height={400} className="w-full rounded-lg bg-white" ref={(canvas) => { if (canvas) drawInk(reset(canvas, true), { ...last, mode, width, settings }); }} /><p className="mt-2 text-xs text-neutral-400">スライダーを動かすとこの見本だけ変わります。上の紙の線は変更しません。</p></section>}

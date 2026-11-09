@@ -34,4 +34,15 @@ describe('連続輪郭の比較ペン', () => {
     expect(fast[1][2]).toBeLessThan(slow[1][2]);
   });
 
+  it('細くなる側と太くなる側の反応を独立させ、旧設定の線幅を保つ', () => {
+    const input = samples(1);
+    const legacy = inkPoints(input, 'speed', { response: 28 });
+    expect(inkPoints(input, 'speed', { responseThin: 28, responseThick: 28 })).toEqual(legacy);
+    expect(inkPoints(input, 'speed', { responseThin: 4, responseThick: 64 })[1][2]).toBeLessThan(legacy[1][2]);
+    const stopped = [...input, { ...input.at(-1), t: input.at(-1).t + 16 }];
+    const quick = inkPoints(stopped, 'speed', { responseThin: 16, responseThick: 4 }).at(-1)[2];
+    const gentle = inkPoints(stopped, 'speed', { responseThin: 16, responseThick: 64 }).at(-1)[2];
+    expect(quick).toBeGreaterThan(gentle);
+  });
+
 });
