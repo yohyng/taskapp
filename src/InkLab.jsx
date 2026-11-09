@@ -65,11 +65,12 @@ export default function InkLab() {
     link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
   return <main className="mx-auto max-w-3xl p-4 ts-text">
-    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.23.0</span></h1>
-    <p className="my-3 text-sm text-neutral-300">まず速度で強弱を試してください。ゆっくり書くと太く、速く書くと細くなります。本番のノートには追加されません。</p>
+    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.24.0</span></h1>
+    <p className="my-3 text-sm text-neutral-300">速度で太さが変わるペンと、筆圧で濃淡が変わる鉛筆を選べます。本番のノートには追加されません。</p>
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="ペンの方式">
       {Object.entries(INK_MODES).map(([value, label]) => <button key={value} data-ink-mode={value} aria-pressed={mode === value} className={`${button} aria-pressed:bg-white/20`} onClick={() => setMode(value)}>{label}</button>)}
     </div>
+    <p data-ink-description className="mb-3 text-sm text-neutral-300">{mode === 'speed' ? 'Concepts風：ゆっくり太く、速く細く。' : mode === 'pencil' ? 'Goodnotes風：軽い力で淡く、押すと濃く。太さの変化は控えめです。' : mode === 'fixed' ? '力や速さによらず、同じ幅で描きます。' : '実際の筆圧で線幅が変わります。'}</p>
     <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
       <label>太さ <select data-ink-width value={width} onChange={(e) => setWidth(Number(e.target.value))} className="rounded border border-white/20 bg-neutral-800 p-2"><option value={6}>細め</option><option value={10}>標準</option><option value={16}>太め</option></select></label>
       <button data-ink-undo className={button} disabled={!count} onClick={() => { if (drawing.current) return; strokes.current.pop(); setLast(strokes.current.at(-1) || null); repaint(); }}>戻す</button>
@@ -85,18 +86,18 @@ export default function InkLab() {
           drawInk(reset(overlay.current), drawing.current.stroke, false);
         }} onPointerMove={add} onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish} />
     </div>
-    <p className="my-2 text-xs text-neutral-400">方式と太さの変更は、次に書く線へ適用されます。筆圧型はSペンで比較してください。</p>
+    <p className="my-2 text-xs text-neutral-400">方式と太さの変更は、次に書く線へ適用されます。筆圧ペンと鉛筆は、SペンやApple Pencilで比較してください。</p>
     <div className="my-3 flex flex-wrap gap-2 text-sm">
       <button data-ink-save className={button} disabled={!count} onClick={() => { try { localStorage.setItem(KEY, JSON.stringify(strokes.current)); setMessage('この端末に下書きを保存しました'); } catch { setMessage('下書きを保存できませんでした'); } }}>下書きを残す</button>
       <button data-ink-restore className={button} onClick={() => { if (drawing.current) return; try { strokes.current = readInkDraft(localStorage.getItem(KEY)); setLast(strokes.current.at(-1) || null); repaint(); setMessage('下書きを戻しました'); } catch { setMessage('下書きを戻せませんでした'); } }}>下書きを戻す</button>
       <button data-ink-export className={button} disabled={!count} onClick={() => { const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 800; const ctx = reset(canvas, true); strokes.current.forEach((stroke) => drawInk(ctx, stroke)); canvas.toBlob((blob) => download(blob, 'ペンの比較.png')); }}>画像を保存</button>
-      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.23.0', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
+      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.24.0', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
     </div>
     <p role="status" className="text-xs">{message}</p>
-    {last && <section className="mt-5"><h2 className="text-sm">同じ入力を3方式で比較</h2><p className="my-2 text-xs text-neutral-400">直前の線の軌跡・時刻・筆圧を使い、太さの決め方だけを変えています。</p><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    {last && <section className="mt-5"><h2 className="text-sm">同じ入力を4種類で比較</h2><p className="my-2 text-xs text-neutral-400">直前の線の軌跡・時刻・筆圧を使い、ペンの表現を変えています。</p><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       {Object.entries(INK_MODES).map(([value, label]) => <div key={value}><p className="mb-1 text-xs">{label}</p><canvas data-ink-replay={value} width={600} height={400} className="w-full rounded-lg bg-white" ref={(canvas) => { if (canvas) drawInk(reset(canvas, true), last, true, value); }} /></div>)}
     </div></section>}
-    <p className="mt-5 text-xs text-neutral-400">描画：perfect-freehand。端に人工的な膨らみは足していません。<a href="/pen-lab.html" className="underline">以前の検証ページ</a></p>
+    <p className="mt-5 text-xs text-neutral-400">独自の近似ブラシです。各アプリと同一の描画方式ではありません。鉛筆は筆圧による濃淡と紙目を試せます（傾きの陰影は未対応）。<a href="/pen-lab.html" className="underline">以前の検証ページ</a></p>
   </main>;
 }
 createRoot(document.getElementById('root')).render(<InkLab />);

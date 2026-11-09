@@ -19,16 +19,16 @@ async function draw(page, mode = 'speed') {
   });
 }
 
-test('三つの方式で同じ入力を比較し、下書きと画像の形を保つ', async ({ page }) => {
+test('四つの方式で同じ入力を比較し、下書きと画像の形を保つ', async ({ page }) => {
   const requests = [], errors = [];
   page.on('request', (r) => { if (/supabase|script.google/.test(r.url())) requests.push(r.url()); });
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('/ink-lab.html');
   await expect(page.locator('[data-ink-mode="speed"]')).toHaveAttribute('aria-pressed', 'true');
   await draw(page);
-  await expect(page.locator('[data-ink-replay]')).toHaveCount(3);
+  await expect(page.locator('[data-ink-replay]')).toHaveCount(4);
   const replays = await page.locator('[data-ink-replay]').evaluateAll((canvases) => canvases.map((c) => c.toDataURL()));
-  expect(new Set(replays).size).toBe(3);
+  expect(new Set(replays).size).toBe(4);
   const pixels = await page.locator('[data-ink-base]').evaluate((c) => c.toDataURL());
   await page.locator('[data-ink-save]').click();
   await page.reload(); await page.locator('[data-ink-restore]').click();
@@ -64,4 +64,37 @@ test('実際のポインターを紙の外まで動かしても線を確定で�
   await page.locator('[data-ink-save]').click();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('fragments-ink-comparison-v1')));
   expect(saved).toHaveLength(1); expect(saved[0].samples.at(-1).x).toBe(600);
+});
+
+
+test('鉛筆の濃淡と紙目を保ち、復元とPNGで同じ表示になる', async ({ page }) => {
+  await page.goto('/ink-lab.html'); await draw(page, 'pencil');
+  await expect(page.locator('[data-ink-description]')).toContainText('押すと濃く');
+  const pixels = await page.locator('[data-ink-base]').evaluate((c) => c.toDataURL());
+  const tones = await page.locator('[data-ink-base]').evaluate((c) => {
+    const data = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    const tones = new Set(); for (let i = 0; i < data.length; i += 4) if (data[i] < 240) tones.add(data[i]); return [...tones];
+  });
+  expect(tones.length).toBeGreaterThan(20);
+  expect(Math.min(...tones)).toBeGreaterThan(32);
+  await page.locator('[data-ink-save]').click(); await page.reload(); await page.locator('[data-ink-restore]').click();
+  await expect.poll(() => page.locator('[data-ink-base]').evaluate((c) => c.toDataURL())).toBe(pixels);
+  const pending = page.waitForEvent('download'); await page.locator('[data-ink-export]').click();
+  expect(`data:image/png;base64,${(await readFile(await (await pending).path())).toString('base64')}`).toBe(pixels);
+  await page.screenshot({ path: `test-results/ink-pencil-${test.info().project.name}.png`, fullPage: true });
+  const masses = [];
+  for (const pressure of [0.1, 0.8]) {
+    await page.evaluate((pressure) => {
+      const strokes = JSON.parse(localStorage.getItem('fragments-ink-comparison-v1'));
+      for (const stroke of strokes) for (const sample of stroke.samples) sample.p = pressure;
+      localStorage.setItem('fragments-ink-comparison-v1', JSON.stringify(strokes));
+    }, pressure);
+    await page.locator('[data-ink-restore]').click();
+    masses.push(await page.locator('[data-ink-base]').evaluate((c) => {
+      const data = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let mass = 0; for (let i = 0; i < data.length; i += 4) mass += 255 - data[i]; return mass;
+    }));
+  }
+  expect(masses[1]).toBeGreaterThan(masses[0] * 1.2);
+
 });
