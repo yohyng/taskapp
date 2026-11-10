@@ -3299,7 +3299,44 @@ function App() {
     try { return localStorage.getItem("taskspace-active-pane-v1"); } catch { return null; }
   });
   const activePane = panes.find((p) => p.id === activePaneId) || panes[0];
-  const visiblePanes = panes.filter((p) => p.group === activePane.group);
+  const [paneLayouts, setPaneLayouts] = useState(() => {
+    try { const value = JSON.parse(localStorage.getItem("taskspace-pane-layouts-v1") || "{}"); return value && typeof value === "object" && !Array.isArray(value) ? value : {}; } catch { return {}; }
+  });
+  const [widePanes, setWidePanes] = useState(() => window.matchMedia("(min-width: 1024px)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 1024px)");
+    const changed = () => setWidePanes(media.matches);
+    media.addEventListener("change", changed); return () => media.removeEventListener("change", changed);
+  }, []);
+  const paneLayout = paneLayouts[activePane.group] || {};
+  const paneDirection = ["row", "column"].includes(paneLayout.direction) ? paneLayout.direction : "auto";
+  const panesInRow = paneDirection === "auto" ? widePanes : paneDirection === "row";
+  const groupPanes = panes.filter((p) => p.group === activePane.group);
+  const visiblePanes = paneLayout.reversed ? [...groupPanes].reverse() : groupPanes;
+  function rememberPaneLayout(next) {
+    setPaneLayouts((previous) => {
+      const value = { ...previous, [activePane.group]: next };
+      try { localStorage.setItem("taskspace-pane-layouts-v1", JSON.stringify(value)); } catch { /* この画面では切り替えられる */ }
+      return value;
+    });
+  }
+  const [paneMenu, setPaneMenu] = useState(null);
+  const paneMenuRef = useRef(null), paneMenuPointerRef = useRef(false), paneMenuTimerRef = useRef(null);
+  function openPaneMenu(target) {
+    paneMenuPointerRef.current = false;
+    const rect = target.getBoundingClientRect();
+    setPaneMenu({ x: Math.max(8, Math.min(window.innerWidth - 128, rect.x + rect.width / 2 - 60)), y: Math.max(8, Math.min(window.innerHeight - 64, rect.y + rect.height / 2 - 28)) });
+  }
+  useEffect(() => {
+    if (!paneMenu) return;
+    const dismiss = (event) => {
+      if (event.type === "keydown" ? event.key === "Escape" : !paneMenuRef.current?.contains(event.target)) setPaneMenu(null);
+    };
+    const close = () => setPaneMenu(null);
+    document.addEventListener("pointerdown", dismiss); document.addEventListener("keydown", dismiss);
+    window.addEventListener("resize", close);
+    return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", dismiss); window.removeEventListener("resize", close); };
+  }, [paneMenu]);
   const [showPaneAdd, setShowPaneAdd] = useState(false);
   const paneAddRef = useRef(null);
   useEffect(() => {
@@ -3315,6 +3352,7 @@ function App() {
     };
   }, [showPaneAdd]);
   function activatePane(id) {
+    setPaneMenu(null);
     setActivePaneId(id);
     try { localStorage.setItem("taskspace-active-pane-v1", id); } catch { /* noop */ }
   }
@@ -3322,7 +3360,7 @@ function App() {
     try { localStorage.setItem(PANES_KEY, JSON.stringify(next)); } catch { /* noop */ }
     return next;
   };
-  function addPane(split) {
+  function addPane(split, direction) {
     if (panes.length >= MAX_PANES) return;
     const id = `pane-${uid()}`;
     setPanes((prev) => {
@@ -3333,10 +3371,12 @@ function App() {
       // 分割するグループだけ均等にし、別タブの取り分は変えない。
       return rememberPanes([...prev, { id, mode, group: split ? activePane.group : id, weight: 1 }].map((p) => split && p.group === activePane.group ? { ...p, weight: 1 } : p));
     });
+    if (split && direction) rememberPaneLayout({ direction, reversed: !!paneLayout.reversed });
     activatePane(id);
     setShowPaneAdd(false);
   }
   function closePane(id) {
+    setPaneMenu(null);
     if (panes.length <= 1) return;
     const closing = panes.find((p) => p.id === id);
     if (id === activePane.id) {
@@ -3351,7 +3391,14 @@ function App() {
   // 枠と枠のあいだをつまんで、取り分を付け替える。
   // 横に並んでいるときは左右、縦に積んでいるときは上下。
   const panesRef = useRef(null);
+  const paneDraggedRef = useRef(false), paneResizeCleanupRef = useRef(null), paneLastPointerRef = useRef(-1000);
+  useEffect(() => () => { paneResizeCleanupRef.current?.(); clearTimeout(paneMenuTimerRef.current); }, []);
   function startPaneResize(e, index) {
+    if (!e.isPrimary || e.button !== 0) return;
+    paneResizeCleanupRef.current?.();
+    clearTimeout(paneMenuTimerRef.current);
+    paneDraggedRef.current = false;
+    setPaneMenu(null);
     e.preventDefault();
     const row = panesRef.current;
     if (!row) return;
@@ -3362,7 +3409,12 @@ function App() {
     const from = upright ? e.clientY : e.clientX;
     const base = visiblePanes.map((p) => p.weight ?? 1);
     const sum = base[index - 1] + base[index];
+    const captureTarget = e.target.closest("button") || e.currentTarget;
+    captureTarget.setPointerCapture(e.pointerId);
     const move = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 6 && !paneDraggedRef.current) return;
+      paneDraggedRef.current = true;
       // 動かした距離を、2つの枠が分け合っている取り分に換算する
       const share = (((upright ? ev.clientY : ev.clientX) - from) / total) * visiblePanes.length;
       const left = Math.max(0.25, Math.min(sum - 0.25, base[index - 1] + share));
@@ -3372,13 +3424,29 @@ function App() {
         return p;
       }));
     };
-    const up = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      setPanes((prev) => rememberPanes(prev));
+      window.removeEventListener("pointercancel", up);
+      paneResizeCleanupRef.current = null;
     };
+    const up = (ev) => {
+      if (ev.pointerId !== e.pointerId) return;
+      cleanup(); setPanes((prev) => rememberPanes(prev));
+      if (captureTarget.matches("[data-pane-rotate]") && ev.type === "pointerup") {
+        // Safariではpointerdownの抑止後にclickが来ないため、実ポインターはupで確定する。
+        paneLastPointerRef.current = performance.now();
+        if (!paneDraggedRef.current) {
+          // マウスの二度押しは従来の均等化を優先し、タッチは待たずに開く。
+          if (e.pointerType === "mouse") paneMenuTimerRef.current = setTimeout(() => openPaneMenu(captureTarget), 300);
+          else openPaneMenu(captureTarget);
+        }
+      }
+    };
+    paneResizeCleanupRef.current = cleanup;
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
   }
   function evenPanes() {
     setPanes((prev) => rememberPanes(prev.map((p) => p.group === activePane.group ? { ...p, weight: 1 } : p)));
@@ -3876,6 +3944,8 @@ function App() {
               <div data-pane-add-menu className="absolute left-0 top-full z-50 mt-1 w-44 rounded-lg border border-white/15 ts-surface p-1 shadow-xl">
                 <button data-pane-add-tab type="button" onClick={() => addPane(false)} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">タブで開く</button>
                 <button data-pane-add-split type="button" onClick={() => addPane(true)} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">画面を分割する</button>
+                <button data-pane-add-row type="button" onClick={() => addPane(true, "row")} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">左右に分割する</button>
+                <button data-pane-add-column type="button" onClick={() => addPane(true, "column")} className="w-full rounded px-3 py-2 text-left text-xs hover:bg-white/10">上下に分割する</button>
               </div>
             )}
             </div>
@@ -4265,14 +4335,23 @@ function App() {
           </div>
         </header>
 
-        {/* 枠を横に並べる。狭い画面では縦に積む（横に割ると読めないので）。 */}
+        {visiblePanes.length > 1 && <div className="flex items-center gap-2 px-1 py-1 text-xs text-neutral-400">
+          <label className="flex items-center gap-2">分割 <select data-pane-direction aria-label="分割の向き" value={paneDirection} onChange={(e) => rememberPaneLayout({ direction: e.target.value, reversed: !!paneLayout.reversed })} style={{ backgroundColor: "var(--ts-bg)", color: "var(--ts-text)" }} className="min-w-16 appearance-none rounded border border-white/15 px-2 py-1 text-center"><option value="auto">自動</option><option value="row">左右</option><option value="column">上下</option></select></label>
+          <span>中央の短いバーをタップで分割メニュー</span>
+        </div>}
+        {paneMenu && <div data-pane-menu ref={paneMenuRef} onPointerDown={() => { paneMenuPointerRef.current = true; }} onClickCapture={(event) => { if (event.detail > 0 && !paneMenuPointerRef.current) { event.preventDefault(); event.stopPropagation(); } }} role="group" aria-label="分割の操作" style={{ left: paneMenu.x, top: paneMenu.y, backgroundColor: "var(--ts-panel, #414544)" }} className="fixed z-[100] flex gap-1 rounded-full border border-white/20 p-1.5 text-neutral-200 shadow-xl">
+          <button data-pane-turn aria-label="分割の向きを切り替え" title="分割の向き" className="flex h-11 w-12 items-center justify-center rounded-full hover:bg-white/10" onClick={() => { rememberPaneLayout({ direction: panesInRow ? "column" : "row", reversed: !!paneLayout.reversed }); setPaneMenu(null); }}><span aria-hidden="true" className="relative h-6 w-5 rounded border-2 border-current"><span className="absolute inset-x-0 top-1/2 border-t-2 border-current" /></span></button>
+          <button data-pane-swap aria-label="ペインを入れ替え" title="入れ替え" className="flex h-11 w-12 items-center justify-center rounded-full text-2xl hover:bg-white/10" onClick={() => { rememberPaneLayout({ direction: paneDirection, reversed: !paneLayout.reversed }); setPaneMenu(null); }}><span aria-hidden="true">⇆</span></button>
+        </div>}
+        {/* 向きと順番は表示だけに適用し、編集中の枠を作り直さない。 */}
         <div
           data-panes
+          data-pane-axis={panesInRow ? "row" : "column"}
           ref={panesRef}
           className={classNames(
             // 残りの高さをぜんぶ使い、はみ出しは枠の中で見る
-            "flex min-h-0 flex-1 flex-col gap-2",
-            visiblePanes.length > 1 && "lg:flex-row lg:items-stretch",
+            "flex min-h-0 flex-1 gap-2 items-stretch",
+            panesInRow ? "flex-row" : "flex-col",
           )}
         >
           {panes.map((pane) => {
@@ -4284,25 +4363,22 @@ function App() {
             return (
               <React.Fragment key={pane.id}>
                 {visible && i > 0 && visiblePanes.length > 1 && (
-                  // 枠と枠のあいだのつまみ。狭い画面では縦に積むので出さない。
                   <div
                     data-pane-handle={i}
+                    style={{ order: i * 2 - 1 }}
                     onPointerDown={(e) => { e.stopPropagation(); startPaneResize(e, i); }}
-                    onDoubleClick={evenPanes}
+                    onDoubleClick={() => { clearTimeout(paneMenuTimerRef.current); setPaneMenu(null); evenPanes(); }}
                     title="ドラッグで取り分を変える／ダブルクリックで均等に戻す"
-                    className={classNames(
-                      "group/handle flex shrink-0 touch-none items-center justify-center",
-                      // 縦に積んでいるときは上下、横に並んでいるときは左右
-                      "h-2 w-full cursor-row-resize lg:h-auto lg:w-2 lg:cursor-col-resize",
-                    )}
+                    className={classNames("group/handle relative flex shrink-0 touch-none items-center justify-center", panesInRow ? "w-3 cursor-col-resize" : "h-3 w-full cursor-row-resize")}
                   >
-                    <span className="h-[3px] w-10 rounded-full bg-white/10 transition group-hover/handle:bg-accent-400/60 lg:h-10 lg:w-[3px]" />
+                    <span className={classNames("rounded-full bg-white/15 transition group-hover/handle:bg-accent-400/60", panesInRow ? "h-10 w-[3px]" : "h-[3px] w-10")} />
+                    <button data-pane-rotate type="button" aria-label="分割メニューを開く" aria-expanded={!!paneMenu} title="タップでメニュー／ドラッグで大きさを調整" onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); openPaneMenu(event.currentTarget); } }} onClick={(event) => { event.stopPropagation(); if (event.detail === 0 && performance.now() - paneLastPointerRef.current > 700) openPaneMenu(event.currentTarget); }} className="absolute left-1/2 top-1/2 z-10 h-11 w-11 -translate-x-1/2 -translate-y-1/2 rounded-lg bg-transparent focus-visible:outline focus-visible:outline-accent-400" />
                   </div>
                 )}
                 <div
                   data-pane={pane.mode}
                   data-pane-id={pane.id}
-                  style={!visible ? { display: "none" } : visiblePanes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0 } : undefined}
+                  style={!visible ? { display: "none" } : visiblePanes.length > 1 ? { flexGrow: pane.weight ?? 1, flexBasis: 0, order: i * 2 } : undefined}
                   className={classNames(
                     // 枠ごとに転がす。隣や画面ぜんたいを巻き込まない。
                     "ts-pane min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain",

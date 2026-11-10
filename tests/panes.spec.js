@@ -262,6 +262,7 @@ test.describe("枠ごとに転がす", () => {
 });
 
 test("転がす棒は細く、配色に馴染む", async ({ page }) => {
+  test.skip(!await page.evaluate(() => CSS.supports("scrollbar-color", "red transparent")), "標準のscrollbar-colorを実装したブラウザーで確認する");
   const pane = page.locator("[data-pane-id]").first();
   expect(await pane.evaluate((e) => getComputedStyle(e).scrollbarWidth)).toBe("thin");
   // 色は文字の色から作る（薄く、溝は透かす）

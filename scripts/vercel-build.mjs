@@ -27,6 +27,7 @@ export function vercelBuildPlan(env, release = productionRelease) {
     const config = releaseConfig({ ...env, VITE_OUTLINE_DOCUMENT_ID: release.documentId, VITE_OUTLINE_CUTOVER: '1' });
     return { staging: false, release: true, viteArgs: ['build', '--mode', 'sync-release'], config };
   }
+  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === 'codex/rotate-pane-layout') return { staging: false, isolated: true, viteArgs: ['build'] };
   if (env.VERCEL_GIT_COMMIT_REF !== stagingBranch) return { staging: false, viteArgs: ['build'] };
   // ブランチ名だけでは本番への誤配信を防げない。環境とリポジトリも揃わなければ停止する。
   if (env.VERCEL !== '1' || env.VERCEL_ENV !== 'preview' || env.VERCEL_GIT_REPO_OWNER !== 'yohyng'
@@ -47,7 +48,7 @@ export async function buildVercel(env = process.env) {
     run('npx', ['--yes', '--package=pnpm@11.25.0', '--', 'pnpm', '--dir', 'experiments/sync-lab', 'install', '--frozen-lockfile'], env);
   }
   run(process.execPath, [resolve(root, 'node_modules/vite/bin/vite.js'), ...plan.viteArgs],
-    plan.staging ? { ...env, ...previewEnvironment } : plan.release ? { ...env, VITE_OUTLINE_DOCUMENT_ID: plan.config.docId, VITE_OUTLINE_CUTOVER: '1' } : env);
+    plan.isolated ? { ...env, VITE_SUPABASE_URL: '', VITE_SUPABASE_ANON_KEY: '' } : plan.staging ? { ...env, ...previewEnvironment } : plan.release ? { ...env, VITE_OUTLINE_DOCUMENT_ID: plan.config.docId, VITE_OUTLINE_CUTOVER: '1' } : env);
   if (plan.staging || plan.release) {
     const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'));
     const manifest = { format: 1, kind: plan.release ? 'published-release-app' : 'published-staging-app', synthetic: !plan.release, version: pkg.version,
