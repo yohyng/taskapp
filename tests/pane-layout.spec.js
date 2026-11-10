@@ -10,7 +10,16 @@ async function rects(page) {
   return panes(page).evaluateAll((items) => items.map((e) => { const r = e.getBoundingClientRect(); return { id: e.dataset.paneId, x: r.x, y: r.y, width: r.width, height: r.height }; }));
 }
 
-test('中央をタップすると四つの配置を一巡し、枠を作り直さない', async ({ page }) => {
+async function cycle(page, first = false) {
+  const fromColumn = await page.locator('[data-panes]').getAttribute('data-pane-axis') === 'column';
+  const handle = first ? page.locator('[data-pane-rotate]').first() : page.locator('[data-pane-rotate]');
+  await handle.tap();
+  await expect(page.locator('[data-pane-menu]')).toBeVisible();
+  await page.locator('[data-pane-turn]').tap();
+  if (fromColumn) { await handle.tap(); await page.locator('[data-pane-swap]').tap(); }
+}
+
+test('中央のメニューから四つの配置へ切り替え、枠を作り直さない', async ({ page }) => {
   await split(page, 'row');
   await page.evaluate(() => { window.paneNodes = [...document.querySelectorAll('[data-pane-id]')]; window.paneNodes[0].scrollTop = 120; });
   for (let index = 0; index < 4; index++) {
@@ -19,7 +28,7 @@ test('中央をタップすると四つの配置を一巡し、枠を作り直�
     else expect(a.y < b.y).toBe(index === 1);
     await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', index % 2 === 0 ? 'row' : 'column');
     expect(await page.evaluate(() => window.paneNodes.every((node) => node === document.querySelector(`[data-pane-id="${node.dataset.paneId}"]`)))).toBe(true);
-    await page.locator('[data-pane-rotate]').tap();
+    await cycle(page);
   }
   const [a, b] = await rects(page); expect(a.x).toBeLessThan(b.x);
   expect(await page.evaluate(() => window.paneNodes[0].scrollTop)).toBeGreaterThan(0);
@@ -29,7 +38,7 @@ test('中央をタップすると四つの配置を一巡し、枠を作り直�
 test('上下と左右を明示して選び、回転した順番も再読込で保つ', async ({ page }) => {
   await split(page, 'column');
   await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', 'column');
-  await page.locator('[data-pane-rotate]').tap();
+  await cycle(page);
   await page.reload();
   await expect(page.locator('[data-pane-direction]')).toHaveValue('row');
   const [a, b] = await rects(page); expect(a.x).toBeGreaterThan(b.x);
@@ -38,14 +47,16 @@ test('上下と左右を明示して選び、回転した順番も再読込で�
   await page.screenshot({ path: `test-results/pane-layout-column-${test.info().project.name}.png` });
 });
 
-test('回転ボタンをドラッグしたときは回転せず、取り分だけを変える', async ({ page }) => {
+test('短いバーをドラッグしたときはメニューを開かず、取り分だけを変える', async ({ page }) => {
   await split(page, 'column');
   const before = await rects(page), box = await page.locator('[data-pane-rotate]').boundingBox();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2 + 100, { steps: 10 }); await page.mouse.up();
   await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', 'column');
   expect((await rects(page))[0].height).toBeGreaterThan(before[0].height + 50);
+  await expect(page.locator('[data-pane-menu]')).toHaveCount(0);
   await page.locator('[data-pane-rotate]').focus(); await page.keyboard.press('Enter');
+  await expect(page.locator('[data-pane-menu]')).toBeVisible(); await page.locator('[data-pane-turn]').tap();
   await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', 'row');
 });
 
@@ -62,8 +73,8 @@ test('方向は分割グループごとに保持し、他のタブへ持ち込�
 test('三分割でも全ての枠を保って向きと順番を切り替える', async ({ page }) => {
   await split(page, 'row'); await split(page, 'row');
   const original = await rects(page);
-  await page.locator('[data-pane-rotate]').first().tap();
-  await page.locator('[data-pane-rotate]').first().tap();
+  await cycle(page, true);
+  await cycle(page, true);
   const current = await rects(page);
   expect(current.map((p) => p.id)).toEqual(original.map((p) => p.id));
   expect(current[0].x).toBeGreaterThan(current[1].x); expect(current[1].x).toBeGreaterThan(current[2].x);
@@ -76,6 +87,18 @@ test('分割線に沿って外れたドラッグをしてもタップとして�
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
   await page.mouse.move(box.x + 100, box.y + box.height / 2, { steps: 10 }); await page.mouse.up();
   await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', 'column');
-  await page.locator('[data-pane-rotate]').tap();
+  await cycle(page);
   await expect(page.locator('[data-panes]')).toHaveAttribute('data-pane-axis', 'row');
+});
+
+test('短いバーのメニューは外側タップとEscapeで閉じる', async ({ page }) => {
+  await split(page, 'row');
+  await expect(page.locator('[data-pane-menu]')).toHaveCount(0);
+  await page.locator('[data-pane-rotate]').tap();
+  await expect(page.locator('[data-pane-menu] button')).toHaveCount(2);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-pane-menu]')).toHaveCount(0);
+  await page.locator('[data-pane-rotate]').tap();
+  await page.locator('[data-pane-tab]').first().tap();
+  await expect(page.locator('[data-pane-menu]')).toHaveCount(0);
 });
