@@ -138,3 +138,20 @@ test('ゆらぎと厚みの設定を選び、従来の速度ペンへ戻せる',
   await page.locator('[data-ink-baseline]').click();
   await expect(page.locator('[data-ink-streamline]')).toHaveValue('15');
 });
+
+test('スマホのタップで選択中の設定と次の線への適用を表示する', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.goto('/ink-lab.html');
+    await page.locator('[data-ink-organic]').tap();
+    await expect(page.locator('[data-ink-organic]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：ゆらぎと厚みを残す');
+    await expect(page.locator('p[role=status]')).toContainText('次に書く線に適用');
+    await page.reload();
+    await expect(page.locator('[data-ink-organic]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('[data-ink-baseline]').tap();
+    await expect(page.locator('[data-ink-organic]')).toHaveAttribute('aria-pressed', 'false');
+    await expect(page.locator('[data-ink-baseline]')).toHaveAttribute('aria-pressed', 'true');
+  } finally { await context.close(); }
+});
