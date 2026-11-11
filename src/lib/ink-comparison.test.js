@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inkOutline, inkPoints, readInkDraft } from './ink-comparison';
+import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC } from './ink-comparison';
 
 const samples = (speed, interval = 8) => Array.from({ length: Math.floor(160 / interval) + 1 }, (_, i) => ({ x: 20 + speed * i * interval, y: 100, t: i * interval, p: 0.4 }));
 describe('連続輪郭の比較ペン', () => {
@@ -45,4 +45,12 @@ describe('連続輪郭の比較ペン', () => {
     expect(quick).toBeGreaterThan(gentle);
   });
 
+});
+
+it('ゆらぎ設定は実測軌跡を保ち、速い区間の厚みを残し、下書きを同じ輪郭へ復元する', () => {
+  const input = samples(2), stroke = { mode: 'speed', width: 10, settings: INK_ORGANIC, samples: input };
+  const points = inkPoints(input, 'speed', INK_ORGANIC);
+  expect(points.map(p => p.slice(0, 2))).toEqual(input.map(p => [p.x, p.y]));
+  expect(points.at(-1)[2]).toBeGreaterThan(inkPoints(input, 'speed').at(-1)[2]);
+  expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
 });

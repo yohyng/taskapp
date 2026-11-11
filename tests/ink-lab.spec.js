@@ -115,7 +115,7 @@ test('スライダーは見本と次の線へ適用し、基準と端末の設�
   await draw(page); await page.locator('[data-ink-save]').click();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('fragments-ink-comparison-v1')));
   expect(saved[0].width).toBe(10); expect(saved[1].width).toBe(40);
-  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6 });
+  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6, smoothing: 0.45, minPressure: 0.2 });
   await page.reload(); await expect(page.locator('[data-ink-width]')).toHaveValue('40');
   await page.locator('[data-ink-controls] summary').click();
   await expect(page.locator('[data-ink-response-thin]')).toHaveValue('64');
@@ -127,4 +127,14 @@ test('スライダーは見本と次の線へ適用し、基準と端末の設�
   await page.locator('[data-ink-gentle-return]').click();
   await expect(page.locator('[data-ink-response-thin]')).toHaveValue('12');
   await expect(page.locator('[data-ink-response-thick]')).toHaveValue('28');
+});
+
+test('ゆらぎと厚みの設定を選び、従来の速度ペンへ戻せる', async ({ page }) => {
+  await page.goto('/ink-lab.html');
+  await page.locator('[data-ink-organic]').click();
+  await page.locator('[data-ink-controls] summary').click();
+  await expect(page.locator('[data-ink-streamline]')).toHaveValue('3');
+  await expect(page.locator('[data-ink-response-thick]')).toHaveValue('12');
+  await page.locator('[data-ink-baseline]').click();
+  await expect(page.locator('[data-ink-streamline]')).toHaveValue('15');
 });
