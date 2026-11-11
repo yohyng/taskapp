@@ -115,7 +115,7 @@ test('スライダーは見本と次の線へ適用し、基準と端末の設�
   await draw(page); await page.locator('[data-ink-save]').click();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('fragments-ink-comparison-v1')));
   expect(saved[0].width).toBe(10); expect(saved[1].width).toBe(40);
-  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6, smoothing: 0.45, minPressure: 0.2 });
+  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6, localReturn: 0, smoothing: 0.45, minPressure: 0.2 });
   await page.reload(); await expect(page.locator('[data-ink-width]')).toHaveValue('40');
   await page.locator('[data-ink-controls] summary').click();
   await expect(page.locator('[data-ink-response-thin]')).toHaveValue('64');
@@ -153,5 +153,19 @@ test('スマホのタップで選択中の設定と次の線への適用を表�
     await page.locator('[data-ink-baseline]').tap();
     await expect(page.locator('[data-ink-organic]')).toHaveAttribute('aria-pressed', 'false');
     await expect(page.locator('[data-ink-baseline]')).toHaveAttribute('aria-pressed', 'true');
+  } finally { await context.close(); }
+});
+
+test('局所的なたまりをタップで選び、旧設定へ戻せる', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true });
+  const page = await context.newPage();
+  try {
+    await page.goto('/ink-lab.html');
+    await page.locator('[data-ink-local-return]').tap();
+    await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：細さと局所的なたまり');
+    await page.reload();
+    await expect(page.locator('[data-ink-local-return]')).toHaveAttribute('aria-pressed', 'true');
+    await page.locator('[data-ink-organic]').tap();
+    await expect(page.locator('[data-ink-local-return]')).toHaveAttribute('aria-pressed', 'false');
   } finally { await context.close(); }
 });

@@ -3,18 +3,19 @@ import { getStroke } from 'perfect-freehand';
 export const INK_MODES = { speed: 'Concepts風・速度ペン', pencil: 'Goodnotes風・鉛筆', pressure: '実筆圧ペン', fixed: '一定幅ペン' };
 export const INK_DEFAULTS = { thinning: 0.6, response: 16, responseThin: 16, responseThick: 16, streamline: 0.15 };
 export const INK_ORGANIC = { ...INK_DEFAULTS, streamline: 0.03, smoothing: 0.35, thinning: 0.5, responseThin: 24, responseThick: 12, minPressure: 0.3 };
+export const INK_LOCAL_RETURN = { ...INK_DEFAULTS, streamline: 0.04, smoothing: 0.45, responseThin: 12, responseThick: 24, minPressure: 0.2, localReturn: 0.14 };
 export function inkSettings(settings = {}) {
   const limit = (value, min, max, fallback) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
   const response = limit(settings?.response, 4, 64, 16);
-  return { smoothing: limit(settings?.smoothing, 0, 1, 0.45), minPressure: limit(settings?.minPressure, 0.1, 0.5, 0.2), responseThin: limit(settings?.responseThin, 4, 64, response), responseThick: limit(settings?.responseThick, 4, 64, response), thinning: limit(settings?.thinning, 0, 0.9, 0.6), response: limit(settings?.response, 4, 64, 16), streamline: limit(settings?.streamline, 0, 0.6, 0.15) };
+  return { localReturn: limit(settings?.localReturn, 0, 0.25, 0), smoothing: limit(settings?.smoothing, 0, 1, 0.45), minPressure: limit(settings?.minPressure, 0.1, 0.5, 0.2), responseThin: limit(settings?.responseThin, 4, 64, response), responseThick: limit(settings?.responseThick, 4, 64, response), thinning: limit(settings?.thinning, 0, 0.9, 0.6), response: limit(settings?.response, 4, 64, 16), streamline: limit(settings?.streamline, 0, 0.6, 0.15) };
 }
 export const INK_WIDTH = 600;
 export const INK_HEIGHT = 400;
 
 // 時刻を使って速度を求め、イベントの届く頻度だけで太さが変わるのを避ける。
 export function inkPoints(samples, mode, settings) {
-  const { responseThin, responseThick, minPressure } = inkSettings(settings);
-  let speed = 0.5;
+  const { responseThin, responseThick, minPressure, localReturn } = inkSettings(settings);
+  let speed = 0.5, returnPressure = 0;
   return samples.map((sample, index) => {
     if (index) {
       const previous = samples[index - 1];
@@ -22,11 +23,15 @@ export function inkPoints(samples, mode, settings) {
       if (elapsed > 0) {
         const measured = Math.min(4, Math.hypot(sample.x - previous.x, sample.y - previous.y) / elapsed);
         // 加速で細くなる側と減速で太くなる側を分ける。旧設定は両方へ同じ値を使う。
+        // 減速中だけ短い余韻を付け、速い区間の最低幅は上げない。静止点へ追加の丸は描かない。
+        const moving = sample.x !== previous.x || sample.y !== previous.y;
+        const target = moving ? localReturn * Math.max(0, (speed - measured) / Math.max(0.3, speed)) : 0;
+        returnPressure += (target - returnPressure) * (1 - Math.exp(-elapsed / (target > returnPressure ? 12 : 32)));
         const response = measured > speed ? responseThin : responseThick;
         speed += (measured - speed) * (1 - Math.exp(-elapsed / response));
       }
     }
-    const pressure = mode === 'speed' ? minPressure + (0.85 - minPressure) / (1 + speed / 0.45) : sample.p;
+    const pressure = mode === 'speed' ? Math.min(0.9, minPressure + (0.85 - minPressure) / (1 + speed / 0.45) + returnPressure) : sample.p;
     return [sample.x, sample.y, pressure];
   });
 }

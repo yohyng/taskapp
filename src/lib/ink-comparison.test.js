@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC } from './ink-comparison';
+import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC, INK_LOCAL_RETURN } from './ink-comparison';
 
 const samples = (speed, interval = 8) => Array.from({ length: Math.floor(160 / interval) + 1 }, (_, i) => ({ x: 20 + speed * i * interval, y: 100, t: i * interval, p: 0.4 }));
 describe('連続輪郭の比較ペン', () => {
@@ -52,5 +52,15 @@ it('ゆらぎ設定は実測軌跡を保ち、速い区間の厚みを残し、�
   const points = inkPoints(input, 'speed', INK_ORGANIC);
   expect(points.map(p => p.slice(0, 2))).toEqual(input.map(p => [p.x, p.y]));
   expect(points.at(-1)[2]).toBeGreaterThan(inkPoints(input, 'speed').at(-1)[2]);
+  expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
+});
+
+it('局所的なたまりは等速時に増えず、減速時だけ厚みを残し復元できる', () => {
+  const fast = samples(2), config = INK_LOCAL_RETURN;
+  const base = { ...config, localReturn: 0 };
+  expect(inkPoints(fast, 'speed', config).at(-1)[2]).toBeCloseTo(inkPoints(fast, 'speed', base).at(-1)[2], 8);
+  const last = fast.at(-1), input = [...fast, { ...last, x: last.x + 1, t: last.t + 16 }];
+  expect(inkPoints(input, 'speed', config).at(-1)[2]).toBeGreaterThan(inkPoints(input, 'speed', base).at(-1)[2]);
+  const stroke = { mode: 'speed', width: 10, samples: input, settings: config };
   expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
 });
