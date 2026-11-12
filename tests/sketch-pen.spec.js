@@ -165,6 +165,7 @@ test('紙の右端をドラッグで足した余白にも、すぐ線を書け�
 });
 
 test('紙の移動モードではドラッグを線として保存せず、ペン専用でも紙を移動できる', async ({page}) => {
+  await page.setViewportSize({width:390,height:844});
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await page.locator('[data-sketch-edge="right"]').focus();
   for(let i=0;i<10;i++) await page.keyboard.press('ArrowRight');
@@ -178,4 +179,26 @@ test('紙の移動モードではドラッグを線として保存せず、ペ�
   await expect(page.locator('[data-sketch-undo]')).toBeDisabled();
   await page.locator('[data-sketch-pan]').click();
   await expect(page.locator('[data-sketch-pan]')).toHaveAttribute('aria-pressed','false');
+});
+
+test('紙と一緒にnoteの外枠も広がり、線の表示倍率は変わらない', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1600,height:1200});
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  const board=page.locator('[data-note-board]'),canvas=page.locator('[data-sketch-canvas]');
+  const before=await board.boundingBox(), paperBefore=await canvas.boundingBox();
+  await page.locator('[data-sketch-edge="right"]').focus();
+  for(let i=0;i<10;i++) await page.keyboard.press('ArrowRight');
+  const after=await board.boundingBox(),paperAfter=await canvas.boundingBox();
+  expect(after.width).toBeGreaterThan(before.width+100);
+  expect(paperAfter.width/900).toBeCloseTo(paperBefore.width/600,2);
+  expect(paperAfter.height).toBeCloseTo(paperBefore.height,0);
+  await page.locator('[data-quick-add-sketch]').click(); await page.locator('[data-quick-add-sketch]').click();
+  expect((await board.boundingBox()).width).toBeCloseTo(after.width,0);
+  expect((await canvas.boundingBox()).width).toBeCloseTo(paperAfter.width,0);
+  await page.locator('[data-sketch-edge="bottom"]').focus(); await page.keyboard.press('ArrowDown');
+  expect((await board.boundingBox()).height).toBeGreaterThan(after.height);
+  await page.screenshot({path:`test-results/note-wide-${testInfo.project.name}.png`});
+  await page.setViewportSize({width:390,height:844});
+  const mobile=await board.boundingBox(); expect(mobile.x).toBeGreaterThanOrEqual(0);
+  expect(mobile.x+mobile.width).toBeLessThanOrEqual(390);
 });
