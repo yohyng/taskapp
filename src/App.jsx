@@ -3213,6 +3213,15 @@ function App() {
   // メモはアウトライン側に書く。木そのものは受け取らない
   //（受け取ると、アウトラインで1文字打つたびに画面ぜんたいが描き直される）。
   const outline = useOutlineApi();
+  // 手書きの画面を開いている間は、アウトラインの重い仕事を持ち越してもらう。
+  // 実機の計測で、書いている最中に画面を止めていたのは手書きではなく、
+  // 60秒ごとの読み直しと、そのあとの端末への書き戻しだった。
+  const sketching = quickAddOpen && quickAddMode === "sketch";
+  useEffect(() => {
+    outline.quiet?.(sketching);
+    return () => outline.quiet?.(false);
+  }, [sketching, outline]);
+
   const [quickAddKind, setQuickAddKind] = useState(() => {
     if (readSketchDraft().length) return "memo";
     try { return localStorage.getItem(QUICK_ADD_KIND_KEY) === "memo" ? "memo" : "task"; } catch { return "task"; }

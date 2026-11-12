@@ -121,3 +121,67 @@ test.describe("止まりの計測（本番と同じ画面で）", () => {
     await expect(page.locator("[data-probe-copy]")).toBeEnabled();
   });
 });
+
+test.describe("手書き中は、アウトラインの重い仕事を持ち越す", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      // 端末への書き戻しが、いつ起きたかを数える
+      window.__idbPuts = 0;
+      const open = indexedDB.open;
+      indexedDB.open = function patched(...args) {
+        const request = open.apply(this, args);
+        request.addEventListener("success", () => {
+          const db = request.result;
+          const transaction = db.transaction;
+          db.transaction = function patchedTx(...txArgs) {
+            const tx = transaction.apply(this, txArgs);
+            const store = tx.objectStore;
+            tx.objectStore = function patchedStore(...storeArgs) {
+              const object = store.apply(this, storeArgs);
+              const put = object.put;
+              object.put = function patchedPut(...putArgs) { window.__idbPuts += 1; return put.apply(this, putArgs); };
+              return object;
+            };
+            return tx;
+          };
+        });
+        return request;
+      };
+      localStorage.setItem("taskspace-outline-v1", JSON.stringify([{ id: "a", text: "ひとつ", children: [] }]));
+    });
+    await page.goto("/");
+    await page.waitForSelector("header");
+  });
+
+  test("手書きを開いている間は書き戻さない", async ({ page }) => {
+    await page.locator("[data-pane-mode]").first().selectOption("outline");
+    await page.waitForSelector("[data-outliner]");
+    await page.locator("[data-header-sketch]").click();
+    await page.waitForSelector("[data-sketch-canvas]");
+    await page.waitForTimeout(500);
+    const before = await page.evaluate(() => window.__idbPuts);
+
+    const box = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(box.x + 40, box.y + 40);
+    await page.mouse.down();
+    for (let i = 1; i <= 30; i++) await page.mouse.move(box.x + 40 + i * 6, box.y + 40 + Math.sin(i / 4) * 10);
+    await page.mouse.up();
+    await page.waitForTimeout(1200);
+    expect(await page.evaluate(() => window.__idbPuts), "書いている間は書き戻さない").toBe(before);
+  });
+
+  test("閉じれば、また書き戻すようになる", async ({ page }) => {
+    await page.locator("[data-pane-mode]").first().selectOption("outline");
+    await page.waitForSelector("[data-outliner]");
+    await page.locator("[data-header-sketch]").click();
+    await page.waitForSelector("[data-sketch-canvas]");
+    await page.locator("[data-sketch-close]").click();
+    await expect(page.locator("[data-sketch-canvas]")).toHaveCount(0);
+    const before = await page.evaluate(() => window.__idbPuts);
+    // 閉じたあとのアウトラインの書き換えは、これまで通り端末へ残る
+    await page.locator("[data-row] [data-row-text]").first().click();
+    await page.keyboard.type("あ");
+    await page.keyboard.press("Escape");
+    await expect.poll(async () => page.evaluate(() => window.__idbPuts), { timeout: 8000 }).toBeGreaterThan(before);
+  });
+});

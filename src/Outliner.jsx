@@ -116,6 +116,9 @@ export function OutlineProvider({ children }) {
   const retryRef = useRef(null);
   const sendingRef = useRef(false);
   const stoppedRef = useRef(false);
+  // 手書きの最中だけ静かにするための札と、持ち越したぶんの覚え
+  const quietRef = useRef(false);
+  const owedPullRef = useRef(false), owedInboxRef = useRef(false), owedSaveRef = useRef(false);
   const syncGenerationRef = useRef(0);            // 手動取り込み前に始まった確認結果を捨てる
   const [retry, setRetry] = useState(0);        // 送信後・失敗後に差分を確かめ直す
   useEffect(() => {
@@ -154,6 +157,8 @@ export function OutlineProvider({ children }) {
   const localWriteRef = useRef({ pending: null, running: false, version: 0 });
   const localRetryRef = useRef(null);
   const saveLocal = useCallback(() => {
+    // 手書きの最中は、端末への書き戻しを持ち越す（約160ms 画面が止まるため）
+    if (quietRef.current) { owedSaveRef.current = true; return Promise.resolve(false); }
     // 読む前に書くと、起き抜けの空の木が本物を押しのけてしまう。
     if (!ownerRef.current || !bigReadRef.current || stoppedRef.current
       || (!contentReadyRef.current && !queueRef.current.pending.size)) return Promise.resolve(false);
@@ -326,6 +331,8 @@ export function OutlineProvider({ children }) {
   // 読み込み：向こうと突き合わせる。消した印のものは戻さない。
   // 手元を読み終えてから、一度だけ呼ぶ。
   const pullOnce = useCallback(function pullOutline() {
+    // 手書きの最中は、向こうの読み直しを持ち越す（返事の読み取りで止まるため）
+    if (quietRef.current) { owedPullRef.current = true; return; }
     if (!ownerRef.current || stoppedRef.current || replacingRef.current) return;
     const generation = syncGenerationRef.current;
     const sequence = ++pullSequenceRef.current;
@@ -389,6 +396,8 @@ export function OutlineProvider({ children }) {
   const cleanupRef = useRef(null);
   const inboxTimer = useRef(null);
   const takeInbox = useCallback(() => {
+    // 手書きの最中は、届いたぶんを溜めたままにする（木の作り直しで止まるため）
+    if (quietRef.current) { owedInboxRef.current = true; return; }
     if (!ownerRef.current || stoppedRef.current) return;
     const box = inboxRef.current;
     // 待機中に消した行も、反映する瞬間の印で止める。
@@ -923,13 +932,27 @@ export function OutlineProvider({ children }) {
   }), [nodes, apply, applyRaw, undo, redo, histCount, historyNote, syncNote, view, setView, resetSync, pullRemote, owner, link, syncedAt, syncStatus, localSave, saveLocal, contentReady, backupState, runBackup]);
   // 「いまの木」はしまっておき、使うときに読む
   const api = useMemo(() => ({
+    // 手書きの最中は静かにする。
+    // 実機の計測で、止まっていたのは手書きではなく
+    //   ・60秒ごとの読み直し（返事の読み取りで約140ms）
+    //   ・そのあとの端末への書き戻し（IndexedDB で約160ms）
+    // だった。書いている間は持ち越し、閉じたところでまとめてやる。
+    quiet: (on) => {
+      if (quietRef.current === on) return;
+      quietRef.current = on;
+      if (on) return;
+      // 静かにしている間にたまったぶんを、ここで片付ける
+      if (owedPullRef.current) { owedPullRef.current = false; pullOnce(); }
+      if (owedInboxRef.current) { owedInboxRef.current = false; takeInbox(); }
+      if (owedSaveRef.current) { owedSaveRef.current = false; saveLocal(); }
+    },
     addMemo: (dateLabel, text, image) => {
       if (!ownerRef.current || stoppedRef.current) return null;
       const got = addMemoUnderDate(nodesRef.current, dateLabel, text, image);
       apply(() => got.nodes);
       return got;
     },
-  }), [apply]);
+  }), [apply, pullOnce, takeInbox, saveLocal]);
 
   return (
     <OutlineApiContext.Provider value={api}>
