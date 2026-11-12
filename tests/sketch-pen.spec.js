@@ -106,3 +106,76 @@ test('ペンを離す前に表示用の紙へ線が出て、保存は確定後�
   await page.mouse.up();
   await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1')||'[]').length)).toBe(1);
 });
+
+test('手が先に触れてもペンだけを保存し、長押し選択を手書き欄で止める', async ({page}) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  const result = await page.locator('[data-sketch-canvas]').evaluate(canvas => {
+    canvas.setPointerCapture=()=>{}; canvas.hasPointerCapture=()=>false;
+    const r=canvas.getBoundingClientRect();
+    const emit=(type,pointerType,pointerId,x)=>canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,cancelable:true,isPrimary:true,pointerType,pointerId,button:0,clientX:r.left+r.width*x,clientY:r.top+r.height*.4}));
+    emit('pointerdown','touch',1,.1); emit('pointermove','touch',1,.2);
+    emit('pointerdown','pen',2,.3); emit('pointermove','pen',2,.8);
+    emit('pointerup','touch',1,.2); emit('pointerup','pen',2,.8);
+    return {selectAllowed:canvas.dispatchEvent(new Event('selectstart',{bubbles:true,cancelable:true})), calloutAllowed:canvas.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,cancelable:true})), selection:getComputedStyle(canvas).userSelect};
+  });
+  expect(result).toEqual({selectAllowed:false,calloutAllowed:false,selection:'none'});
+  await expect(page.locator('[data-sketch-pen-only]')).toBeChecked();
+  const saved=await page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1')));
+  expect(saved).toHaveLength(1); expect(saved[0].points[0]).toEqual([.3,.4]);
+});
+
+test('紙の四辺を広げても線を伸ばさず、左右の余白と位置を復元できる', async ({page}) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();
+  const box=await canvas.boundingBox();
+  await page.mouse.move(box.x+box.width*.2,box.y+box.height*.3); await page.mouse.down();
+  await page.mouse.move(box.x+box.width*.6,box.y+box.height*.6,{steps:8}); await page.mouse.up();
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1'))[0]);
+  for (const [edge,key] of [['left','ArrowLeft'],['top','ArrowUp'],['right','ArrowRight'],['bottom','ArrowDown']]) {
+    await page.locator(`[data-sketch-edge="${edge}"]`).focus(); await page.keyboard.press(key);
+  }
+  const after=await page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1'))[0]);
+  expect(after.paperWidth).toBe(660); expect(after.height).toBe(420);
+  expect(after.points[0][0]*660).toBeCloseTo(before.points[0][0]*600+30);
+  expect(after.points[0][1]*420).toBeCloseTo(before.points[0][1]*360+30);
+  expect(after.width).toBe(before.width); expect(after.times).toEqual(before.times);
+  const size=await canvas.boundingBox();
+  expect(size.width/660).toBeCloseTo(box.width/600,2);
+  await page.reload(); await page.locator('[data-quick-add]').click();
+  await expect(canvas).toHaveAttribute('width','1320'); await expect(canvas).toHaveAttribute('height','840');
+});
+
+test('紙の右端をドラッグで足した余白にも、すぐ線を書ける', async ({page}) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  const grip=page.locator('[data-sketch-edge="right"]'); await grip.scrollIntoViewIfNeeded();
+  const r=await grip.boundingBox();
+  await page.mouse.move(r.x+r.width/2,r.y+r.height/2); await page.mouse.down();
+  await page.mouse.move(r.x+r.width/2+60,r.y+r.height/2,{steps:8}); await page.mouse.up();
+  const canvas=page.locator('[data-sketch-canvas]');
+  expect(Number(await canvas.getAttribute('width'))).toBeGreaterThan(1200);
+  await page.locator('[data-sketch-viewport]').evaluate(el=>{el.scrollLeft=el.scrollWidth;});
+  const box=await canvas.boundingBox(), x=box.x+box.width-20,y=box.y+30;
+  await page.mouse.move(x-20,y); await page.mouse.down(); await page.mouse.move(x,y+30,{steps:5});
+  expect(await canvas.evaluate(el=>{
+    const p=el.getContext('2d').getImageData(el.width-160,0,160,160).data;
+    return p.some((v,i)=>i%4<3&&v<100);
+  })).toBe(true);
+  await page.mouse.up();
+  await expect(page.locator('[data-sketch-undo]')).toBeEnabled();
+});
+
+test('紙の移動モードではドラッグを線として保存せず、ペン専用でも紙を移動できる', async ({page}) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  await page.locator('[data-sketch-edge="right"]').focus();
+  for(let i=0;i<10;i++) await page.keyboard.press('ArrowRight');
+  await page.locator('[data-sketch-pen-only]').check(); await page.locator('[data-sketch-pan]').click();
+  const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();
+  await page.locator('[data-sketch-viewport]').evaluate(el=>{el.scrollLeft=0;});
+  const r=await canvas.boundingBox();
+  await page.mouse.move(r.x+180,r.y+50); await page.mouse.down();
+  await page.mouse.move(r.x+60,r.y+50,{steps:8}); await page.mouse.up();
+  expect(await page.locator('[data-sketch-viewport]').evaluate(el=>el.scrollLeft)).toBeGreaterThan(80);
+  await expect(page.locator('[data-sketch-undo]')).toBeDisabled();
+  await page.locator('[data-sketch-pan]').click();
+  await expect(page.locator('[data-sketch-pan]')).toHaveAttribute('aria-pressed','false');
+});
