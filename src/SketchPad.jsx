@@ -11,17 +11,20 @@ function preference(key) {
 }
 
 export default function SketchPad({ strokes, onChange, disabled }) {
-  const canvasRef = useRef(null), drawingRef = useRef(null);
+  const canvasRef = useRef(null), drawingRef = useRef(null), overlayRef = useRef(null), frameRef = useRef(null);
+  const [brush, setBrush] = useState("speed-extreme-v1");
   const resizeRef = useRef(null);
   const [ratio, setRatio] = useState(() => strokes.reduce((maximum, stroke) => Math.max(maximum, (stroke.height || SKETCH_HEIGHT) / SKETCH_WIDTH), savedRatio()));
   const minRatio = useMemo(() => strokes.reduce((maximum, stroke) => stroke.points.reduce((height, point) => Math.max(height, point[1] * (stroke.height || SKETCH_HEIGHT) / SKETCH_WIDTH + 0.02), maximum), 0.35), [strokes]);
   const pixelHeight = Math.round(SKETCH_WIDTH * 2 * ratio);
   const [color, setColor] = useState(COLORS[0].color);
-  const [width, setWidth] = useState(3);
+  const [width, setWidth] = useState(10);
   const [cleared, setCleared] = useState(null);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
   const [pressure, setPressure] = useState(() => preference("taskspace-sketch-pressure"));
   useEffect(() => { paintSketch(canvasRef.current, strokes); }, [strokes, pixelHeight]);
+  useEffect(() => () => { if (frameRef.current !== null) cancelAnimationFrame(frameRef.current); }, []);
+  function clearOverlay() { const canvas = overlayRef.current; canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height); }
   function finishResize(event) {
     const resize = resizeRef.current;
     if (!resize || resize.id !== event.pointerId) return;
@@ -45,15 +48,25 @@ export default function SketchPad({ strokes, onChange, disabled }) {
     }
     for (const sample of [...samples, native]) {
       const p = point(sample, rect, stroke.pressure, final), last = stroke.points.at(-1);
-      if (p[0] !== last[0] || p[1] !== last[1]) stroke.points.push(p);
+      if (p[0] !== last[0] || p[1] !== last[1]) {
+        stroke.points.push(p);
+        if (stroke.times) stroke.times.push(Math.max(stroke.times.at(-1), sample.timeStamp - drawing.started));
+      }
     }
-    appendSketch(canvasRef.current, stroke, from);
+    if (stroke.brush) {
+      if (frameRef.current === null) frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = null;
+        if (drawingRef.current) { clearOverlay(); appendSketch(overlayRef.current, drawingRef.current.stroke, 0, false); }
+      });
+    } else appendSketch(canvasRef.current, stroke, from);
   }
   function finish(event) {
     const drawing = drawingRef.current;
     if (!drawing || drawing.pointerId !== event.pointerId) return;
     if (event.type === "pointerup") addPoints(event, true);
     drawingRef.current = null;
+    if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
+    frameRef.current = null; clearOverlay();
     onChange([...strokes, drawing.stroke]);
     setCleared(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -61,23 +74,25 @@ export default function SketchPad({ strokes, onChange, disabled }) {
   return <div data-sketch-pad className="mt-2">
     <div className="mb-2 flex flex-wrap items-center gap-1.5">
       {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => setColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: item.color }} /></button>)}
-      <select aria-label="ペンの太さ" value={width} disabled={disabled} onChange={(event) => setWidth(Number(event.target.value))} className="h-9 rounded border border-white/15 ts-surface px-2 text-xs"><option value={3}>細め</option><option value={6}>太め</option></select>
+      <select data-sketch-brush aria-label="ペンの種類" value={brush} disabled={disabled} onChange={(event) => setBrush(event.target.value)} className="h-9 rounded border border-white/15 ts-surface px-2 text-xs"><option value="speed-extreme-v1">速度ペン・強弱最大</option><option value="legacy">従来のペン</option></select>
+      <label className="flex items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
       <button type="button" data-sketch-undo disabled={disabled || (!strokes.length && !cleared)} onClick={() => { onChange(strokes.length ? strokes.slice(0, -1) : cleared); setCleared(null); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-300 disabled:opacity-30">戻す</button>
       <button type="button" data-sketch-clear disabled={disabled || !strokes.length} onClick={() => { setCleared(strokes); onChange([]); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-400 disabled:opacity-30">全消去</button>
     </div>
     <div className="mb-2 flex flex-wrap gap-3 text-xs text-neutral-300">
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pen-only type="checkbox" checked={penOnly} disabled={disabled} onChange={(event) => { setPenOnly(event.target.checked); try { localStorage.setItem("taskspace-sketch-pen-only", String(event.target.checked)); } catch { /* この画面では使える */ } }} />ペン専用</label>
-      <label className="flex min-h-9 items-center gap-2"><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
+      <label className="flex min-h-9 items-center gap-2" style={{ display: brush === "legacy" ? undefined : "none" }}><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
+    <div className="relative">
     <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: `${SKETCH_WIDTH * 2} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         if (disabled || drawingRef.current || resizeRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: pen && pressure, points: [point(event, event.currentTarget.getBoundingClientRect(), pen && pressure)] };
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen };
-        appendSketch(canvasRef.current, stroke);
+        const stroke = { color, width, height: pixelHeight / 2, pressure: brush === "legacy" && pen && pressure, ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), brush === "legacy" && pen && pressure)] };
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp };
+        appendSketch(stroke.brush ? overlayRef.current : canvasRef.current, stroke, 0, false);
       }}
       onPointerMove={(event) => {
         const drawing = drawingRef.current;
@@ -87,6 +102,8 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       }}
       onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
     />
+    <canvas ref={overlayRef} data-sketch-overlay aria-hidden="true" width={SKETCH_WIDTH * 2} height={pixelHeight} className="pointer-events-none absolute inset-0 h-full w-full" />
+    </div>
     <div data-sketch-resize role="separator" aria-label="手書き欄の高さ" aria-orientation="horizontal" aria-valuemin={35} aria-valuemax={200} aria-valuenow={Math.round(ratio * 100)} tabIndex={disabled ? -1 : 0}
       className="mx-auto flex h-7 w-24 cursor-ns-resize touch-none items-center justify-center rounded focus-visible:outline focus-visible:outline-accent-400"
       onPointerDown={(event) => {

@@ -3,6 +3,7 @@ import { test, expect } from './helpers.js';
 test('ペン専用：指の線を入れず筆圧付きのペンを保存し、再起動しても復元する', async ({ page }) => {
   await page.locator('[data-quick-add]').click();
   await page.locator('[data-quick-add-sketch]').click();
+  await page.locator('[data-sketch-brush]').selectOption('legacy');
   await expect(page.locator('[data-sketch-pressure]')).not.toBeChecked();
   await page.locator('[data-sketch-pen-only]').check();
   await page.locator('[data-sketch-pressure]').check();
@@ -61,4 +62,19 @@ test('ペンの追従：まとめて届く途中の座標を拾い、移動中�
   expect(counts.segments).toBeLessThanOrEqual(4);
   const points = await page.evaluate(() => JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1')).at(-1).points);
   expect(points).toEqual([[0.2, 0.3], [0.4, 0.2], [0.6, 0.7], [0.8, 0.6]]);
+});
+
+test('本番の速度ペンは時刻と種類を保存し、復元した絵とPNGの形を保つ', async ({ page }) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  await expect(page.locator('[data-sketch-brush]')).toHaveValue('speed-extreme-v1');
+  const canvas = page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded(); const rect = await canvas.boundingBox();
+  await page.mouse.move(rect.x+20, rect.y+20); await page.mouse.down();
+  await page.mouse.move(rect.x+rect.width*.7, rect.y+rect.height*.6, { steps: 20 }); await page.mouse.up();
+  const saved = await page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1')));
+  expect(saved[0].brush).toBe('speed-extreme-v1'); expect(saved[0].times.length).toBe(saved[0].points.length);
+  expect(saved[0].times.at(-1)).toBeGreaterThan(0);
+  const before = await canvas.evaluate(c=>c.toDataURL());
+  await page.reload(); await page.locator('[data-quick-add]').click();
+  expect(await page.locator('[data-sketch-canvas]').evaluate(c=>c.toDataURL())).toBe(before);
+
 });
