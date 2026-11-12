@@ -56,3 +56,24 @@ test('スマホのsketchは画面に収まり、大きな紙をすぐ描ける',
   const paper=await page.locator('[data-sketch-canvas]').boundingBox(); expect(paper.height).toBeGreaterThan(300);
   await draw(page); await expect(page.locator('[data-sketch-save]')).toBeEnabled();
 });
+
+test('sketchは画面幅いっぱいに開き、紙を横へ広げず縦だけスクロールする', async ({page}, testInfo) => {
+  await page.setViewportSize({width:1280,height:900});
+  await page.evaluate(()=>localStorage.setItem('taskspace-sketch-paper-v1',JSON.stringify({width:1200,height:1200})));
+  await page.locator('[data-header-sketch]').click();
+  const board=page.locator('[data-sketch-board]'), viewport=page.locator('[data-sketch-viewport]');
+  expect((await board.boundingBox()).width).toBeCloseTo(1280,0);
+  await expect(page.locator('[data-sketch-edge="left"]')).toHaveCount(0);
+  await expect(page.locator('[data-sketch-edge="right"]')).toHaveCount(0);
+  const metrics=()=>viewport.evaluate(el=>({width:el.clientWidth,scrollWidth:el.scrollWidth,height:el.clientHeight,scrollHeight:el.scrollHeight}));
+  await expect.poll(async()=>{const m=await metrics(); return m.scrollWidth-m.width;}).toBeLessThanOrEqual(1);
+  expect((await metrics()).scrollHeight).toBeGreaterThan((await metrics()).height);
+  const canvas=page.locator('[data-sketch-canvas]'); const width=await canvas.getAttribute('width');
+  await viewport.evaluate(el=>{el.scrollTop=200;});
+  expect(await viewport.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
+  await page.screenshot({path:`test-results/sketch-full-width-${testInfo.project.name}.png`});
+  await page.setViewportSize({width:390,height:844});
+  await expect.poll(async()=>{const m=await metrics();return m.scrollWidth-m.width;}).toBeLessThanOrEqual(1);
+  expect((await board.boundingBox()).width).toBeCloseTo(390,0);
+  await expect(canvas).toHaveAttribute('width',width);
+});
