@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { paintSketch, readSketchDraft, sketchPreviewStroke } from './sketch';
+import { paintSketch, readSketchDraft, sketchPreviewStroke, expandSketchPaper, fitSketchToPaper } from './sketch';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('ペンの線と下書き', () => {
@@ -55,4 +55,33 @@ it('長い線のプレビュー計算を制限し、先端と保存用の全入�
   expect(view.times.at(-1)).toBe(times.at(-1));
   expect(stroke.points).toBe(points); expect(stroke.points).toHaveLength(10000);
   expect(sketchPreviewStroke({...stroke,points:points.slice(0,100),times:times.slice(0,100)}).points).toHaveLength(100);
+});
+
+it('四辺へ余白を足しても線の実寸・筆圧・時刻を保つ', () => {
+  const stroke = { color: '#202020', width: 10, brush: 'speed-extreme-v1', times: [0, 16], points: [[.2, .3, .1], [.8, .7, .9]] };
+  let paper = { width: 600, height: 360 }, strokes = [stroke];
+  for (const edge of ['left', 'top', 'right', 'bottom']) {
+    const before = strokes[0], next = expandSketchPaper(paper, edge, 80);
+    strokes = fitSketchToPaper(strokes, next);
+    expect(strokes[0].points[0][0] * next.width).toBeCloseTo(before.points[0][0] * (before.paperWidth || 600) + next.shiftX);
+    expect(strokes[0].points[0][1] * next.height).toBeCloseTo(before.points[0][1] * (before.height || 360) + next.shiftY);
+    expect(strokes[0].points.map(p => p[2])).toEqual([.1, .9]);
+    expect(strokes[0].times).toEqual([0, 16]); expect(strokes[0].width).toBe(10);
+    paper = { width: next.width, height: next.height };
+  }
+  expect(stroke.points).toEqual([[.2, .3, .1], [.8, .7, .9]]);
+  vi.stubGlobal('localStorage', {getItem: () => JSON.stringify(strokes)});
+  expect(readSketchDraft()).toEqual(strokes);
+  expect(expandSketchPaper({width:1190,height:360},'right',100).width).toBe(1200);
+});
+it('横に広げた紙でも古い線を拡大せず、新しい紙の座標で描く', () => {
+  const ends = [], ctx = { fillRect() {}, beginPath() {}, arc() {}, fill() {}, moveTo() {}, lineTo(x,y) {ends.push([x,y]);}, stroke() {} };
+  const canvas = {width:1600,height:720,getContext:()=>ctx};
+  const old = {color:'#202020',width:3,points:[[.1,.2],[.3,.4]]};
+  paintSketch(canvas,[old],800);
+  expect(ends[0]).toEqual([360,288]);
+  ends.length=0;
+  const paper=expandSketchPaper({width:600,height:360},'left',200);
+  paintSketch(canvas,fitSketchToPaper([old],paper),800);
+  expect(ends[0]).toEqual([760,288]);
 });

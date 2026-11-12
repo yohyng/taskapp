@@ -5,7 +5,7 @@ export function createLiveSketch(canvas) {
   const backing = canvas.ownerDocument.createElement("canvas");
   let active = null, frame = null, counted = 0, bounds = null;
   function extend() {
-    const scaleY = (active.height || SKETCH_HEIGHT) * canvas.width / 600;
+    const scaleY = (active.height || SKETCH_HEIGHT) * canvas.width / (active.paperWidth || 600);
     for (; counted < active.points.length; counted++) {
       const p = active.points[counted], x = p[0] * canvas.width, y = p[1] * scaleY;
       if (!bounds) bounds = { left: x, right: x, top: y, bottom: y };
@@ -13,7 +13,7 @@ export function createLiveSketch(canvas) {
     }
   }
   function restore() {
-    const pad = active.width * canvas.width / 600 * 2 + 4;
+    const pad = active.width * canvas.width / (active.paperWidth || 600) * 2 + 4;
     const left = Math.max(0, Math.floor(bounds.left - pad)), top = Math.max(0, Math.floor(bounds.top - pad));
     const right = Math.min(canvas.width, Math.ceil(bounds.right + pad)), bottom = Math.min(canvas.height, Math.ceil(bounds.bottom + pad));
     const ctx = canvas.getContext("2d");
@@ -22,7 +22,7 @@ export function createLiveSketch(canvas) {
   function paint(complete = false) {
     if (!active) return;
     extend(); restore();
-    appendSketch(canvas, complete ? active : sketchPreviewStroke(active), 0, complete);
+    appendSketch(canvas, complete ? active : sketchPreviewStroke(active), 0, complete, active.paperWidth || 600);
   }
   function cancelFrame() { if (frame !== null) cancelAnimationFrame(frame); frame = null; }
   return {
