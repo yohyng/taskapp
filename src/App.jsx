@@ -17,6 +17,10 @@ import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
 import SketchPad from "./SketchPad";
 import SketchBoard from "./SketchBoard";
+import StallProbe from "./StallProbe";
+// 止まりの計測は検証ビルド（ink-diag）の ?probe=1 だけ。通常の配信では false のまま消える。
+const STALL_PROBE = import.meta.env.MODE === "ink-diag"
+  && typeof location !== "undefined" && new URLSearchParams(location.search).has("probe");
 import { readSketchDraft, sketchFile, SKETCH_DRAFT_KEY } from "./lib/sketch";
 import { hasDrive, uploadToDrive } from "./lib/drive";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
@@ -4405,6 +4409,8 @@ function App() {
         </div>
 
         {visiblePanes.some((p) => p.mode === "tasks") && <MarqueeSelect onSelect={handleMarqueeSelect} />}
+
+        {STALL_PROBE && <StallProbe />}
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>

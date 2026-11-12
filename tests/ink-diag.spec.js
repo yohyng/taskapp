@@ -95,3 +95,29 @@ test("描かない設定でも、入力の数は取れる", async ({ page }) => 
   expect(got.pointermove.count).toBeGreaterThan(0);
   expect(got.paint.count ?? 0).toBe(0);
 });
+
+test.describe("止まりの計測（本番と同じ画面で）", () => {
+  test("?probe=1 のときだけ小窓が出る", async ({ page }) => {
+    await page.goto("/");
+    await page.waitForSelector("header");
+    await expect(page.locator("[data-stall-probe]")).toHaveCount(0);
+    await page.goto("/?probe=1");
+    await page.waitForSelector("header");
+    await expect(page.locator("[data-stall-probe]")).toBeVisible();
+  });
+
+  test("記録をとめると、結果が出て写せる", async ({ page }) => {
+    await page.goto("/?probe=1");
+    await page.waitForSelector("header");
+    await page.locator("[data-probe-toggle]").click();
+    await expect(page.locator("[data-probe-toggle]")).toHaveText("とめる");
+    // わざと止める（この仕掛けが、止まりを拾えることの確認）
+    await page.evaluate(() => { const end = performance.now() + 220; while (performance.now() < end) { /* 塞ぐ */ } });
+    await page.waitForTimeout(300);
+    await page.locator("[data-probe-toggle]").click();
+    const report = page.locator("[data-probe-report]");
+    await expect(report).toBeVisible();
+    await expect(report).toContainText("50ms超のフレーム");
+    await expect(page.locator("[data-probe-copy]")).toBeEnabled();
+  });
+});

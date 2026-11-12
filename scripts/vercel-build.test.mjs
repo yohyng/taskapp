@@ -44,7 +44,7 @@ test('本番配信：有効化した共通原本と本番ブランチ・公開�
 
 test('計測配信：手書きの計測ページはPreviewだけに出し、本番ビルドには混ぜない', () => {
   const diag = { ...preview, VERCEL_GIT_COMMIT_REF: inkDiagBranch };
-  assert.deepEqual(vercelBuildPlan(diag, { enabled: false }), { staging: false, isolated: true, viteArgs: ['build', '--mode', 'ink-diag'] });
+  assert.deepEqual(vercelBuildPlan(diag, { enabled: false }), { staging: false, viteArgs: ['build', '--mode', 'ink-diag'] });
   // 同じブランチでもProductionでは通常ビルド。ログイン情報は配信物へ渡さない（isolatedで空にする）。
   assert.deepEqual(vercelBuildPlan({ ...diag, VERCEL_ENV: 'production' }, { enabled: false }), { staging: false, viteArgs: ['build'] });
   assert.deepEqual(vercelBuildPlan({ ...preview, VERCEL_GIT_COMMIT_REF: productionBranch }, { enabled: false }), { staging: false, viteArgs: ['build'] });

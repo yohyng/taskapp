@@ -30,7 +30,8 @@ export function vercelBuildPlan(env, release = productionRelease) {
   }
   if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === 'codex/rotate-pane-layout') return { staging: false, isolated: true, viteArgs: ['build'] };
   // 手書きの計測ページは、実機で開ける場所が要る。Preview だけに置き、本番には出さない。
-  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === inkDiagBranch) return { staging: false, isolated: true, viteArgs: ['build', '--mode', 'ink-diag'] };
+  // 本体側の止まりを測るので、同期を切らず本番と同じ条件で動かす。
+  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === inkDiagBranch) return { staging: false, viteArgs: ['build', '--mode', 'ink-diag'] };
   if (env.VERCEL_GIT_COMMIT_REF !== stagingBranch) return { staging: false, viteArgs: ['build'] };
   // ブランチ名だけでは本番への誤配信を防げない。環境とリポジトリも揃わなければ停止する。
   if (env.VERCEL !== '1' || env.VERCEL_ENV !== 'preview' || env.VERCEL_GIT_REPO_OWNER !== 'yohyng'
