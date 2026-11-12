@@ -23,6 +23,11 @@ test('接続ランプ：同期済みは緑の丸を表示し、切断中は待�
     await a.locator('[data-row="memo"] textarea').fill('圏外の入力も復帰後に届ける');
     await a.evaluate(() => window.lab.localBarrier());
     await expect(status).toHaveAttribute('data-sync', 'waiting');
+    await expect(status).toHaveText('');
+    await a.locator('[data-outline-sync-detail]').click();
+    await expect(status).toHaveText('送信待ち');
+    await a.locator('[data-outline-sync-detail]').click();
+    await expect(status).toHaveText('');
     f.offline.delete(a);
     await a.evaluate(() => window.dispatchEvent(new Event('online')));
     await expect(b.locator('[data-row="memo"] [data-row-text]')).toHaveText('圏外の入力も復帰後に届ける');
