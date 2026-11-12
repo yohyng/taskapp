@@ -78,3 +78,19 @@ test('本番の速度ペンは時刻と種類を保存し、復元した絵とPN
   expect(await page.locator('[data-sketch-canvas]').evaluate(c=>c.toDataURL())).toBe(before);
 
 });
+
+test('一画の途中でレイアウトを測り直さず最初の移動を即時に描く', async ({ page }) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  const result = await page.locator('[data-sketch-canvas]').evaluate(canvas=>{
+    const rect=canvas.getBoundingClientRect(), original=canvas.getBoundingClientRect.bind(canvas);let reads=0;
+    canvas.getBoundingClientRect=()=>{reads++;return original();}; canvas.setPointerCapture=()=>{};canvas.hasPointerCapture=()=>false;
+    const send=(type,x)=>canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,isPrimary:true,pointerId:42,pointerType:'pen',button:0,clientX:rect.left+rect.width*x,clientY:rect.top+40,pressure:.5}));
+    send('pointerdown',.1); send('pointermove',.4);
+    const overlay=document.querySelector('[data-sketch-overlay]');
+    const pixels=overlay.getContext('2d').getImageData(0,0,overlay.width,overlay.height).data;
+    const drawn=pixels.some((v,i)=>i%4===3&&v>0);
+    for(let i=0;i<100;i++)send('pointermove',.4+i*.003);
+    send('pointerup',.7); return {reads,drawn};
+  });
+  expect(result.reads).toBe(1); expect(result.drawn).toBe(true);
+});

@@ -11,6 +11,16 @@ export function readSketchDraft() {
   } catch { return []; }
 }
 
+// 入力の全点は保存し、長い線の表示用だけを制限する。末尾は密に残してペン先を追う。
+export function sketchPreviewStroke(stroke, limit = 512) {
+  if (!stroke.brush || stroke.points.length <= limit) return stroke;
+  const tail = Math.min(128, Math.floor(limit / 2)), head = limit - tail;
+  const end = stroke.points.length - tail;
+  const indexes = Array.from({ length: head }, (_, i) => Math.floor(i * end / head));
+  for (let i = end; i < stroke.points.length; i++) indexes.push(i);
+  return { ...stroke, points: indexes.map(i => stroke.points[i]), times: indexes.map(i => stroke.times[i]) };
+}
+
 // 移動中は新しく届いた線だけを描き、過去の全ストロークを走査しない。
 export function appendSketch(canvas, stroke, from = 0, complete = true) {
   const ctx = canvas.getContext("2d");

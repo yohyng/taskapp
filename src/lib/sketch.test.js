@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { paintSketch, readSketchDraft } from './sketch';
+import { paintSketch, readSketchDraft, sketchPreviewStroke } from './sketch';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('ペンの線と下書き', () => {
@@ -44,4 +44,15 @@ it('速度ペンの下書きは時刻付きで復元し、壊れた時刻や未�
   const stroke={color:'#202020',width:10,height:360,brush:'speed-extreme-v1',times:[0,16],points:[[.1,.2],[.3,.4]]};
   vi.stubGlobal('localStorage',{getItem:()=>JSON.stringify([null,stroke,{...stroke,times:[0]},{...stroke,times:[16,0]},{...stroke,brush:'unknown'}])});
   expect(readSketchDraft()).toEqual([stroke]);
+});
+
+it('長い線のプレビュー計算を制限し、先端と保存用の全入力を保つ',()=>{
+  const points=Array.from({length:10000},(_,i)=>[i/10000,.4]), times=points.map((_,i)=>i*4);
+  const stroke={brush:'speed-extreme-v1',points,times,color:'#202020',width:10};
+  const view=sketchPreviewStroke(stroke);
+  expect(view.points).toHaveLength(512); expect(view.times).toHaveLength(512);
+  expect(view.points.slice(-128)).toEqual(points.slice(-128));
+  expect(view.times.at(-1)).toBe(times.at(-1));
+  expect(stroke.points).toBe(points); expect(stroke.points).toHaveLength(10000);
+  expect(sketchPreviewStroke({...stroke,points:points.slice(0,100),times:times.slice(0,100)}).points).toHaveLength(100);
 });
