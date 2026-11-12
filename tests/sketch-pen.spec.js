@@ -1,8 +1,8 @@
 import { test, expect } from './helpers.js';
 
 test('ペン専用：指の線を入れず筆圧付きのペンを保存し、再起動しても復元する', async ({ page }) => {
-  await page.locator('[data-quick-add]').click();
-  await page.locator('[data-quick-add-sketch]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   await page.locator('[data-sketch-brush]').selectOption('legacy');
   await expect(page.locator('[data-sketch-pressure]')).not.toBeChecked();
   await page.locator('[data-sketch-pen-only]').check();
@@ -25,15 +25,15 @@ test('ペン専用：指の線を入れず筆圧付きのペンを保存し、�
   expect(saved[0].points[0][2]).toBeCloseTo(0.1, 5);
   expect(saved[0].points[1][2]).toBeCloseTo(0.9, 5);
   await page.reload();
-  await page.locator('[data-quick-add]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await expect(page.locator('[data-sketch-pen-only]')).toBeChecked();
   await expect(page.locator('[data-sketch-pressure]')).toBeChecked();
   await expect(page.locator('[data-sketch-undo]')).toBeEnabled();
 });
 
 test('ペンの追従：まとめて届く途中の座標を拾い、移動中に過去の線を描き直さない', async ({ page }) => {
-  await page.locator('[data-quick-add]').click();
-  await page.locator('[data-quick-add-sketch]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const canvas = page.locator('[data-sketch-canvas]');
   await canvas.scrollIntoViewIfNeeded();
   const box = await canvas.boundingBox();
@@ -66,6 +66,7 @@ test('ペンの追従：まとめて届く途中の座標を拾い、移動中�
 
 test('本番の速度ペンは時刻と種類を保存し、復元した絵とPNGの形を保つ', async ({ page }) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   await expect(page.locator('[data-sketch-brush]')).toHaveValue('speed-extreme-v1');
   const canvas = page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded(); const rect = await canvas.boundingBox();
   await page.mouse.move(rect.x+20, rect.y+20); await page.mouse.down();
@@ -74,13 +75,14 @@ test('本番の速度ペンは時刻と種類を保存し、復元した絵とPN
   expect(saved[0].brush).toBe('speed-extreme-v1'); expect(saved[0].times.length).toBe(saved[0].points.length);
   expect(saved[0].times.at(-1)).toBeGreaterThan(0);
   const before = await canvas.evaluate(c=>c.toDataURL());
-  await page.reload(); await page.locator('[data-quick-add]').click();
+  await page.reload(); await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   expect(await page.locator('[data-sketch-canvas]').evaluate(c=>c.toDataURL())).toBe(before);
 
 });
 
 test('一画の途中でレイアウトを測り直さず最初の移動を即時に描く', async ({ page }) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const result = await page.locator('[data-sketch-canvas]').evaluate(canvas=>{
     const rect=canvas.getBoundingClientRect(), original=canvas.getBoundingClientRect.bind(canvas);let reads=0;
     canvas.getBoundingClientRect=()=>{reads++;return original();}; canvas.setPointerCapture=()=>{};canvas.hasPointerCapture=()=>false;
@@ -96,6 +98,7 @@ test('一画の途中でレイアウトを測り直さず最初の移動を即�
 
 test('ペンを離す前に表示用の紙へ線が出て、保存は確定後だけ行う', async ({ page }) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   await expect(page.locator('[data-sketch-overlay]')).toHaveCount(0);
   const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();const rect=await canvas.boundingBox();
   await page.mouse.move(rect.x+rect.width*.1,rect.y+rect.height*.4);await page.mouse.down();
@@ -109,6 +112,7 @@ test('ペンを離す前に表示用の紙へ線が出て、保存は確定後�
 
 test('手が先に触れてもペンだけを保存し、長押し選択を手書き欄で止める', async ({page}) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const result = await page.locator('[data-sketch-canvas]').evaluate(canvas => {
     canvas.setPointerCapture=()=>{}; canvas.hasPointerCapture=()=>false;
     const r=canvas.getBoundingClientRect();
@@ -126,6 +130,7 @@ test('手が先に触れてもペンだけを保存し、長押し選択を手�
 
 test('紙の四辺を広げても線を伸ばさず、左右の余白と位置を復元できる', async ({page}) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();
   const box=await canvas.boundingBox();
   await page.mouse.move(box.x+box.width*.2,box.y+box.height*.3); await page.mouse.down();
@@ -141,12 +146,13 @@ test('紙の四辺を広げても線を伸ばさず、左右の余白と位置�
   expect(after.width).toBe(before.width); expect(after.times).toEqual(before.times);
   const size=await canvas.boundingBox();
   expect(size.width/660).toBeCloseTo(box.width/600,2);
-  await page.reload(); await page.locator('[data-quick-add]').click();
+  await page.reload(); await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await expect(canvas).toHaveAttribute('width','1320'); await expect(canvas).toHaveAttribute('height','840');
 });
 
 test('紙の右端をドラッグで足した余白にも、すぐ線を書ける', async ({page}) => {
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const grip=page.locator('[data-sketch-edge="right"]'); await grip.scrollIntoViewIfNeeded();
   const r=await grip.boundingBox();
   await page.mouse.move(r.x+r.width/2,r.y+r.height/2); await page.mouse.down();
@@ -167,6 +173,7 @@ test('紙の右端をドラッグで足した余白にも、すぐ線を書け�
 test('紙の移動モードではドラッグを線として保存せず、ペン専用でも紙を移動できる', async ({page}) => {
   await page.setViewportSize({width:390,height:844});
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   await page.locator('[data-sketch-edge="right"]').focus();
   for(let i=0;i<10;i++) await page.keyboard.press('ArrowRight');
   await page.locator('[data-sketch-pen-only]').check(); await page.locator('[data-sketch-pan]').click();
@@ -184,6 +191,7 @@ test('紙の移動モードではドラッグを線として保存せず、ペ�
 test('紙と一緒にnoteの外枠も広がり、線の表示倍率は変わらない', async ({page}, testInfo) => {
   await page.setViewportSize({width:1600,height:1200});
   await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
   const board=page.locator('[data-note-board]'),canvas=page.locator('[data-sketch-canvas]');
   const before=await board.boundingBox(), paperBefore=await canvas.boundingBox();
   await page.locator('[data-sketch-edge="right"]').focus();
