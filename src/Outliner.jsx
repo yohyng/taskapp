@@ -24,6 +24,7 @@ import {
 } from "./lib/outline-checkpoint";
 import { readDriveSetting, writeDriveSetting, hasDrive, uploadToDrive, pingDrive, backupToDrive, hoursSinceBackup, lastBackupAt } from "./lib/drive";
 
+const QUIET_SYNC_STATES = new Set(["checking", "waiting", "sending", "saving", "synced"]);
 const OUTLINE_KEY = "taskspace-outline-v1";
 const READ_SYNC_ERRORS = new Set(["error:サーバーの世代を確認できませんでした", "error:受信した変更の世代を確認できませんでした"]);
 
@@ -1879,10 +1880,10 @@ export default function Outliner() {
             "shrink-0 text-[10px]",
             syncState === "synced" ? "text-emerald-300/80" : "text-neutral-500",
           )}
-        >{syncState === "synced" ? (
-          <button type="button" data-outline-sync-detail aria-label="同期済み：保存・送信の状態を確認" aria-expanded={showSyncDetail} onClick={() => setShowSyncDetail((value) => !value)} className="flex items-center gap-1 rounded px-1 py-1">
-            <Check aria-hidden="true" className="h-3.5 w-3.5" />
-            {showSyncDetail && <span>同期済み</span>}
+        >{QUIET_SYNC_STATES.has(syncState) ? (
+          <button type="button" data-outline-sync-detail aria-label={`${syncLabel}：保存・送信の状態を確認`} aria-expanded={showSyncDetail} onClick={() => setShowSyncDetail((value) => !value)} className="flex min-h-7 min-w-7 items-center justify-center gap-1 rounded px-1 py-1">
+            {syncState === "synced" ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />}
+            {showSyncDetail && <span>{syncLabel}</span>}
           </button>
         ) : syncLabel}</span>
         <button
