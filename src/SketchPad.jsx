@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
+import { paintSketch, appendSketch, sketchPreviewStroke, SKETCH_WIDTH, SKETCH_HEIGHT } from "./lib/sketch";
 
 const COLORS = [{ name: "黒", color: "#202020" }, { name: "青", color: "#2563eb" }, { name: "赤", color: "#dc2626" }, { name: "緑", color: "#15803d" }];
 const HEIGHT_KEY = "taskspace-sketch-ratio";
@@ -40,7 +40,7 @@ export default function SketchPad({ strokes, onChange, disabled }) {
   function addPoints(event, final = false) {
     const drawing = drawingRef.current;
     const stroke = drawing.stroke, from = stroke.points.length;
-    const rect = canvasRef.current.getBoundingClientRect();
+    const rect = drawing.rect;
     const native = event.nativeEvent || event;
     let samples = [];
     if (drawing.pen && !final) {
@@ -54,9 +54,10 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       }
     }
     if (stroke.brush) {
+      if (from === 1 && !final) { clearOverlay(); appendSketch(overlayRef.current, sketchPreviewStroke(stroke), 0, false); }
       if (frameRef.current === null) frameRef.current = requestAnimationFrame(() => {
         frameRef.current = null;
-        if (drawingRef.current) { clearOverlay(); appendSketch(overlayRef.current, drawingRef.current.stroke, 0, false); }
+        if (drawingRef.current) { clearOverlay(); appendSketch(overlayRef.current, sketchPreviewStroke(drawingRef.current.stroke), 0, false); }
       });
     } else appendSketch(canvasRef.current, stroke, from);
   }
@@ -66,7 +67,9 @@ export default function SketchPad({ strokes, onChange, disabled }) {
     if (event.type === "pointerup") addPoints(event, true);
     drawingRef.current = null;
     if (frameRef.current !== null) cancelAnimationFrame(frameRef.current);
-    frameRef.current = null; clearOverlay();
+    frameRef.current = null;
+    if (drawing.stroke.brush) appendSketch(canvasRef.current, drawing.stroke);
+    clearOverlay();
     onChange([...strokes, drawing.stroke]);
     setCleared(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -83,21 +86,22 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       <label className="flex min-h-9 items-center gap-2"><input data-sketch-pen-only type="checkbox" checked={penOnly} disabled={disabled} onChange={(event) => { setPenOnly(event.target.checked); try { localStorage.setItem("taskspace-sketch-pen-only", String(event.target.checked)); } catch { /* この画面では使える */ } }} />ペン専用</label>
       <label className="flex min-h-9 items-center gap-2" style={{ display: brush === "legacy" ? undefined : "none" }}><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
-    <div className="relative">
+    <div className="relative" style={{ contain: "layout paint" }}>
     <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={SKETCH_WIDTH * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", aspectRatio: `${SKETCH_WIDTH * 2} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         if (disabled || drawingRef.current || resizeRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
-        const stroke = { color, width, height: pixelHeight / 2, pressure: brush === "legacy" && pen && pressure, ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [point(event, event.currentTarget.getBoundingClientRect(), brush === "legacy" && pen && pressure)] };
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp };
+        const rect = event.currentTarget.getBoundingClientRect();
+        const stroke = { color, width, height: pixelHeight / 2, pressure: brush === "legacy" && pen && pressure, ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [point(event, rect, brush === "legacy" && pen && pressure)] };
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp, rect };
         appendSketch(stroke.brush ? overlayRef.current : canvasRef.current, stroke, 0, false);
       }}
       onPointerMove={(event) => {
         const drawing = drawingRef.current;
         if (!drawing || drawing.pointerId !== event.pointerId) return;
-        event.preventDefault();
+        event.preventDefault(); event.stopPropagation();
         addPoints(event);
       }}
       onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={finish}
