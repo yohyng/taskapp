@@ -12,8 +12,8 @@ async function draw(page) {
 }
 
 test.beforeEach(async ({ page }) => {
-  await page.locator('[data-quick-add]').click();
-  await page.locator('[data-quick-add-sketch]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+
 });
 
 test('手書き：描画・全消去の取り消し・再起動からの復元ができる', async ({ page }) => {
@@ -24,7 +24,7 @@ test('手書き：描画・全消去の取り消し・再起動からの復元�
   await page.locator('[data-sketch-undo]').click();
   await expect(page.locator('[data-add-memo]')).toBeEnabled();
   await page.reload();
-  await page.locator('[data-quick-add]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await expect(page.locator('[data-sketch-canvas]')).toBeVisible();
   expect(await page.locator('[data-sketch-canvas]').evaluate((canvas) => {
     const pixels = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height).data;
@@ -77,7 +77,7 @@ test('手書き：転送中に閉じたら追加せず、描いた下書きを�
   await sent;
   await page.locator('[data-quick-add-dialog] button[type="button"]').first().click();
   finish();
-  await page.locator('[data-quick-add]').click();
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await expect(page.locator('[data-sketch-undo]')).toBeEnabled();
   await expect(page.locator('[data-sketch-status]')).toHaveCount(0);
   expect(await page.evaluate(() => localStorage.getItem('taskspace-outline-v1'))).not.toContain('canceled.png');
@@ -105,7 +105,7 @@ test('手書き：下へ広げても線を伸ばさず、広げた場所も復�
   await draw(page);
   const fullHeight = await canvas.getAttribute('height');
   expect(await inkBottom()).toBeGreaterThan(Number(fullHeight) * 0.6);
-  await page.reload(); await page.locator('[data-quick-add]').click();
+  await page.reload(); await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
   await expect(canvas).toHaveAttribute('height', fullHeight);
   expect(await inkBottom()).toBeGreaterThan(Number(fullHeight) * 0.6);
   await page.evaluate(() => localStorage.setItem('taskspace-drive-url', 'https://sketch.invalid/upload'));

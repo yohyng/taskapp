@@ -16,6 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
 import SketchPad from "./SketchPad";
+import SketchBoard from "./SketchBoard";
 import { readSketchDraft, sketchFile, SKETCH_DRAFT_KEY } from "./lib/sketch";
 import { hasDrive, uploadToDrive } from "./lib/drive";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
@@ -1030,12 +1031,13 @@ function App() {
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const [quickAddMode, setQuickAddMode] = useState("note");
   const [quickAddTitle, setQuickAddTitle] = useState("");
   const quickAddInputRef = useRef(null);
-  const quickAddVoice = useVoiceInput({ enabled: quickAddOpen, value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
+  const quickAddVoice = useVoiceInput({ enabled: quickAddOpen && quickAddMode === "note", value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
   const [quickAddSketch, setQuickAddSketch] = useState(readSketchDraft);
   const [sketchPaperSize, setSketchPaperSize] = useState(null);
-  const [sketchOpen, setSketchOpen] = useState(() => readSketchDraft().length > 0);
+  const [sketchOpen, setSketchOpen] = useState(false);
   const [sketchSaving, setSketchSaving] = useState(false);
   const [sketchMessage, setSketchMessage] = useState("");
   const sketchUploadRef = useRef(null), sketchUploadedRef = useRef(null);
@@ -3217,7 +3219,7 @@ function App() {
   }
   async function submitQuickAdd(kind) {
     const title = quickAddTitle.trim();
-    const strokes = quickAddSketch;
+    const strokes = quickAddMode === "sketch" || sketchOpen ? quickAddSketch : [];
     if ((!title && !strokes.length) || sketchUploadRef.current) return;
     // 追加後の空欄へ遅れて届いた認識結果を入れない。
     quickAddVoice.cancel();
@@ -3954,13 +3956,18 @@ function App() {
 
           <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             <button
-              onClick={() => setQuickAddOpen(true)}
+              onClick={() => { setQuickAddMode("note"); setSketchOpen(false); setQuickAddOpen(true); }}
               title="タスクかメモを書きとめる"
               data-quick-add
               className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-accent-400/40 bg-accent-500/15 px-3 py-1.5 text-xs font-medium text-accent-300 transition hover:bg-accent-500/25 sm:flex-none"
             >
               <NotebookPen className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">note</span>
+            </button>
+            <button type="button" data-header-sketch aria-label="sketch" title="sketch：手書きボードを開く" onClick={() => { setQuickAddMode("sketch"); setQuickAddOpen(true); }}
+              className="relative flex min-h-9 min-w-9 items-center justify-center rounded-md border border-accent-400/40 bg-accent-500/15 px-2.5 text-accent-300 transition hover:bg-accent-500/25">
+              <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
+              {quickAddSketch.length > 0 && <span aria-hidden="true" className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent-400" />}
             </button>
             <button onClick={() => window.location.reload()} title="再読み込み" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07]"><RefreshCw className="h-3.5 w-3.5" /></button>
             <button onClick={undo} disabled={!history.past.length} title="Undo (Ctrl+Z)" className="rounded-md border border-white/10 bg-white/[0.03] px-2 py-1.5 text-xs text-neutral-400 transition hover:bg-white/[0.07] disabled:cursor-not-allowed disabled:opacity-30"><Undo2 className="h-3.5 w-3.5" /></button>
@@ -4541,14 +4548,17 @@ function App() {
         {quickAddOpen && (
           <div
             data-quick-add-dialog
+            data-sketch-dialog={quickAddMode === "sketch" ? "" : undefined}
+            aria-label={quickAddMode === "sketch" ? "sketch" : "note"}
+            onKeyDown={event => { if (event.key === "Escape") { event.stopPropagation(); closeQuickAdd(); } }}
             role="dialog"
             aria-modal="true"
             onPointerDown={(e) => e.stopPropagation()}
             // 後ろは暗くしない。押したら閉じる受け皿としてだけ置く。
-            className="fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"
+            className={quickAddMode === "sketch" ? "fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4" : "fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"}
             onClick={(e) => { if (e.target === e.currentTarget) closeQuickAdd(); }}
           >
-            <form
+            {quickAddMode === "sketch" ? <SketchBoard strokes={quickAddSketch} onChange={changeSketch} onClose={closeQuickAdd} onSave={() => submitQuickAdd("memo")} saving={sketchSaving} message={sketchMessage} /> : <form
               data-note-board
               style={{ maxWidth: sketchOpen && sketchPaperSize ? `calc(28rem + ${Math.max(0, sketchPaperSize.width - 600) * sketchPaperSize.scale}px)` : undefined }}
               onSubmit={(e) => {
@@ -4573,7 +4583,7 @@ function App() {
                 <button
                   type="button"
                   data-add-task
-                  disabled={sketchSaving || quickAddSketch.length > 0 || !quickAddTitle.trim()}
+                  disabled={sketchSaving || (sketchOpen && quickAddSketch.length > 0) || !quickAddTitle.trim()}
                   onClick={() => submitQuickAdd("task")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
@@ -4587,7 +4597,7 @@ function App() {
                 <button
                   type="button"
                   data-add-memo
-                  disabled={sketchSaving || (!quickAddTitle.trim() && !quickAddSketch.length)}
+                  disabled={sketchSaving || (!quickAddTitle.trim() && (!sketchOpen || !quickAddSketch.length))}
                   onClick={() => submitQuickAdd("memo")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
@@ -4686,7 +4696,7 @@ function App() {
                   : "タスクは選んだ日に入ります。"}
                 {" "}Enter は前に使ったほう（いまは{quickAddKind === "memo" ? "メモ" : "タスク"}）。続けて打てば何件でも。
               </div>
-            </form>
+            </form>}
           </div>
         )}
 
