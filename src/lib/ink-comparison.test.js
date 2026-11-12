@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC, INK_LOCAL_RETURN } from './ink-comparison';
+import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC, INK_LOCAL_RETURN, INK_CURVE_RETURN } from './ink-comparison';
 
 const samples = (speed, interval = 8) => Array.from({ length: Math.floor(160 / interval) + 1 }, (_, i) => ({ x: 20 + speed * i * interval, y: 100, t: i * interval, p: 0.4 }));
 describe('連続輪郭の比較ペン', () => {
@@ -62,5 +62,16 @@ it('局所的なたまりは等速時に増えず、減速時だけ厚みを残�
   const last = fast.at(-1), input = [...fast, { ...last, x: last.x + 1, t: last.t + 16 }];
   expect(inkPoints(input, 'speed', config).at(-1)[2]).toBeGreaterThan(inkPoints(input, 'speed', base).at(-1)[2]);
   const stroke = { mode: 'speed', width: 10, samples: input, settings: config };
+  expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
+});
+
+it('曲がりの厚みは直線へ足さず、角の座標と復元を維持する', () => {
+  const input = [...samples(1), { x: 180, y: 108, t: 168, p: 0.4 }, { x: 180, y: 116, t: 176, p: 0.4 }];
+  const config = { ...INK_CURVE_RETURN, widthResponse: 0 };
+  const withCurve = inkPoints(input, 'speed', config), plain = inkPoints(input, 'speed', { ...config, curveReturn: 0 });
+  expect(withCurve.slice(0, -2)).toEqual(plain.slice(0, -2));
+  expect(withCurve.at(-1)[2]).toBeGreaterThan(plain.at(-1)[2]);
+  expect(withCurve.map(p=>p.slice(0,2))).toEqual(input.map(p=>[p.x,p.y]));
+  const stroke = { mode: 'speed', width: 10, samples: input, settings: INK_CURVE_RETURN };
   expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
 });

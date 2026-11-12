@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { drawInk, INK_DEFAULTS, INK_ORGANIC, INK_LOCAL_RETURN, inkSettings, INK_MODES, INK_WIDTH, INK_HEIGHT, readInkDraft } from './lib/ink-comparison';
+import { drawInk, INK_DEFAULTS, INK_ORGANIC, INK_LOCAL_RETURN, INK_CURVE_RETURN, inkSettings, INK_MODES, INK_WIDTH, INK_HEIGHT, readInkDraft } from './lib/ink-comparison';
 import './index.css';
 
 const KEY = 'fragments-ink-comparison-v1';
@@ -72,7 +72,7 @@ export default function InkLab() {
     link.href = url; link.download = name; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   }
   return <main className="mx-auto max-w-3xl p-4 ts-text">
-    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.25.4</span></h1>
+    <h1 className="text-lg font-semibold">fragments ペンの比較 <span className="text-xs text-neutral-400">v1.25.5</span></h1>
     <p className="my-3 text-sm text-neutral-300">速度で太さが変わるペンと、筆圧で濃淡が変わる鉛筆を選べます。本番のノートには追加されません。</p>
     <div className="mb-3 flex flex-wrap gap-2" role="group" aria-label="ペンの方式">
       {Object.entries(INK_MODES).map(([value, label]) => <button key={value} data-ink-mode={value} aria-pressed={mode === value} className={`${button} aria-pressed:bg-white/20`} onClick={() => setMode(value)}>{label}</button>)}
@@ -82,8 +82,9 @@ export default function InkLab() {
       <button data-ink-baseline aria-pressed={matchesPreset(INK_DEFAULTS)} className={`${button} aria-pressed:bg-white/20 aria-pressed:border-emerald-300`} onClick={() => { setSettings({ ...INK_DEFAULTS }); setMessage("従来の速度ペンを選びました。次に書く線に適用します"); }}>従来の速度ペン</button>
       <button data-ink-organic aria-pressed={matchesPreset(INK_ORGANIC)} className={`${button} aria-pressed:bg-white/20 aria-pressed:border-emerald-300`} onClick={() => { setSettings({ ...INK_ORGANIC }); setMessage("ゆらぎと厚みを残す設定を選びました。次に書く線に適用します"); }}>ゆらぎと厚みを残す</button>
       <button data-ink-local-return aria-pressed={matchesPreset(INK_LOCAL_RETURN)} className={`${button} aria-pressed:bg-white/20 aria-pressed:border-emerald-300`} onClick={() => { setSettings({ ...INK_LOCAL_RETURN }); setMessage("細さと局所的なたまりを選びました。次に書く線に適用します"); }}>細さと局所的なたまり</button>
-      <p data-ink-preset className="w-full text-sm text-emerald-200" aria-live="polite">{matchesPreset(INK_LOCAL_RETURN) ? "選択中：細さと局所的なたまり" : matchesPreset(INK_ORGANIC) ? "選択中：ゆらぎと厚みを残す" : matchesPreset(INK_DEFAULTS) ? "選択中：従来の速度ペン" : "選択中：カスタム設定"}</p>
-      <p className="w-full text-xs text-neutral-400">新しい「細さと局所的なたまり」は細い区間を保ち、減速時だけ厚みの余韻を付けます。ランダムな揺れや追加の丸い点は足しません。</p>
+      <button data-ink-curve-return aria-pressed={matchesPreset(INK_CURVE_RETURN)} className={`${button} aria-pressed:bg-white/20 aria-pressed:border-emerald-300`} onClick={() => { setSettings({ ...INK_CURVE_RETURN }); setMessage("曲がりとなめらかなたまりを選びました。次に書く線に適用します"); }}>曲がりとなめらかなたまり</button>
+      <p data-ink-preset className="w-full text-sm text-emerald-200" aria-live="polite">{matchesPreset(INK_CURVE_RETURN) ? "選択中：曲がりとなめらかなたまり" : matchesPreset(INK_LOCAL_RETURN) ? "選択中：細さと局所的なたまり" : matchesPreset(INK_ORGANIC) ? "選択中：ゆらぎと厚みを残す" : matchesPreset(INK_DEFAULTS) ? "選択中：従来の速度ペン" : "選択中：カスタム設定"}</p>
+      <p className="w-full text-xs text-neutral-400">新しい「曲がりとなめらかなたまり」は、細い区間を保ち、曲がりと減速で戻る厚みを短くならします。ランダムな揺れや追加の丸い点は足しません。</p>
     </div>}
     <div className="mb-3 flex flex-wrap items-center gap-3 text-sm">
       <label className="flex w-full items-center gap-3">太さ <input data-ink-width type="range" min="1" max="40" step="0.5" value={width} onChange={(e) => setWidth(Number(e.target.value))} className="min-w-0 flex-1" /><output data-ink-width-value className="w-12 text-right tabular-nums">{width.toFixed(1)}</output></label>
@@ -117,7 +118,7 @@ export default function InkLab() {
       <button data-ink-save className={button} disabled={!count} onClick={() => { try { localStorage.setItem(KEY, JSON.stringify(strokes.current)); setMessage('この端末に下書きを保存しました'); } catch { setMessage('下書きを保存できませんでした'); } }}>下書きを残す</button>
       <button data-ink-restore className={button} onClick={() => { if (drawing.current) return; try { strokes.current = readInkDraft(localStorage.getItem(KEY)); setLast(strokes.current.at(-1) || null); repaint(); setMessage('下書きを戻しました'); } catch { setMessage('下書きを戻せませんでした'); } }}>下書きを戻す</button>
       <button data-ink-export className={button} disabled={!count} onClick={() => { const canvas = document.createElement('canvas'); canvas.width = 1200; canvas.height = 800; const ctx = reset(canvas, true); strokes.current.forEach((stroke) => drawInk(ctx, stroke)); canvas.toBlob((blob) => download(blob, 'ペンの比較.png')); }}>画像を保存</button>
-      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.25.4', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
+      <button data-ink-input className={button} disabled={!last} onClick={() => download(new Blob([JSON.stringify({ format: 1, version: '1.25.5', stroke: last })], { type: 'application/json' }), 'ペンの入力.json')}>直前の入力を保存</button>
     </div>
     <p role="status" className="text-xs">{message}</p>
     {last && <section className="mt-5"><h2 className="mb-2 text-sm">今の設定で直前の線を試す</h2><canvas data-ink-tuning width={600} height={400} className="w-full rounded-lg bg-white" ref={(canvas) => { if (canvas) drawInk(reset(canvas, true), { ...last, mode, width, settings }); }} /><p className="mt-2 text-xs text-neutral-400">スライダーを動かすとこの見本だけ変わります。上の紙の線は変更しません。</p></section>}

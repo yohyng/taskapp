@@ -115,7 +115,7 @@ test('スライダーは見本と次の線へ適用し、基準と端末の設�
   await draw(page); await page.locator('[data-ink-save]').click();
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('fragments-ink-comparison-v1')));
   expect(saved[0].width).toBe(10); expect(saved[1].width).toBe(40);
-  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6, localReturn: 0, smoothing: 0.45, minPressure: 0.2 });
+  expect(saved[1].settings).toEqual({ thinning: 0.9, response: 16, responseThin: 64, responseThick: 64, streamline: 0.6, curveReturn: 0, widthResponse: 0, localReturn: 0, smoothing: 0.45, minPressure: 0.2 });
   await page.reload(); await expect(page.locator('[data-ink-width]')).toHaveValue('40');
   await page.locator('[data-ink-controls] summary').click();
   await expect(page.locator('[data-ink-response-thin]')).toHaveValue('64');
@@ -168,4 +168,14 @@ test('局所的なたまりをタップで選び、旧設定へ戻せる', async
     await page.locator('[data-ink-organic]').tap();
     await expect(page.locator('[data-ink-local-return]')).toHaveAttribute('aria-pressed', 'false');
   } finally { await context.close(); }
+});
+
+test('曲がりの設定をタップで選び、前の好感触な設定へ戻せる', async ({ page }) => {
+  await page.goto('/ink-lab.html');
+  await page.locator('[data-ink-curve-return]').click();
+  await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：曲がりとなめらかなたまり');
+  await page.reload();
+  await expect(page.locator('[data-ink-curve-return]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-ink-local-return]').click();
+  await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：細さと局所的なたまり');
 });
