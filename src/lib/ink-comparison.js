@@ -5,6 +5,7 @@ export const INK_DEFAULTS = { thinning: 0.6, response: 16, responseThin: 16, res
 export const INK_ORGANIC = { ...INK_DEFAULTS, streamline: 0.03, smoothing: 0.35, thinning: 0.5, responseThin: 24, responseThick: 12, minPressure: 0.3 };
 export const INK_LOCAL_RETURN = { ...INK_DEFAULTS, streamline: 0.04, smoothing: 0.45, responseThin: 12, responseThick: 24, minPressure: 0.2, localReturn: 0.14 };
 export const INK_STRONG_RETURN = { ...INK_LOCAL_RETURN, thinning: 0.82, minPressure: 0.14, localReturn: 0.18 };
+export const INK_EXTREME_RETURN = { ...INK_STRONG_RETURN, thinning: 0.9, minPressure: 0.1, localReturn: 0.25, responseThin: 8, responseThick: 12 };
 export const INK_CURVE_RETURN = { ...INK_LOCAL_RETURN, localReturn: 0.12, curveReturn: 0.055, widthResponse: 10 };
 export function inkSettings(settings = {}) {
   const limit = (value, min, max, fallback) => Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;

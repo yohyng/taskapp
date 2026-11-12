@@ -191,3 +191,15 @@ test('局所的なたまりの強弱大を選び、基準へ戻せる', async ({
   await page.locator('[data-ink-local-return]').click();
   await expect(page.locator('[data-ink-strong-return]')).toHaveAttribute('aria-pressed', 'false');
 });
+
+test('強弱最大を選んで保存し、強弱大へ戻せる', async ({ page }) => {
+  await page.goto('/ink-lab.html');
+  await page.locator('[data-ink-extreme-return]').click();
+  await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：細さと局所的なたまり・強弱最大');
+  await page.locator('[data-ink-controls] summary').click();
+  await expect(page.locator('[data-ink-thinning]')).toHaveValue('90');
+  await page.reload();
+  await expect(page.locator('[data-ink-extreme-return]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-ink-strong-return]').click();
+  await expect(page.locator('[data-ink-extreme-return]')).toHaveAttribute('aria-pressed', 'false');
+});

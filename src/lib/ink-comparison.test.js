@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC, INK_LOCAL_RETURN, INK_STRONG_RETURN, INK_CURVE_RETURN } from './ink-comparison';
+import { inkOutline, inkPoints, readInkDraft, INK_ORGANIC, INK_LOCAL_RETURN, INK_STRONG_RETURN, INK_EXTREME_RETURN, INK_CURVE_RETURN } from './ink-comparison';
 
 const samples = (speed, interval = 8) => Array.from({ length: Math.floor(160 / interval) + 1 }, (_, i) => ({ x: 20 + speed * i * interval, y: 100, t: i * interval, p: 0.4 }));
 describe('連続輪郭の比較ペン', () => {
@@ -87,5 +87,16 @@ it('強弱大は同じ軌跡で速い線と遅い線の幅の比を広げ、保�
   expect(spread(INK_STRONG_RETURN)).toBeGreaterThan(spread(INK_LOCAL_RETURN));
   const input = samples(2), stroke = { mode: 'speed', width: 10, samples: input, settings: INK_STRONG_RETURN };
   expect(inkPoints(input, 'speed', INK_STRONG_RETURN).map(p=>p.slice(0,2))).toEqual(input.map(p=>[p.x,p.y]));
+  expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
+});
+
+it('強弱最大は強弱大より幅の比が大きく、輪郭と保存復元が有限で一致する', () => {
+  const spread = (settings) => {
+    const width = speed => { const ys = inkOutline({ mode: 'speed', width: 10, settings, samples: samples(speed) }).map(p=>p[1]); return Math.max(...ys)-Math.min(...ys); };
+    return width(0.05)/width(2);
+  };
+  expect(spread(INK_EXTREME_RETURN)).toBeGreaterThan(spread(INK_STRONG_RETURN));
+  const stroke = { mode: 'speed', width: 10, samples: samples(2), settings: INK_EXTREME_RETURN };
+  expect(inkOutline(stroke).flat().every(Number.isFinite)).toBe(true);
   expect(inkOutline(readInkDraft(JSON.stringify([stroke]))[0])).toEqual(inkOutline(stroke));
 });
