@@ -4555,7 +4555,7 @@ function App() {
             aria-modal="true"
             onPointerDown={(e) => e.stopPropagation()}
             // 後ろは暗くしない。押したら閉じる受け皿としてだけ置く。
-            className={quickAddMode === "sketch" ? "fixed inset-0 z-[200] flex items-center justify-center p-2 sm:p-4" : "fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"}
+            className={quickAddMode === "sketch" ? "fixed inset-0 z-[200] flex items-stretch justify-center" : "fixed inset-0 z-[200] flex items-start justify-center p-4 pt-[12vh]"}
             onClick={(e) => { if (e.target === e.currentTarget) closeQuickAdd(); }}
           >
             {quickAddMode === "sketch" ? <SketchBoard strokes={quickAddSketch} onChange={changeSketch} onClose={closeQuickAdd} onSave={() => submitQuickAdd("memo")} saving={sketchSaving} message={sketchMessage} /> : <form
