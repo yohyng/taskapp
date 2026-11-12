@@ -1034,6 +1034,7 @@ function App() {
   const quickAddInputRef = useRef(null);
   const quickAddVoice = useVoiceInput({ enabled: quickAddOpen, value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
   const [quickAddSketch, setQuickAddSketch] = useState(readSketchDraft);
+  const [sketchPaperSize, setSketchPaperSize] = useState(null);
   const [sketchOpen, setSketchOpen] = useState(() => readSketchDraft().length > 0);
   const [sketchSaving, setSketchSaving] = useState(false);
   const [sketchMessage, setSketchMessage] = useState("");
@@ -4548,6 +4549,8 @@ function App() {
             onClick={(e) => { if (e.target === e.currentTarget) closeQuickAdd(); }}
           >
             <form
+              data-note-board
+              style={{ maxWidth: sketchOpen && sketchPaperSize ? `calc(28rem + ${Math.max(0, sketchPaperSize.width - 600) * sketchPaperSize.scale}px)` : undefined }}
               onSubmit={(e) => {
                 e.preventDefault();
                 submitQuickAdd(quickAddKind);
@@ -4674,7 +4677,7 @@ function App() {
                 <button type="button" data-quick-add-sketch aria-label={quickAddSketch.length > 0 ? "手書き（下書きあり）" : "手書き"} title="手書き" aria-expanded={sketchOpen} aria-pressed={sketchOpen} aria-controls="note-sketch" disabled={sketchSaving} onClick={() => setSketchOpen((value) => !value)} className={classNames("relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50", sketchOpen ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}><Pencil aria-hidden="true" className="h-4 w-4" />{quickAddSketch.length > 0 && <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent-400" />}</button>
                 <span data-quick-add-voice-status role="status" className="min-w-0 flex-1 text-[11px] text-neutral-500">{quickAddVoice.message}</span>
               </div>
-              {sketchOpen && <div id="note-sketch"><SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} /></div>}
+              {sketchOpen && <div id="note-sketch"><SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} onPaperSize={setSketchPaperSize} /></div>}
               {sketchMessage && <div data-sketch-status role="status" className="mt-2 text-xs text-neutral-400">{sketchMessage}</div>}
 
               <div className="mt-2 text-[10px] leading-relaxed text-neutral-600">

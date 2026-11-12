@@ -19,8 +19,10 @@ function sketchPoint(event, rect, withPressure, finalPressure) {
   return p;
 }
 
-export default function SketchPad({ strokes, onChange, disabled }) {
+export default function SketchPad({ strokes, onChange, disabled, onPaperSize }) {
   const canvasRef = useRef(null), drawingRef = useRef(null), liveRef = useRef(null);
+  const viewportRef = useRef(null), scaleReferenceRef = useRef(null);
+  const [paperScale, setPaperScale] = useState(null);
   const [brush, setBrush] = useState("speed-extreme-v1");
   const resizeRef = useRef(null), panRef = useRef(null);
   const [panMode, setPanMode] = useState(false);
@@ -30,6 +32,11 @@ export default function SketchPad({ strokes, onChange, disabled }) {
     return { width: Math.max(600, ...strokes.map(stroke => stroke.paperWidth || 600), Number.isFinite(saved?.width) ? Math.min(1200, Math.max(600, saved.width)) : 600),
       height: Math.max(210, ...strokes.map(stroke => stroke.height || 360), Number.isFinite(saved?.height) ? Math.min(1200, Math.max(210, saved.height)) : Math.round(savedRatio() * 600)) };
   });
+  // 外枠が広がっても線を拡大しないよう、最初の紙の表示倍率を保つ。
+  useLayoutEffect(() => { setPaperScale((scaleReferenceRef.current.clientWidth - 32) / 600); }, []);
+  useLayoutEffect(() => {
+    if (paperScale !== null) onPaperSize?.({ width: paper.width, height: paper.height, scale: paperScale });
+  }, [paper.width, paper.height, paperScale, onPaperSize]);
   const shownStrokes = useMemo(() => fitSketchToPaper(strokes, paper), [strokes, paper]);
   const pixelHeight = paper.height * 2;
   const [color, setColor] = useState(COLORS[0].color);
@@ -119,8 +126,9 @@ export default function SketchPad({ strokes, onChange, disabled }) {
       <label className="flex min-h-9 items-center gap-2" style={{ display: brush === "legacy" ? undefined : "none" }}><input data-sketch-pressure type="checkbox" checked={pressure} disabled={disabled} onChange={(event) => { setPressure(event.target.checked); try { localStorage.setItem("taskspace-sketch-pressure", String(event.target.checked)); } catch { /* この画面では使える */ } }} />筆圧を使う</label>
     </div>
     <div className="mb-1 text-[11px] text-neutral-500">ペンを使うとペン専用がオンになります。紙の端を引くと余白が増え、手のアイコンで紙を移動できます。</div>
-    <div data-sketch-viewport className="max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15">
-    <div className="relative p-4" style={{ width: `calc((100% - 32px) * ${paper.width / 600} + 32px)`, contain: "layout paint" }}>
+    <div ref={scaleReferenceRef} aria-hidden="true" className="h-0 overflow-hidden border-x border-transparent" style={{ width: "min(100%, calc(28rem - 2rem - 2px))" }} />
+    <div ref={viewportRef} data-sketch-viewport className="max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15">
+    <div className="relative p-4" style={{ width: paperScale === null ? "100%" : `${paper.width * paperScale + 32}px`, contain: "layout paint" }}>
     <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={paper.width * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : undefined, aspectRatio: `${paper.width * 2} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         event.stopPropagation();
