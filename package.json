@@ -1,7 +1,7 @@
 {
   "name": "taskapp-scaffold",
   "private": true,
-  "version": "1.22.2",
+  "version": "1.23.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -21,7 +21,8 @@
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "perfect-freehand": "1.2.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

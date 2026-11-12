@@ -1,3 +1,4 @@
+import { drawInk, INK_EXTREME_RETURN } from "./ink-comparison";
 export const SKETCH_WIDTH = 600;
 export const SKETCH_HEIGHT = 360;
 export const SKETCH_DRAFT_KEY = "taskspace-quick-sketch-v1";
@@ -6,13 +7,20 @@ export function readSketchDraft() {
   try {
     const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => (stroke?.brush === undefined || (stroke.brush === "speed-extreme-v1" && Array.isArray(stroke.times) && stroke.times.length === stroke.points?.length && stroke.times.every((t, i) => Number.isFinite(t) && t >= 0 && (!i || t >= stroke.times[i - 1])))) && /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
 }
 
 // 移動中は新しく届いた線だけを描き、過去の全ストロークを走査しない。
-export function appendSketch(canvas, stroke, from = 0) {
+export function appendSketch(canvas, stroke, from = 0, complete = true) {
   const ctx = canvas.getContext("2d");
+  if (stroke.brush === "speed-extreme-v1") {
+    ctx.save();
+    const scale = canvas.width / SKETCH_WIDTH;
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
+    drawInk(ctx, { mode: "speed", width: stroke.width, color: stroke.color, settings: INK_EXTREME_RETURN, samples: stroke.points.map((point, i) => ({ x: point[0] * SKETCH_WIDTH, y: point[1] * (stroke.height || SKETCH_HEIGHT), p: 0.5, t: stroke.times[i] })) }, complete);
+    ctx.restore(); return;
+  }
   const scale = canvas.width / SKETCH_WIDTH;
   // 縦に紙を足しても、それまでの線を引き伸ばさない。
   const height = (stroke.height || SKETCH_HEIGHT) * scale;

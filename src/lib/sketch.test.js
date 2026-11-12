@@ -39,3 +39,9 @@ describe('ペンの線と下書き', () => {
   });
 
 });
+
+it('速度ペンの下書きは時刻付きで復元し、壊れた時刻や未知のペンを除外する',()=>{
+  const stroke={color:'#202020',width:10,height:360,brush:'speed-extreme-v1',times:[0,16],points:[[.1,.2],[.3,.4]]};
+  vi.stubGlobal('localStorage',{getItem:()=>JSON.stringify([null,stroke,{...stroke,times:[0]},{...stroke,times:[16,0]},{...stroke,brush:'unknown'}])});
+  expect(readSketchDraft()).toEqual([stroke]);
+});
