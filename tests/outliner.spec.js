@@ -859,7 +859,7 @@ test.describe("見た目の設定", () => {
   test("タイプライターを入れると、書いている行が同じ高さに来る", async ({ page }) => {
     await openPanel(page);
     await page.locator("[data-typewriter]").click();
-    await expect(page.locator("[data-typewriter]")).toContainText("ON");
+    await expect(page.locator("[data-typewriter]")).toHaveAttribute("aria-pressed", "true");
     await page.keyboard.press("Escape");
 
     const whereIsEditing = async () => page.evaluate(() => {

@@ -86,11 +86,23 @@ test('一画の途中でレイアウトを測り直さず最初の移動を即�
     canvas.getBoundingClientRect=()=>{reads++;return original();}; canvas.setPointerCapture=()=>{};canvas.hasPointerCapture=()=>false;
     const send=(type,x)=>canvas.dispatchEvent(new PointerEvent(type,{bubbles:true,isPrimary:true,pointerId:42,pointerType:'pen',button:0,clientX:rect.left+rect.width*x,clientY:rect.top+40,pressure:.5}));
     send('pointerdown',.1); send('pointermove',.4);
-    const overlay=document.querySelector('[data-sketch-overlay]');
-    const pixels=overlay.getContext('2d').getImageData(0,0,overlay.width,overlay.height).data;
-    const drawn=pixels.some((v,i)=>i%4===3&&v>0);
+    const pixels=canvas.getContext('2d').getImageData(Math.round(canvas.width*.3),Math.round(40/rect.height*canvas.height)-2,4,4).data;
+    const drawn=pixels.some((v,i)=>i%4===0&&v<100);
     for(let i=0;i<100;i++)send('pointermove',.4+i*.003);
     send('pointerup',.7); return {reads,drawn};
   });
   expect(result.reads).toBe(1); expect(result.drawn).toBe(true);
+});
+
+test('ペンを離す前に表示用の紙へ線が出て、保存は確定後だけ行う', async ({ page }) => {
+  await page.locator('[data-quick-add]').click(); await page.locator('[data-quick-add-sketch]').click();
+  await expect(page.locator('[data-sketch-overlay]')).toHaveCount(0);
+  const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();const rect=await canvas.boundingBox();
+  await page.mouse.move(rect.x+rect.width*.1,rect.y+rect.height*.4);await page.mouse.down();
+  await page.mouse.move(rect.x+rect.width*.8,rect.y+rect.height*.4,{steps:30});
+  expect(await page.evaluate(()=>localStorage.getItem('taskspace-quick-sketch-v1'))).toBeNull();
+  await expect.poll(()=>canvas.evaluate(c=>{const y=Math.round(c.height*.4);const data=c.getContext('2d').getImageData(Math.round(c.width*.6),y-3,6,6).data;return data.some((v,i)=>i%4===0&&v<100);})).toBe(true);
+  await page.screenshot({path:`test-results/live-before-up-${test.info().project.name}.png`});
+  await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-quick-sketch-v1')||'[]').length)).toBe(1);
 });

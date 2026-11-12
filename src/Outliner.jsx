@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2, Settings2 } from "lucide-react";
+import { ChevronRight, ChevronDown, MoreHorizontal, Star, Check, Trash2, Search, X, Download, Upload, Undo2, Redo2, Settings2, Type } from "lucide-react";
 import {
   makeNode, ensureNode, pathTo, visibleRows, filterByQuery, splitByQuery,
   importOutline, mergeByText, buildExport, moveSubtreeTo,
@@ -1094,7 +1094,7 @@ export default function Outliner() {
   const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
   const [band, setBand] = useState(null);       // なぞって選ぶときの枠
   const [dateView, setDateView] = useState(false);     // 日付の順に並べて見る
-  // 書くことに集中：打っているあいだは、細かい表示を引っ込める。
+  // フォーカスモード：打っているあいだは、細かい表示を引っ込める。
   // 指やマウスが動いたら、すぐ戻す（押したいものが見えないと困るので）。
   const [calm, setCalm] = useState(false);
   const calmTimer = useRef(null);
@@ -1922,6 +1922,20 @@ export default function Outliner() {
           日付
         </button>
 
+        <button
+          data-typewriter
+          onClick={() => setView({ typewriter: !view.typewriter })}
+          title="タイプライターモード：書いている行を同じ高さに保つ"
+          aria-label="タイプライターモード"
+          aria-pressed={!!view.typewriter}
+          className={classNames(
+            "shrink-0 rounded-md border p-1 transition",
+            view.typewriter ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-500 hover:bg-white/[0.07] hover:text-neutral-200",
+          )}
+        >
+          <Type className="h-3 w-3" aria-hidden="true" />
+        </button>
+
         <div className="relative shrink-0">
           <button
             data-outline-view
@@ -2105,7 +2119,7 @@ export default function Outliner() {
                   view.immersive ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
                 )}
               >
-                <span>書くことに集中</span>
+                <span>フォーカスモード</span>
                 <span className="text-[10px]">{view.immersive ? "ON" : "OFF"}</span>
               </button>
               <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
@@ -2113,20 +2127,6 @@ export default function Outliner() {
                 指やマウスを動かすか、Esc で戻ります。
               </div>
 
-              <button
-                data-typewriter
-                onClick={() => setView({ typewriter: !view.typewriter })}
-                className={classNames(
-                  "flex w-full items-center justify-between rounded border px-2 py-1.5 text-[11px] transition",
-                  view.typewriter ? "border-accent-400/40 bg-accent-400/10 text-accent-200" : "border-white/10 text-neutral-400 hover:bg-white/[0.07]",
-                )}
-              >
-                <span>タイプライター</span>
-                <span className="text-[10px]">{view.typewriter ? "ON" : "OFF"}</span>
-              </button>
-              <div className="mt-1 text-[10px] leading-relaxed text-neutral-600">
-                書いている行が、いつも同じ高さに来るように送ります。
-              </div>
             </div>
           )}
         </div>
@@ -2496,7 +2496,7 @@ alter table outline_nodes disable row level security;
                 "group/row relative flex items-start gap-1 rounded py-[3px] pr-1 transition-opacity duration-500 hover:bg-white/[0.03]",
                 drag?.id === node.id && "opacity-40",
                 pickedSet.has(node.id) && "bg-accent-400/15 ring-1 ring-accent-400/30",
-                // 書くことに集中：いま打っている行のまわりだけ残す
+                // フォーカスモード：いま打っている行のまわりだけ残す
                 calm && editingId !== node.id && "opacity-25",
               )}
             >
