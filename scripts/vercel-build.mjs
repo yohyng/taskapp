@@ -9,6 +9,7 @@ import { documentId, productionProject } from '../experiments/sync-lab/src/stagi
 
 export const stagingBranch = 'codex/compare-sync-engines';
 export const productionBranch = 'claude/kind-fermi-sNjwi';
+export const inkDiagBranch = 'codex/ink-diagnostics';
 const productionRelease = JSON.parse(await readFile(new URL('./production-release.json', import.meta.url), 'utf8'));
 // ブラウザーへ配る公開設定だけを固定する。ログイン情報・GASの合言葉は配信物に含めない。
 export const previewEnvironment = Object.freeze({
@@ -28,6 +29,8 @@ export function vercelBuildPlan(env, release = productionRelease) {
     return { staging: false, release: true, viteArgs: ['build', '--mode', 'sync-release'], config };
   }
   if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === 'codex/rotate-pane-layout') return { staging: false, isolated: true, viteArgs: ['build'] };
+  // 手書きの計測ページは、実機で開ける場所が要る。Preview だけに置き、本番には出さない。
+  if (env.VERCEL_ENV === 'preview' && env.VERCEL_GIT_COMMIT_REF === inkDiagBranch) return { staging: false, isolated: true, viteArgs: ['build', '--mode', 'ink-diag'] };
   if (env.VERCEL_GIT_COMMIT_REF !== stagingBranch) return { staging: false, viteArgs: ['build'] };
   // ブランチ名だけでは本番への誤配信を防げない。環境とリポジトリも揃わなければ停止する。
   if (env.VERCEL !== '1' || env.VERCEL_ENV !== 'preview' || env.VERCEL_GIT_REPO_OWNER !== 'yohyng'

@@ -11,6 +11,8 @@ const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 
 
 export default defineConfig(({ mode }) => {
   // 明示した切替・検証ビルドだけ新Providerを選ぶ。通常配信で二つの保存経路を同時に起動しない。
+  // 手書きの計測ページだけを作るビルド。本番の配信物には計測コードを入れない。
+  const inkDiag = mode === 'ink-diag'
   const staging = mode === 'sync-staging'
   const release = mode === 'sync-release'
   const newSync = staging || release
@@ -20,6 +22,10 @@ export default defineConfig(({ mode }) => {
   const sessionClient = fileURLToPath(new URL('src/session-client.js', lab))
   const productSource = fileURLToPath(new URL('./src/', import.meta.url)).replaceAll('\\', '/')
   return {
+  ...(inkDiag ? { build: { rollupOptions: { input: {
+    main: fileURLToPath(new URL('./index.html', import.meta.url)),
+    diag: fileURLToPath(new URL('./ink-diag.html', import.meta.url)),
+  } } } } : {}),
   envPrefix: newSync ? 'LAB_BROWSER_UNUSED_' : 'VITE_',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
