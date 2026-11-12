@@ -179,3 +179,15 @@ test('曲がりの設定をタップで選び、前の好感触な設定へ戻�
   await page.locator('[data-ink-local-return]').click();
   await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：細さと局所的なたまり');
 });
+
+test('局所的なたまりの強弱大を選び、基準へ戻せる', async ({ page }) => {
+  await page.goto('/ink-lab.html');
+  await page.locator('[data-ink-strong-return]').click();
+  await expect(page.locator('[data-ink-preset]')).toHaveText('選択中：細さと局所的なたまり・強弱大');
+  await page.locator('[data-ink-controls] summary').click();
+  await expect(page.locator('[data-ink-thinning]')).toHaveValue('82');
+  await page.reload();
+  await expect(page.locator('[data-ink-strong-return]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('[data-ink-local-return]').click();
+  await expect(page.locator('[data-ink-strong-return]')).toHaveAttribute('aria-pressed', 'false');
+});
