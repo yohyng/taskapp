@@ -16,6 +16,7 @@ import { CSS } from "@dnd-kit/utilities";
 import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
 import SketchBoard from "./SketchBoard";
+import { Toaster, toast } from "sonner";
 import StallProbe from "./StallProbe";
 import { drainMemos, queuedMemos } from "./lib/memo-queue";
 // 止まりの計測は検証ビルド（ink-diag）の ?probe=1 だけ。通常の配信では false のまま消える。
@@ -1024,12 +1025,11 @@ function App() {
   const [quickCategory, setQuickCategory] = useState(boot.categories[0]?.key || "NOMLAB");
   const [quickProject, setQuickProject] = useState("空間シンクタンク");
   const [collapsed, setCollapsed] = useState({});
-  const [toast, setToastRaw] = useState("");
-  const toastTimer = useRef(null);
-  function setToast(msg) {
-    setToastRaw(msg);
-    clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToastRaw(""), 3000);
+  // 知らせは Sonner に任せる。重ねて出せて、押して閉じられて、
+  // 待つあいだも出せる。呼び名は setToast のまま（呼び出しが90か所あるので）。
+  function setToast(msg, options) {
+    if (!msg) return;
+    toast(msg, options);
   }
   const [history, setHistory] = useState({ past: [], future: [] });
   const [showColumnsPanel, setShowColumnsPanel] = useState(false);
@@ -4794,7 +4794,22 @@ function App() {
           </div>
         )}
 
-        {toast && <div className="fixed bottom-3 left-1/2 z-50 -translate-x-1/2 rounded-full border border-white/10 ts-surface px-3 py-1.5 text-[11px] text-neutral-400 shadow-2xl backdrop-blur">{toast}</div>}
+        <Toaster
+          position="bottom-center"
+          theme="dark"
+          closeButton
+          // この app の配色・丸みに合わせる（既定のカードは浮きすぎる）
+          toastOptions={{
+            unstyled: false,
+            classNames: {
+              toast: "!rounded-xl !border !border-white/10 !bg-[var(--ts-panel,#2b2e2d)] !text-neutral-200 !shadow-2xl",
+              description: "!text-neutral-400",
+              actionButton: "!rounded !bg-white/10 !text-neutral-100",
+              cancelButton: "!rounded !bg-transparent !text-neutral-400",
+              closeButton: "!border-white/15 !bg-[var(--ts-panel,#2b2e2d)] !text-neutral-400",
+            },
+          }}
+        />
       </div>
     </div>
     <DragOverlay dropAnimation={null}>
