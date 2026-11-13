@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
-import { stagingBranch, productionBranch, inkDiagBranch, previewEnvironment, vercelBuildPlan } from './vercel-build.mjs';
+import { stagingBranch, productionBranch, inkDiagBranch, uiLabBranch, previewEnvironment, vercelBuildPlan } from './vercel-build.mjs';
 
 const preview = { VERCEL: '1', VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: stagingBranch,
   VERCEL_GIT_REPO_OWNER: 'yohyng', VERCEL_GIT_REPO_SLUG: 'taskapp', VERCEL_GIT_COMMIT_SHA: 'a'.repeat(40) };
@@ -48,4 +48,10 @@ test('計測配信：手書きの計測ページはPreviewだけに出し、本�
   // 同じブランチでもProductionでは通常ビルド。ログイン情報は配信物へ渡さない（isolatedで空にする）。
   assert.deepEqual(vercelBuildPlan({ ...diag, VERCEL_ENV: 'production' }, { enabled: false }), { staging: false, viteArgs: ['build'] });
   assert.deepEqual(vercelBuildPlan({ ...preview, VERCEL_GIT_COMMIT_REF: productionBranch }, { enabled: false }), { staging: false, viteArgs: ['build'] });
+});
+
+test('試し場：部品のライブラリはPreviewだけに出し、本番ビルドには混ぜない', () => {
+  const lab = { ...preview, VERCEL_GIT_COMMIT_REF: uiLabBranch };
+  assert.deepEqual(vercelBuildPlan(lab, { enabled: false }), { staging: false, isolated: true, viteArgs: ['build', '--mode', 'ui-lab'] });
+  assert.deepEqual(vercelBuildPlan({ ...lab, VERCEL_ENV: 'production' }, { enabled: false }), { staging: false, viteArgs: ['build'] });
 });

@@ -13,6 +13,8 @@ export default defineConfig(({ mode }) => {
   // 明示した切替・検証ビルドだけ新Providerを選ぶ。通常配信で二つの保存経路を同時に起動しない。
   // 手書きの計測ページだけを作るビルド。本番の配信物には計測コードを入れない。
   const inkDiag = mode === 'ink-diag'
+  // 部品のライブラリを試す場所。通常の配信物には入れない。
+  const uiLab = mode === 'ui-lab'
   const staging = mode === 'sync-staging'
   const release = mode === 'sync-release'
   const newSync = staging || release
@@ -27,6 +29,7 @@ export default defineConfig(({ mode }) => {
     main: fileURLToPath(new URL('./index.html', import.meta.url)),
     sketch: fileURLToPath(new URL('./sketch.html', import.meta.url)),
     ...(inkDiag ? { diag: fileURLToPath(new URL('./ink-diag.html', import.meta.url)) } : {}),
+    ...(uiLab ? { lab: fileURLToPath(new URL('./ui-lab.html', import.meta.url)) } : {}),
   } } },
   envPrefix: newSync ? 'LAB_BROWSER_UNUSED_' : 'VITE_',
   define: {
