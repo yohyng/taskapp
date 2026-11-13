@@ -3506,6 +3506,67 @@ function App() {
 
   // 月〜日の日付ブロックを、横一列の段組みとして一気に置く
   // 列を1本足す。列は独立した持ち物なので、中身を消しても残る。
+  // PJ の箱を、別の段へ置き直す。
+  //   into … その段の、ある列の左右へ差し込む
+  //   row  … 新しい段として、ある段の上／下へ置く
+  // 段は rowKey で束ね、画面の並びは配列の順で決まるので、両方を直す。
+  function placePjColumn(fromRowKey, fromCol, target) {
+    commitTasks((prev) => {
+      const onBoard = (t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId;
+      const movedIds = new Set(prev
+        .filter((t) => onBoard(t) && t.rowKey === fromRowKey && (t.col ?? 0) === fromCol)
+        .map((t) => t.id));
+      if (!movedIds.size) return prev;
+
+      // 抜けたあとの段は、列番号を詰めておく（穴が空くと並べ替えが狂う）
+      const compact = (list) => {
+        const cols = [...new Set(list
+          .filter((t) => onBoard(t) && t.rowKey === fromRowKey && !movedIds.has(t.id))
+          .map((t) => t.col ?? 0))].sort((a, b) => a - b);
+        const number = new Map(cols.map((c, i) => [c, i]));
+        return list.map((t) => (onBoard(t) && t.rowKey === fromRowKey && !movedIds.has(t.id) && number.has(t.col ?? 0)
+          ? { ...t, col: number.get(t.col ?? 0) } : t));
+      };
+      // 配列の中でも、置いた先の段のそばへ移す（段の上下の並びは配列順で決まる）
+      const relocate = (list, anchorRowKey, before) => {
+        const moving = list.filter((t) => movedIds.has(t.id));
+        const rest = list.filter((t) => !movedIds.has(t.id));
+        const marks = rest
+          .map((t, i) => (onBoard(t) && t.rowKey === anchorRowKey ? i : -1))
+          .filter((i) => i >= 0);
+        if (!marks.length) return [...rest, ...moving];
+        const at = before ? marks[0] : marks[marks.length - 1] + 1;
+        return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+      };
+
+      if (target.kind === "into") {
+        const cols = [...new Set(prev
+          .filter((t) => onBoard(t) && t.rowKey === target.rowKey && !movedIds.has(t.id))
+          .map((t) => t.col ?? 0))].sort((a, b) => a - b);
+        let at = cols.indexOf(target.col);
+        if (at < 0) at = cols.length;
+        else if (target.after) at += 1;
+        const order = [...cols];
+        order.splice(at, 0, null);          // null が動かしてきた箱の居場所
+        const number = new Map();
+        order.forEach((c, i) => { if (c !== null) number.set(c, i); });
+        const movedCol = order.indexOf(null);
+        let next = prev.map((t) => {
+          if (movedIds.has(t.id)) return { ...t, rowKey: target.rowKey, col: movedCol };
+          if (onBoard(t) && t.rowKey === target.rowKey && number.has(t.col ?? 0)) return { ...t, col: number.get(t.col ?? 0) };
+          return t;
+        });
+        if (target.rowKey !== fromRowKey) next = compact(next);
+        return relocate(next, target.rowKey, false);
+      }
+
+      const key = `row-${uid()}`;
+      let next = prev.map((t) => (movedIds.has(t.id) ? { ...t, rowKey: key, col: 0, colWidth: null } : t));
+      next = compact(next);
+      return relocate(next, target.rowKey, target.before);
+    });
+  }
+
   function addBoardColumn() {
     const here = tasks.filter((t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId);
     const inRow = here.filter((t) => t.rowKey);
@@ -3631,6 +3692,7 @@ function App() {
         addTask={addTask}
         mapTasks={mapTasks}
         onReorder={swapTaskOrder}
+        onPlacePj={placePjColumn}
         onMergeBlocks={mergeBlockInto}
         dayDeps={dayDeps}
         placeholder="ここは自由。クリックして書き始める。/ でコマンド、/PJを追加する で PJ の箱。"
@@ -6327,7 +6389,7 @@ function PageBlock({ task, depth, childrenOf, listNumber, upsertTask, removeTask
 // pageId で持ち主が決まるだけで、中の操作感は Notion のページと同じ。
 function BlockArea({
   pageId, tasks, upsertTask, removeTask, toggleDone, setSelectedTaskId, childrenOf,
-  addTask, mapTasks, onReorder, onMergeBlocks, placeholder = "クリックして書き始める。/ でコマンド。",
+  addTask, mapTasks, onReorder, onPlacePj, onMergeBlocks, placeholder = "クリックして書き始める。/ でコマンド。",
   tailClass = "mt-1 min-h-[40vh] cursor-text pt-2 text-[13px] text-neutral-700",
   // 日付ブロックが 7days と同じ実体を触るのに要るもの
   dayDeps,
@@ -6536,20 +6598,33 @@ function BlockArea({
     setPjDrag(colNum);
     setPjOver(null);
     // 重ねている列と、その左右どちら側に入るか。真ん中より右なら後ろに差し込む。
+    const EDGE = 18;   // 段の上下、このぶんの帯に落とすと新しい段になる
     const spotAt = (ev) => {
-      const el = document.elementFromPoint(ev.clientX, ev.clientY)?.closest("[data-col-index]");
+      const at = document.elementFromPoint(ev.clientX, ev.clientY);
+      const rowEl = at?.closest("[data-row-key]");
+      if (rowEl) {
+        const rect = rowEl.getBoundingClientRect();
+        const near = Math.min(EDGE, rect.height / 3);
+        if (ev.clientY < rect.top + near || ev.clientY > rect.bottom - near) {
+          return { kind: "row", rowKey: rowEl.getAttribute("data-row-key"), before: ev.clientY < rect.top + rect.height / 2 };
+        }
+      }
+      const el = at?.closest("[data-col-index]");
       if (!el) return null;
       const n = Number(el.getAttribute("data-col-index"));
       if (Number.isNaN(n)) return null;
       const r = el.getBoundingClientRect();
-      return { col: n, after: ev.clientX > r.left + r.width / 2 };
+      const key = el.closest("[data-row-key]")?.getAttribute("data-row-key") || rowKey;
+      return { kind: "into", rowKey: key, col: n, after: ev.clientX > r.left + r.width / 2 };
     };
     const move = (ev) => setPjOver(spotAt(ev));
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const spot = spotAt(ev);
-      if (spot) moveColumnTo(pjRow.current, colNum, spot.col, spot.after);
+      if (spot?.kind === "row") onPlacePj?.(pjRow.current, colNum, spot);
+      else if (spot && spot.rowKey !== pjRow.current) onPlacePj?.(pjRow.current, colNum, spot);
+      else if (spot) moveColumnTo(pjRow.current, colNum, spot.col, spot.after);
       setPjDrag(null);
       setPjOver(null);
     };
@@ -6572,9 +6647,16 @@ function BlockArea({
         {rows.map((row) => (
           <div
             key={row.key}
+            data-row-key={row.single ? undefined : row.key}
             // 段組みは広い画面だけ。狭い画面では縦に積む。
             // PJ は横に並べ、入りきらなくなったら下の段へ回す。
-            className={row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-3 sm:flex-row sm:flex-wrap sm:items-start"}
+            className={classNames(
+              row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-3 sm:flex-row sm:flex-wrap sm:items-start",
+              // 段の上下へ落とすと、その段の上／下に新しい段ができる
+              !row.single && pjDrag != null && pjOver?.kind === "row" && pjOver.rowKey === row.key && (pjOver.before
+                ? "shadow-[inset_0_3px_0_0_rgb(56_189_248)]"
+                : "shadow-[inset_0_-3px_0_0_rgb(56_189_248)]"),
+            )}
           >
             {row.cols.map((colBlocks, ci) => {
               const colNum = row.single ? 0 : row.colNums[ci];
@@ -6590,8 +6672,8 @@ function BlockArea({
                   data-col-index={colNum}
                   className={classNames(
                     "min-w-0",
-                    pjDrag != null && pjOver?.col === colNum && "relative",
-                    pjDrag != null && pjOver?.col === colNum && (pjOver.after
+                    pjDrag != null && pjOver?.kind === "into" && pjOver?.col === colNum && "relative",
+                    pjDrag != null && pjOver?.kind === "into" && pjOver?.col === colNum && (pjOver.after
                       ? "shadow-[inset_-3px_0_0_0_rgb(56_189_248)]"
                       : "shadow-[inset_3px_0_0_0_rgb(56_189_248)]"),
                     pjDrag === colNum && "opacity-50",
