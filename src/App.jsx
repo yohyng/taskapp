@@ -15,7 +15,6 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
-import SketchPad from "./SketchPad";
 import SketchBoard from "./SketchBoard";
 import StallProbe from "./StallProbe";
 import { drainMemos, queuedMemos } from "./lib/memo-queue";
@@ -1041,8 +1040,6 @@ function App() {
   const quickAddInputRef = useRef(null);
   const quickAddVoice = useVoiceInput({ enabled: quickAddOpen && quickAddMode === "note", value: quickAddTitle, onText: setQuickAddTitle, inputRef: quickAddInputRef });
   const [quickAddSketch, setQuickAddSketch] = useState(readSketchDraft);
-  const [sketchPaperSize, setSketchPaperSize] = useState(null);
-  const [sketchOpen, setSketchOpen] = useState(false);
   const [sketchSaving, setSketchSaving] = useState(false);
   const [sketchMessage, setSketchMessage] = useState("");
   const sketchUploadRef = useRef(null), sketchUploadedRef = useRef(null);
@@ -3217,7 +3214,7 @@ function App() {
   // 手書きの画面を開いている間は、アウトラインの重い仕事を持ち越してもらう。
   // 実機の計測で、書いている最中に画面を止めていたのは手書きではなく、
   // 60秒ごとの読み直しと、そのあとの端末への書き戻しだった。
-  const sketching = quickAddOpen && (quickAddMode === "sketch" || sketchOpen);
+  const sketching = quickAddOpen && quickAddMode === "sketch";
   useEffect(() => {
     outline.quiet?.(sketching);
     return () => outline.quiet?.(false);
@@ -3233,7 +3230,7 @@ function App() {
   }
   async function submitQuickAdd(kind) {
     const title = quickAddTitle.trim();
-    const strokes = quickAddMode === "sketch" || sketchOpen ? quickAddSketch : [];
+    const strokes = quickAddMode === "sketch" ? quickAddSketch : [];
     if ((!title && !strokes.length) || sketchUploadRef.current) return;
     // 追加後の空欄へ遅れて届いた認識結果を入れない。
     quickAddVoice.cancel();
@@ -3992,7 +3989,7 @@ function App() {
 
           <div data-header-actions className="flex w-full flex-wrap items-stretch justify-start gap-1.5 sm:ml-auto sm:w-auto sm:justify-end">
             <button
-              onClick={() => { setQuickAddMode("note"); setSketchOpen(false); setQuickAddOpen(true); }}
+              onClick={() => { setQuickAddMode("note"); setQuickAddOpen(true); }}
               title="タスクかメモを書きとめる"
               data-quick-add
               className="flex min-w-0 flex-1 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-accent-400/40 bg-accent-500/15 px-3 py-1.5 text-xs font-medium text-accent-300 transition hover:bg-accent-500/25 sm:flex-none"
@@ -4598,7 +4595,6 @@ function App() {
           >
             {quickAddMode === "sketch" ? <SketchBoard strokes={quickAddSketch} onChange={changeSketch} onClose={closeQuickAdd} onSave={() => submitQuickAdd("memo")} saving={sketchSaving} message={sketchMessage} /> : <form
               data-note-board
-              style={{ maxWidth: sketchOpen && sketchPaperSize ? `calc(28rem + ${Math.max(0, sketchPaperSize.width - 600) * sketchPaperSize.scale}px)` : undefined }}
               onSubmit={(e) => {
                 e.preventDefault();
                 submitQuickAdd(quickAddKind);
@@ -4621,7 +4617,7 @@ function App() {
                 <button
                   type="button"
                   data-add-task
-                  disabled={sketchSaving || (sketchOpen && quickAddSketch.length > 0) || !quickAddTitle.trim()}
+                  disabled={sketchSaving || !quickAddTitle.trim()}
                   onClick={() => submitQuickAdd("task")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
@@ -4635,7 +4631,7 @@ function App() {
                 <button
                   type="button"
                   data-add-memo
-                  disabled={sketchSaving || (!quickAddTitle.trim() && (!sketchOpen || !quickAddSketch.length))}
+                  disabled={sketchSaving || !quickAddTitle.trim()}
                   onClick={() => submitQuickAdd("memo")}
                   className={classNames(
                     "flex-1 rounded-xl border px-3 py-2.5 text-sm font-medium transition disabled:opacity-30",
@@ -4722,10 +4718,8 @@ function App() {
                 <button type="button" data-quick-add-voice aria-label={quickAddVoice.phase === "idle" ? "音声入力" : quickAddVoice.phase === "stopping" ? "音声を確定中" : "音声入力を停止"} title="音声入力" data-voice-phase={quickAddVoice.phase} aria-pressed={quickAddVoice.phase !== "idle"} onClick={quickAddVoice.toggle} disabled={sketchSaving || quickAddVoice.phase === "stopping"} className={classNames("flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border text-xs transition disabled:opacity-50", quickAddVoice.phase !== "idle" ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}>
                   {quickAddVoice.phase !== "idle" ? <Square aria-hidden="true" className="h-3.5 w-3.5" /> : <Mic aria-hidden="true" className="h-3.5 w-3.5" />}
                 </button>
-                <button type="button" data-quick-add-sketch aria-label={quickAddSketch.length > 0 ? "手書き（下書きあり）" : "手書き"} title="手書き" aria-expanded={sketchOpen} aria-pressed={sketchOpen} aria-controls="note-sketch" disabled={sketchSaving} onClick={() => setSketchOpen((value) => !value)} className={classNames("relative flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border transition disabled:opacity-50", sketchOpen ? "border-accent-400/50 bg-accent-500/15 text-accent-200" : "border-white/15 text-neutral-300 hover:bg-white/10")}><Pencil aria-hidden="true" className="h-4 w-4" />{quickAddSketch.length > 0 && <span aria-hidden="true" className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-accent-400" />}</button>
                 <span data-quick-add-voice-status role="status" className="min-w-0 flex-1 text-[11px] text-neutral-500">{quickAddVoice.message}</span>
               </div>
-              {sketchOpen && <div id="note-sketch"><SketchPad strokes={quickAddSketch} onChange={changeSketch} disabled={sketchSaving} onPaperSize={setSketchPaperSize} /></div>}
               {sketchMessage && <div data-sketch-status role="status" className="mt-2 text-xs text-neutral-400">{sketchMessage}</div>}
 
               <div className="mt-2 text-[10px] leading-relaxed text-neutral-600">

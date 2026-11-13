@@ -1916,15 +1916,18 @@ test.describe("集中モード（Stone のような字組みと、消える UI�
   test("字組みが Stone に寄る（左21%・行間2.0）", async ({ page }) => {
     await turnOn(page);
     const list = page.locator("[data-outline-list]");
-    const box = await list.boundingBox();
+    const screen = page.viewportSize();
     const style = await list.evaluate((el) => {
       const s = getComputedStyle(el);
       return { left: parseFloat(s.paddingLeft), size: parseFloat(s.fontSize), line: parseFloat(s.lineHeight) };
     });
     // 画面幅の 21%（上限 320px）
-    expect(style.left).toBeCloseTo(Math.min(320, box.width * 0.21), 0);
+    expect(style.left).toBeCloseTo(Math.min(320, screen.width * 0.21), 0);
     expect(style.size).toBeGreaterThanOrEqual(17);
     expect(style.line / style.size).toBeCloseTo(2, 1);
+    // 1行は 36 字ほどで折り返す（画面いっぱいに流さない）
+    const row = await page.locator('[data-row="a"]').boundingBox();
+    expect(row.width).toBeLessThanOrEqual(style.size * 40);
   });
 
   test("打つと、印も日付も ⋯ も消える（薄くではなく、出さない）", async ({ page }) => {

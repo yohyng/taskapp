@@ -1,11 +1,21 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT, expandSketchPaper, fitSketchToPaper } from "./lib/sketch";
+import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
 
 import { createPortal } from "react-dom";
 import { Hand, Settings2, Undo2, Trash2 } from "lucide-react";
 import { createLiveSketch } from "./lib/live-sketch";
 
+// よく使う4色は出したまま。残りは押して開く見本から選ぶ（Goodnotes の鉛筆まわりに近い形）。
 const COLORS = [{ name: "黒", color: "#202020" }, { name: "青", color: "#2563eb" }, { name: "赤", color: "#dc2626" }, { name: "緑", color: "#15803d" }];
+const PALETTE = [
+  "#202020", "#5b5b5b", "#9b9b9b", "#ffffff",
+  "#dc2626", "#ea580c", "#d97706", "#ca8a04",
+  "#15803d", "#059669", "#0891b2", "#2563eb",
+  "#4f46e5", "#7c3aed", "#c026d3", "#db2777",
+];
+// 太さも、よく使う3つをすぐ押せるようにする
+const WIDTHS = [{ label: "細", value: 2 }, { label: "中", value: 6 }, { label: "太", value: 12 }];
+const COLOR_KEY = "taskspace-sketch-colors";
 const HEIGHT_KEY = "taskspace-sketch-ratio";
 function savedRatio() {
   try { const value = Number(localStorage.getItem(HEIGHT_KEY)); return value >= 0.35 && value <= 2 ? value : SKETCH_HEIGHT / SKETCH_WIDTH; } catch { return SKETCH_HEIGHT / SKETCH_WIDTH; }
@@ -25,7 +35,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   const viewportRef = useRef(null), scaleReferenceRef = useRef(null);
   const [paperScale, setPaperScale] = useState(null);
   const [brush, setBrush] = useState("speed-extreme-v1");
-  const resizeRef = useRef(null), panRef = useRef(null), committedRef = useRef(null), scrollIntentRef = useRef(false), lastExpansionRef = useRef(null);
+  const panRef = useRef(null), committedRef = useRef(null), scrollIntentRef = useRef(false), lastExpansionRef = useRef(null);
   const [panMode, setPanMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paper, setPaper] = useState(() => {
@@ -52,8 +62,30 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     if (paperScale !== null) onPaperSize?.({ width: paper.width, height: paper.height, scale: paperScale });
   }, [paper.width, paper.height, paperScale, onPaperSize]);
   const shownStrokes = useMemo(() => paper.shiftX || paper.shiftY ? fitSketchToPaper(strokes, paper) : strokes, [strokes, paper]);
-  const pixelHeight = paper.height * 2;
+  // 画面に出ている大きさ × 端末の細かさで描く。
+  // 紙の寸法の2倍で固定していると、広い画面や iPad では引き伸ばされ、
+  // 線の縁がぎざつく（「がびがび」に見えるのがこれ）。
+  const density = Math.min(3, Math.max(1, typeof window === "undefined" ? 2 : window.devicePixelRatio || 2));
+  const shownScale = paperScale || 2;
+  // 大きすぎる紙は端末が持てないので、上限で頭打ちにする
+  const pixelWidth = Math.min(4096, Math.round(paper.width * shownScale * density));
+  const pixelHeight = Math.round(pixelWidth * (paper.height / paper.width));
   const [color, setColor] = useState(COLORS[0].color);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [recent, setRecent] = useState(() => {
+    try { const list = JSON.parse(localStorage.getItem(COLOR_KEY) || "[]"); return Array.isArray(list) ? list.filter((v) => /^#[0-9a-f]{6}$/i.test(v)).slice(0, 8) : []; }
+    catch { return []; }
+  });
+  // 選んだ色は、最近つかった色として覚えておく（選び直しが速い）
+  const pickColor = (value) => {
+    setColor(value);
+    setPaletteOpen(false);
+    setRecent((prev) => {
+      const next = [value, ...prev.filter((item) => item !== value)].slice(0, 8);
+      try { localStorage.setItem(COLOR_KEY, JSON.stringify(next)); } catch { /* 覚えられなくても使える */ }
+      return next;
+    });
+  };
   const [width, setWidth] = useState(10);
   const [cleared, setCleared] = useState(null);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
@@ -64,18 +96,8 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     // 確定した線は既に同じ紙へ描いてある。過去の全線を再計算して次の入力を止めない。
     if (committed?.strokes === strokes && committed.width === canvas.width && committed.height === canvas.height && shownStrokes === strokes) return;
     paintSketch(canvas, shownStrokes, paper.width);
-  }, [shownStrokes, strokes, paper.width, pixelHeight]);
+  }, [shownStrokes, strokes, paper.width, paper.height, pixelWidth, pixelHeight]);
   useEffect(() => () => { liveRef.current?.dispose(); liveRef.current = null; }, []);
-  function finishResize(event) {
-    const resize = resizeRef.current;
-    if (!resize || resize.id !== event.pointerId) return;
-    const next = resize.next || resize.paper;
-    resizeRef.current = null;
-    if (next.width !== resize.paper.width || next.height !== resize.paper.height) onChange(fitSketchToPaper(strokes, next));
-    setPaper({ width: next.width, height: next.height });
-    try { localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify({ width: next.width, height: next.height })); localStorage.setItem(HEIGHT_KEY, String(next.height / 600)); } catch { /* 紙はこの画面では広げられる */ }
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-  }
   const extendDown = useCallback(() => {
     if (!standalone || disabled || drawingRef.current || paper.height >= 1200 || lastExpansionRef.current === paper.height) return;
     lastExpansionRef.current = paper.height; scrollIntentRef.current = false;
@@ -145,9 +167,54 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   }
   const tools = (
     <div data-sketch-tools className={standalone ? "flex w-max shrink-0 flex-nowrap items-center gap-1.5" : "mb-2 flex shrink-0 flex-wrap items-center gap-1.5"}>
-      {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => setColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: item.color }} /></button>)}
+      {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => pickColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: item.color }} /></button>)}
+      <div className="relative shrink-0">
+        <button
+          type="button"
+          data-sketch-palette
+          aria-label="ペンの色を選ぶ"
+          aria-expanded={paletteOpen}
+          disabled={disabled}
+          onClick={() => setPaletteOpen((value) => !value)}
+          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-expanded:bg-white/10"
+        >
+          <span className="h-4 w-4 rounded-full border border-white/30" style={{ backgroundColor: color }} />
+        </button>
+        {paletteOpen && (
+          <div data-sketch-palette-panel className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
+            {recent.length > 0 && <>
+              <div className="mb-1 text-[10px] text-neutral-500">最近つかった色</div>
+              <div className="mb-2 flex flex-wrap gap-1">
+                {recent.map((value) => <button key={`recent-${value}`} type="button" data-sketch-recent={value} aria-label={`最近の色 ${value}`} onClick={() => pickColor(value)} className="h-7 w-7 rounded-full border border-white/20" style={{ backgroundColor: value }} />)}
+              </div>
+            </>}
+            <div className="mb-1 text-[10px] text-neutral-500">色</div>
+            <div className="mb-2 grid grid-cols-8 gap-1">
+              {PALETTE.map((value) => <button key={value} type="button" data-sketch-swatch={value} aria-label={`色 ${value}`} aria-pressed={color === value} onClick={() => pickColor(value)} className="h-6 w-6 rounded-full border border-white/20 aria-pressed:ring-2 aria-pressed:ring-white/70" style={{ backgroundColor: value }} />)}
+            </div>
+            <label className="flex items-center gap-2 text-[10px] text-neutral-400">
+              そのほかの色
+              <input data-sketch-color-input type="color" value={color} onChange={(event) => pickColor(event.target.value)} className="h-7 w-10 rounded border border-white/15 bg-transparent" />
+            </label>
+          </div>
+        )}
+      </div>
+      <div data-sketch-widths className="flex shrink-0 items-center gap-1">
+        {WIDTHS.map((item) => <button
+          key={item.value}
+          type="button"
+          data-sketch-width-preset={item.value}
+          aria-label={`太さ：${item.label}`}
+          aria-pressed={width === item.value}
+          disabled={disabled}
+          onClick={() => setWidth(item.value)}
+          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:bg-white/10 aria-pressed:ring-1 aria-pressed:ring-white/60"
+        >
+          <span className="rounded-full bg-current" style={{ width: `${4 + item.value * 0.8}px`, height: `${4 + item.value * 0.8}px` }} />
+        </button>)}
+      </div>
       <select hidden={standalone && !settingsOpen} data-sketch-brush aria-label="ペンの種類" value={brush} disabled={disabled} onChange={(event) => setBrush(event.target.value)} className="h-9 rounded border border-white/15 ts-surface px-2 text-xs"><option value="speed-extreme-v1">速度ペン・強弱最大</option><option value="legacy">従来のペン</option></select>
-      <label className="flex items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
+      <label hidden={standalone && !settingsOpen} className="flex items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
       <button type="button" data-sketch-pan aria-label="紙を移動" title="紙を移動：オンの間は指やマウスで紙をドラッグできます" aria-pressed={panMode} disabled={disabled} onClick={() => setPanMode(value => !value)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:bg-accent-400/20 aria-pressed:text-accent-200"><Hand aria-hidden="true" className="h-4 w-4" /></button>
       <button type="button" data-sketch-undo disabled={disabled || (!strokes.length && !cleared)} onClick={() => { onChange(strokes.length ? strokes.slice(0, -1) : cleared); setCleared(null); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-300 disabled:opacity-30" aria-label="戻す" title="戻す">{standalone ? <Undo2 aria-hidden="true" className="h-4 w-4" /> : "戻す"}</button>
       <button type="button" data-sketch-clear disabled={disabled || !strokes.length} onClick={() => { setCleared(strokes); onChange([]); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-400 disabled:opacity-30" aria-label="全消去" title="全消去">{standalone ? <Trash2 aria-hidden="true" className="h-4 w-4" /> : "全消去"}</button>
@@ -172,10 +239,10 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
       if (scrollIntentRef.current && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 8) extendDown();
     }} className={standalone ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-white/15" : "max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15"}>
     <div className="relative p-4" style={{ width: standalone || paperScale === null ? "100%" : `${paper.width * paperScale + 32}px`, contain: "layout paint" }}>
-    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={paper.width * 2} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : undefined, aspectRatio: `${paper.width * 2} / ${pixelHeight}` }}
+    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={pixelWidth} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : undefined, aspectRatio: `${pixelWidth} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         event.stopPropagation();
-        if (!disabled && !drawingRef.current && !resizeRef.current && !panRef.current && panMode && event.pointerType !== "pen" && event.isPrimary && event.button === 0) {
+        if (!disabled && !drawingRef.current && !panRef.current && panMode && event.pointerType !== "pen" && event.isPrimary && event.button === 0) {
           event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId);
           const viewport = event.currentTarget.closest("[data-sketch-viewport]");
           panRef.current = { id: event.pointerId, viewport, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
@@ -186,7 +253,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
           drawingRef.current = null; liveRef.current?.dispose(); liveRef.current = null;
           paintSketch(canvasRef.current, shownStrokes, paper.width);
         }
-        if (disabled || drawingRef.current || resizeRef.current || panRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
+        if (disabled || drawingRef.current || panRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         const pen = event.pointerType === "pen";
@@ -206,36 +273,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
       onMouseMove={event => event.stopPropagation()} onMouseUp={event => event.stopPropagation()}
       onPointerUp={event => { event.stopPropagation(); finish(event); }} onPointerCancel={event => { event.stopPropagation(); finish(event); }} onLostPointerCapture={finish}
     />
-    {[["top", "上", "absolute left-1/2 top-0 h-4 w-20 -translate-x-1/2 cursor-ns-resize"], ["bottom", "下", "absolute bottom-0 left-1/2 h-4 w-20 -translate-x-1/2 cursor-ns-resize"], ["left", "左", "absolute left-0 top-1/2 h-20 w-4 -translate-y-1/2 cursor-ew-resize"], ["right", "右", "absolute right-0 top-1/2 h-20 w-4 -translate-y-1/2 cursor-ew-resize"]].filter(() => !standalone).map(([edge, name, classes]) => <div key={edge}
-      data-sketch-edge={edge} data-sketch-resize={edge === "bottom" ? "" : undefined} role="separator" aria-label={`紙を${name}へ広げる`} aria-valuemin={edge === "left" || edge === "right" ? 600 : 210} aria-valuemax={1200} aria-valuenow={edge === "left" || edge === "right" ? paper.width : paper.height} aria-orientation={edge === "left" || edge === "right" ? "vertical" : "horizontal"} tabIndex={disabled ? -1 : 0}
-      className={`${classes} flex touch-none items-center justify-center rounded focus-visible:outline focus-visible:outline-accent-400`}
-      onPointerDown={event => {
-        event.preventDefault(); event.stopPropagation();
-        if (disabled || drawingRef.current || resizeRef.current || panRef.current || !event.isPrimary || event.button !== 0) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        resizeRef.current = { id: event.pointerId, edge, x: event.clientX, y: event.clientY, paper, scale: canvasRef.current.getBoundingClientRect().width / paper.width };
-      }}
-      onPointerMove={event => {
-        const start = resizeRef.current;
-        if (!start || start.id !== event.pointerId) return;
-        event.preventDefault(); event.stopPropagation();
-        const horizontal = edge === "left" || edge === "right";
-        const distance = ((horizontal ? event.clientX - start.x : event.clientY - start.y) * (edge === "left" || edge === "top" ? -1 : 1)) / start.scale;
-        start.next = expandSketchPaper(start.paper, edge, distance);
-        setPaper(start.next);
-      }}
-      onPointerUp={finishResize} onPointerCancel={finishResize} onLostPointerCapture={finishResize}
-      onKeyDown={event => {
-        const key = { top: "ArrowUp", bottom: "ArrowDown", left: "ArrowLeft", right: "ArrowRight" }[edge];
-        if (disabled || drawingRef.current || event.key !== key) return;
-        event.preventDefault(); event.stopPropagation();
-        const next = expandSketchPaper(paper, edge, 30);
-        onChange(fitSketchToPaper(strokes, next)); setPaper({ width: next.width, height: next.height });
-        try { localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify({ width: next.width, height: next.height })); } catch { /* この画面では広げられる */ }
-      }}
-    ><span className={edge === "left" || edge === "right" ? "h-10 w-1 rounded-full bg-white/30" : "h-1 w-10 rounded-full bg-white/30"} /></div>)}
     </div>
     </div>
-    <div hidden={standalone} className="mt-1 text-[11px] text-neutral-500">手書きは画像としてメモに追加されます</div>
   </div>;
 }
