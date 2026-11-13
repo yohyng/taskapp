@@ -1127,6 +1127,7 @@ export default function Outliner() {
   const [dateView, setDateView] = useState(false);     // 日付の順に並べて見る
   // フォーカスモード：打っているあいだは、細かい表示を引っ込める。
   // 指やマウスが動いたら、すぐ戻す（押したいものが見えないと困るので）。
+  const immersiveRef = useRef(null);
   const [calm, setCalm] = useState(false);
   const calmTimer = useRef(null);
   const wake = useCallback(() => {
@@ -1203,23 +1204,41 @@ export default function Outliner() {
 
   // タイプライター：書いている行を、枠の決まった高さに保つ。
   // 画面ではなく「この枠」の中で合わせる（枠ごとに転がすため）。
+  // 集中モードでは、送りも Stone に合わせる（画面の 53% に貼り付く）
+  const typewriting = view.typewriter || view.immersive;
   const keepAtAnchor = useCallback(() => {
-    if (!view.typewriter || !editingId) return;
+    if (!(view.typewriter || view.immersive) || !editingId) return;
     const row = listRef.current?.querySelector(`[data-row="${editingId}"]`);
-    const box = row?.closest("[data-pane-id]") || listRef.current?.parentElement;
+    // 集中モードでは枠ではなく、全画面のこの箱の中で送る
+    const box = (view.immersive && immersiveRef.current)
+      || row?.closest("[data-pane-id]") || listRef.current?.parentElement;
     if (!row || !box) return;
     const r = row.getBoundingClientRect();
     const b = box.getBoundingClientRect();
-    const want = b.top + b.height * (view.anchor ?? 0.6);
+    const want = b.top + b.height * (view.immersive ? 0.53 : (view.anchor ?? 0.6));
     const delta = r.top + r.height / 2 - want;
     if (Math.abs(delta) > 2) box.scrollTop += delta;
-  }, [view.typewriter, view.anchor, editingId]);
+  }, [view.typewriter, view.immersive, view.anchor, editingId]);
 
   // 行が編集欄に変わると高さが少し動くので、整ってから合わせる
   useEffect(() => {
     const id = requestAnimationFrame(keepAtAnchor);
     return () => cancelAnimationFrame(id);
   }, [keepAtAnchor, nodes]);
+
+  // 集中モードは Esc で抜ける（書いているときは、まず編集だけをやめる）
+  useEffect(() => {
+    if (!view.immersive) return;
+    const onKey = (event) => {
+      // 行の編集をやめる Esc は、行の側で先に受けて止めてある。
+      // （状態を見て判じると、同じ押下でここまで来てしまう）
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      event.preventDefault();
+      setView({ immersive: false });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [view.immersive, setView]);
 
   // ⌘/Ctrl+K で探す欄に移る（Quietliner と同じ）
   useEffect(() => {
@@ -1870,13 +1889,21 @@ export default function Outliner() {
       data-outliner
       inert={owner !== "active" ? true : undefined}
       data-calm={calm ? "" : undefined}
-      className="mx-auto w-full max-w-3xl px-1 py-2"
+      data-immersive-screen={view.immersive ? "" : undefined}
+      ref={immersiveRef}
+      // 集中モードでは、枠の中ではなく画面いっぱいに開く。
+      // 周りが見えていると、結局そちらへ目が行ってしまう。
+      className={classNames(
+        view.immersive
+          ? "fixed inset-0 z-[300] overflow-y-auto overscroll-contain ts-bg px-1 py-2"
+          : "mx-auto w-full max-w-3xl px-1 py-2",
+      )}
     >
       <div
         data-outline-top
         className={classNames(
           "mb-2 flex items-center gap-1 transition-opacity duration-500",
-          calm && "pointer-events-none opacity-0",
+          calm && (view.immersive ? "hidden" : "pointer-events-none opacity-0"),
         )}
       >
         <div className="relative min-w-0 flex-1">
@@ -2154,8 +2181,9 @@ export default function Outliner() {
                 <span className="text-[10px]">{view.immersive ? "ON" : "OFF"}</span>
               </button>
               <div className="mb-2 text-[10px] leading-relaxed text-neutral-600">
-                打っているあいだ、まわりの細かい表示を引っ込めます。
-                指やマウスを動かすか、Esc で戻ります。
+                画面いっぱいに開き、行間を広げて文章だけを並べます。
+                打っているあいだは、行頭の印も日付も引っ込みます。
+                指やマウスを動かすと戻り、Esc で抜けます。
               </div>
 
             </div>
@@ -2365,7 +2393,7 @@ alter table outline_nodes disable row level security;
           data-favorites
           className={classNames(
             "mb-2 flex flex-wrap items-center gap-1 transition-opacity duration-500",
-            calm && "pointer-events-none opacity-0",
+            calm && (view.immersive ? "hidden" : "pointer-events-none opacity-0"),
           )}
         >
           <Star className="h-3 w-3 shrink-0 fill-amber-300/70 text-amber-300/70" />
@@ -2387,7 +2415,7 @@ alter table outline_nodes disable row level security;
         data-outline-crumbs
         className={classNames(
           "mb-2 flex flex-wrap items-center gap-1 text-[11px] text-neutral-500 transition-opacity duration-500",
-          calm && "pointer-events-none opacity-0",
+          calm && (view.immersive ? "hidden" : "pointer-events-none opacity-0"),
         )}
       >
         <button
@@ -2459,14 +2487,23 @@ alter table outline_nodes disable row level security;
           putImage(file, row ? pathTo(listed, row)?.at(-1) : null);
         }}
         style={{
-          fontSize: `${view.fontSize}px`,
+          // 集中モードは、一覧の字組みのままだと読みにくい。
+          // Stone の録画から測った寸法に寄せる：
+          //   左の余白 21%、行間 2.0、1行は 36 字ほどで折り返す
+          fontSize: `${view.immersive ? Math.max(view.fontSize, 17) : view.fontSize}px`,
           textAlign: view.align,
+          ...(view.immersive ? {
+            paddingLeft: "clamp(16px, 21%, 320px)",
+            paddingRight: "clamp(16px, 8%, 160px)",
+            maxWidth: "none",
+            lineHeight: 2,
+          } : {}),
           // 上の行も下の行も決まった高さに来られるよう、前後に余白を置く
           // （これが無いと、最初の数行は押し下げられない）
-          paddingTop: view.typewriter ? "45vh" : undefined,
-          paddingBottom: view.typewriter ? "45vh" : undefined,
+          paddingTop: typewriting ? "45vh" : undefined,
+          paddingBottom: typewriting ? "45vh" : undefined,
         }}
-        className="relative flex flex-col"
+        className={classNames("relative flex flex-col", view.immersive && "ts-immersive")}
       >
         {drag && (
           <div
@@ -2528,7 +2565,8 @@ alter table outline_nodes disable row level security;
                 drag?.id === node.id && "opacity-40",
                 pickedSet.has(node.id) && "bg-accent-400/15 ring-1 ring-accent-400/30",
                 // フォーカスモード：いま打っている行のまわりだけ残す
-                calm && editingId !== node.id && "opacity-25",
+                // Stone は、ほかの行を薄くしない。文章がそのまま並ぶ。
+                calm && !view.immersive && editingId !== node.id && "opacity-25",
               )}
             >
               <button
@@ -2542,7 +2580,7 @@ alter table outline_nodes disable row level security;
                 className={classNames(
                   "mt-[5px] shrink-0 rounded p-px text-neutral-500 transition hover:text-neutral-200",
                   !hasKids && "invisible",
-                  calm && "opacity-0",
+                  calm && (view.immersive ? "hidden" : "opacity-0"),
                   // 畳むつまみは、薄くても出しておく。ホバーで出すだけだと
                   // 触る機械では一生見えず、閉じられないままになる。
                   hasKids && !node.collapsed && "opacity-30 group-hover/row:opacity-100 focus:opacity-100",
@@ -2563,7 +2601,7 @@ alter table outline_nodes disable row level security;
                 className={classNames(
                   "mt-[8px] grid h-[7px] w-[7px] shrink-0 place-items-center rounded-full transition",
                   node.collapsed ? "bg-white/70 ring-[5px] ring-white/15" : "bg-white/55 hover:ring-[5px] hover:ring-white/15",
-                  calm && "opacity-0",
+                  calm && (view.immersive ? "hidden" : "opacity-0"),
                   hasStoredBody(node) && !node.collapsed && "ring-[3px] ring-white/10",
                 )}
               >
@@ -2684,7 +2722,7 @@ alter table outline_nodes disable row level security;
                 data-row-actions
                 className={classNames(
                   "flex shrink-0 items-center gap-0.5 self-start pt-0.5 transition-opacity duration-500",
-                  calm && "pointer-events-none opacity-0",
+                  calm && (view.immersive ? "hidden" : "pointer-events-none opacity-0"),
                 )}
               >
                 {node.date && !node.virtual && (

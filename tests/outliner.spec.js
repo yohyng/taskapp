@@ -1752,31 +1752,21 @@ test.describe("書くことに集中（イマーシブ）", () => {
     await expect(page.locator("[data-outliner]")).not.toHaveAttribute("data-calm", "");
   });
 
-  test("ON にして打つと、まわりが引っ込む", async ({ page }) => {
+  test("ON にして打つと、まわりが出なくなる", async ({ page }) => {
     await gear(page);
     await page.locator("[data-immersive]").click();
-    await page.keyboard.press("Escape");
+    await page.locator("[data-outline-view]").click();   // 設定を閉じる（Esc は抜ける操作）
     await page.locator('[data-row="a"] [data-row-text]').click();
     await page.keyboard.type("しずかに");
     await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
-    await expect(page.locator("[data-outline-top]")).toHaveCSS("opacity", "0");
-    await expect(page.locator('[data-row="b"] [data-row-actions]')).toHaveCSS("opacity", "0");
-  });
-
-  test("打っている行は、はっきり出たまま", async ({ page }) => {
-    await gear(page);
-    await page.locator("[data-immersive]").click();
-    await page.keyboard.press("Escape");
-    await page.locator('[data-row="a"] [data-row-text]').click();
-    await page.keyboard.type("ここ");
-    await expect(page.locator('[data-row="a"]')).toHaveCSS("opacity", "1");
-    await expect(page.locator('[data-row="b"]')).not.toHaveCSS("opacity", "1");
+    await expect(page.locator("[data-outline-top]")).toBeHidden();
+    await expect(page.locator('[data-row="b"] [data-row-actions]')).toBeHidden();
   });
 
   test("マウスを動かせば、すぐ戻る", async ({ page }) => {
     await gear(page);
     await page.locator("[data-immersive]").click();
-    await page.keyboard.press("Escape");
+    await page.locator("[data-outline-view]").click();
     await page.locator('[data-row="a"] [data-row-text]').click();
     await page.keyboard.type("しずかに");
     await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
@@ -1787,6 +1777,7 @@ test.describe("書くことに集中（イマーシブ）", () => {
   test("設定は覚えている", async ({ page }) => {
     await gear(page);
     await page.locator("[data-immersive]").click();
+    await page.locator("[data-outline-view]").click();
     await page.reload();
     await page.waitForSelector("header");
     await open(page);
@@ -1885,4 +1876,104 @@ test("別タブで編集中にメモを追加しても入力を消さず、引�
   await expect(input).toHaveValue("");
   await expect.poll(() => next.evaluate(() => localStorage.getItem("taskspace-outline-v1"))).toContain("引き継いでから追加するメモ");
   await next.close();
+});
+
+
+test.describe("集中モード（Stone のような字組みと、消える UI）", () => {
+  const gear = async (page) => {
+    await page.locator("[data-outline-view]").click();
+    await expect(page.locator("[data-view-panel]")).toBeVisible();
+  };
+  const turnOn = async (page) => {
+    await gear(page);
+    await page.locator("[data-immersive]").click();
+    // Esc は集中モードを抜ける操作なので、設定は歯車で閉じる
+    await page.locator("[data-outline-view]").click();
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-immersive-screen", "");
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "ひとつめの行" },
+      { id: "b", text: "ふたつめの行" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await setMode(page, "outline");
+    await expect(page.locator("[data-outliner]")).toBeVisible();
+  });
+
+  test("入れると画面いっぱいに開く", async ({ page }) => {
+    const before = await page.locator("[data-outliner]").boundingBox();
+    await turnOn(page);
+    const after = await page.locator("[data-outliner]").boundingBox();
+    const view = page.viewportSize();
+    expect(after.height).toBeGreaterThan(before.height);
+    expect(Math.round(after.width)).toBe(view.width);
+    expect(Math.round(after.height)).toBe(view.height);
+  });
+
+  test("字組みが Stone に寄る（左21%・行間2.0）", async ({ page }) => {
+    await turnOn(page);
+    const list = page.locator("[data-outline-list]");
+    const box = await list.boundingBox();
+    const style = await list.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { left: parseFloat(s.paddingLeft), size: parseFloat(s.fontSize), line: parseFloat(s.lineHeight) };
+    });
+    // 画面幅の 21%（上限 320px）
+    expect(style.left).toBeCloseTo(Math.min(320, box.width * 0.21), 0);
+    expect(style.size).toBeGreaterThanOrEqual(17);
+    expect(style.line / style.size).toBeCloseTo(2, 1);
+  });
+
+  test("打つと、印も日付も ⋯ も消える（薄くではなく、出さない）", async ({ page }) => {
+    await turnOn(page);
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("しずかに");
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
+    await expect(page.locator("[data-outline-top]")).toBeHidden();
+    await expect(page.locator('[data-row="a"] [data-zoom]')).toBeHidden();
+    await expect(page.locator('[data-row="b"] [data-row-actions]')).toBeHidden();
+    // Stone はほかの行を薄くしない
+    await expect(page.locator('[data-row="b"]')).toHaveCSS("opacity", "1");
+  });
+
+  test("触れば戻る", async ({ page }) => {
+    await turnOn(page);
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await page.keyboard.type("しずかに");
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-calm", "");
+    await page.mouse.move(300, 300);
+    await expect(page.locator("[data-outliner]")).not.toHaveAttribute("data-calm", "");
+    await expect(page.locator("[data-outline-top]")).toBeVisible();
+  });
+
+  test("Esc で抜ける（書いている途中は、まず編集だけをやめる）", async ({ page }) => {
+    await turnOn(page);
+    await page.locator('[data-row="a"] [data-row-text]').click();
+    await expect(page.locator('[data-row="a"] textarea')).toBeVisible();
+    await page.keyboard.type("あ");
+    await page.keyboard.press("Escape");            // まず編集をやめる
+    await expect(page.locator("[data-outliner]")).toHaveAttribute("data-immersive-screen", "");
+    await page.keyboard.press("Escape");            // つぎに集中モードを抜ける
+    await expect(page.locator("[data-outliner]")).not.toHaveAttribute("data-immersive-screen", "");
+  });
+
+  test("書いている行は、画面の半ばあたりに留まる", async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1",
+      JSON.stringify(Array.from({ length: 40 }, (_, i) => ({ id: `n${i}`, text: `行 ${i}` })))));
+    await page.reload();
+    await page.waitForSelector("header");
+    await setMode(page, "outline");
+    await turnOn(page);
+    const view = page.viewportSize();
+    const where = async (id) => {
+      const box = await page.locator(`[data-row="${id}"]`).boundingBox();
+      return (box.y + box.height / 2) / view.height;
+    };
+    await page.locator('[data-row="n30"] [data-row-text]').click();
+    await page.keyboard.type("あ");
+    await expect.poll(async () => Math.abs(await where("n30") - 0.53) < 0.12).toBe(true);
+  });
 });
