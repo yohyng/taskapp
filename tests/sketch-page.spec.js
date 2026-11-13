@@ -63,3 +63,19 @@ test("壊れた預かりは捨てずに無視する", async ({ page }) => {
   await page.waitForSelector("header");
   await expect(page.locator("[data-app-root]")).toBeVisible();
 });
+
+test("手書きから戻ったとき、黄色い帯が一瞬出ない", async ({ page }) => {
+  await page.locator("[data-header-sketch]").click();
+  await page.waitForURL(/sketch\.html$/);
+  // 戻る途中から、帯が出ないかを見張る
+  const seen = [];
+  const watch = setInterval(async () => {
+    try { seen.push(await page.locator("[data-outline-owner]").count()); } catch { /* 移動中 */ }
+  }, 60);
+  await page.locator("[data-sketch-close]").click();
+  await page.waitForSelector("header");
+  await page.waitForTimeout(900);
+  clearInterval(watch);
+  expect(Math.max(0, ...seen), "鍵を取るまでの一瞬で札を出さない").toBe(0);
+  await expect(page.locator("[data-outline-owner]")).toHaveCount(0);
+});

@@ -74,6 +74,15 @@ async function readIds(key) {
 export function OutlineProvider({ children }) {
   const [initial] = useState(readLocalOutline);
   const [owner, setOwner] = useState("waiting");
+  // 起き抜けは、鍵を取るまでの一瞬だけ "waiting" になる。
+  // そこで札を出すと、手書きのページから戻るたびに黄色い帯が点滅する。
+  // しばらく待っても取れないときだけ知らせる。
+  const [showOwnerNote, setShowOwnerNote] = useState(false);
+  useEffect(() => {
+    if (owner === "active") { setShowOwnerNote(false); return; }
+    const timer = setTimeout(() => setShowOwnerNote(true), 1200);
+    return () => clearTimeout(timer);
+  }, [owner]);
   const ownerRef = useRef(false);
   const workRef = useRef(new Set());
   const [nodes, setNodes] = useState(() => load(initial));
@@ -956,7 +965,7 @@ export function OutlineProvider({ children }) {
   return (
     <OutlineApiContext.Provider value={api}>
       <OutlineContext.Provider value={value}>
-        {owner !== "active" && (
+        {owner !== "active" && showOwnerNote && (
           <div data-outline-owner={owner} role="status" className="border-b border-amber-400/30 bg-amber-400/10 p-2 text-xs text-amber-100">
             {owner === "waiting"
               ? "アウトラインは別のタブで編集中です。このタブは待機しています。編集タブを閉じると、最新の保存内容を読み直して引き継ぎます。"
