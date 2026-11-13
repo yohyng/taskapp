@@ -117,7 +117,20 @@ export function drawInk(ctx, stroke, complete = true, mode = stroke.mode) {
   const outline = inkOutline(stroke, complete, mode);
   if (!outline.length) return;
   if (mode === 'pencil') { drawPencil(ctx, stroke, outline); return; }
-  ctx.fillStyle = stroke.color || '#202020'; outlinePath(ctx, outline); ctx.fill();
+  ctx.fillStyle = stroke.color || '#202020';
+  outlinePath(ctx, outline);
+  ctx.fill();
+  // 速い区間では線が画素より細くなり、塗りだけでは点々に途切れる
+  // （細いペンで白い点が並んで見えるのがこれ）。輪郭を画素1つぶんの
+  // 細さでなぞって、どれだけ細くなっても途切れないようにする。
+  // 太い線では見た目が変わらない厚みなので、書き味の値には触らない。
+  const scale = ctx.getTransform?.().a || 1;
+  ctx.save();
+  ctx.strokeStyle = ctx.fillStyle;
+  ctx.lineJoin = ctx.lineCap = 'round';
+  ctx.lineWidth = 1 / (scale || 1);
+  ctx.stroke();
+  ctx.restore();
 }
 
 export function readInkDraft(value) {
