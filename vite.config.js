@@ -22,10 +22,12 @@ export default defineConfig(({ mode }) => {
   const sessionClient = fileURLToPath(new URL('src/session-client.js', lab))
   const productSource = fileURLToPath(new URL('./src/', import.meta.url)).replaceAll('\\', '/')
   return {
-  ...(inkDiag ? { build: { rollupOptions: { input: {
+  // 手書きは別ページ。アプリ本体を読み込まずに開けるよう、入口を分ける。
+  build: { rollupOptions: { input: {
     main: fileURLToPath(new URL('./index.html', import.meta.url)),
-    diag: fileURLToPath(new URL('./ink-diag.html', import.meta.url)),
-  } } } } : {}),
+    sketch: fileURLToPath(new URL('./sketch.html', import.meta.url)),
+    ...(inkDiag ? { diag: fileURLToPath(new URL('./ink-diag.html', import.meta.url)) } : {}),
+  } } },
   envPrefix: newSync ? 'LAB_BROWSER_UNUSED_' : 'VITE_',
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),

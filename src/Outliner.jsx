@@ -118,7 +118,9 @@ export function OutlineProvider({ children }) {
   const stoppedRef = useRef(false);
   // 手書きの最中だけ静かにするための札と、持ち越したぶんの覚え
   const quietRef = useRef(false);
-  const owedPullRef = useRef(false), owedInboxRef = useRef(false), owedSaveRef = useRef(false);
+  // 止めるのは「向こうから来るもの」だけ。自分で書いたぶんの保存は止めない
+  // （止めると、手書きの最中に足したメモが端末へ残らない）。
+  const owedPullRef = useRef(false), owedInboxRef = useRef(false);
   const syncGenerationRef = useRef(0);            // 手動取り込み前に始まった確認結果を捨てる
   const [retry, setRetry] = useState(0);        // 送信後・失敗後に差分を確かめ直す
   useEffect(() => {
@@ -157,8 +159,6 @@ export function OutlineProvider({ children }) {
   const localWriteRef = useRef({ pending: null, running: false, version: 0 });
   const localRetryRef = useRef(null);
   const saveLocal = useCallback(() => {
-    // 手書きの最中は、端末への書き戻しを持ち越す（約160ms 画面が止まるため）
-    if (quietRef.current) { owedSaveRef.current = true; return Promise.resolve(false); }
     // 読む前に書くと、起き抜けの空の木が本物を押しのけてしまう。
     if (!ownerRef.current || !bigReadRef.current || stoppedRef.current
       || (!contentReadyRef.current && !queueRef.current.pending.size)) return Promise.resolve(false);
@@ -944,7 +944,6 @@ export function OutlineProvider({ children }) {
       // 静かにしている間にたまったぶんを、ここで片付ける
       if (owedPullRef.current) { owedPullRef.current = false; pullOnce(); }
       if (owedInboxRef.current) { owedInboxRef.current = false; takeInbox(); }
-      if (owedSaveRef.current) { owedSaveRef.current = false; saveLocal(); }
     },
     addMemo: (dateLabel, text, image) => {
       if (!ownerRef.current || stoppedRef.current) return null;
@@ -952,7 +951,7 @@ export function OutlineProvider({ children }) {
       apply(() => got.nodes);
       return got;
     },
-  }), [apply, pullOnce, takeInbox, saveLocal]);
+  }), [apply, pullOnce, takeInbox]);
 
   return (
     <OutlineApiContext.Provider value={api}>

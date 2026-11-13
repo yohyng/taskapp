@@ -153,11 +153,18 @@ test.describe("手書き中は、アウトラインの重い仕事を持ち越�
     await page.waitForSelector("header");
   });
 
+  // ヘッダーの sketch は別ページ（アウトラインを載せない）。
+  // こちらは note の中で手書きしたときの持ち越しを見る。
+  const openNoteSketch = async (page) => {
+    await page.locator("[data-quick-add]").click();
+    await page.locator("[data-quick-add-sketch]").click();
+    await page.waitForSelector("[data-sketch-canvas]");
+  };
+
   test("手書きを開いている間は書き戻さない", async ({ page }) => {
     await page.locator("[data-pane-mode]").first().selectOption("outline");
     await page.waitForSelector("[data-outliner]");
-    await page.locator("[data-header-sketch]").click();
-    await page.waitForSelector("[data-sketch-canvas]");
+    await openNoteSketch(page);
     await page.waitForTimeout(500);
     const before = await page.evaluate(() => window.__idbPuts);
 
@@ -173,9 +180,8 @@ test.describe("手書き中は、アウトラインの重い仕事を持ち越�
   test("閉じれば、また書き戻すようになる", async ({ page }) => {
     await page.locator("[data-pane-mode]").first().selectOption("outline");
     await page.waitForSelector("[data-outliner]");
-    await page.locator("[data-header-sketch]").click();
-    await page.waitForSelector("[data-sketch-canvas]");
-    await page.locator("[data-sketch-close]").click();
+    await openNoteSketch(page);
+    await page.keyboard.press("Escape");
     await expect(page.locator("[data-sketch-canvas]")).toHaveCount(0);
     const before = await page.evaluate(() => window.__idbPuts);
     // 閉じたあとのアウトラインの書き換えは、これまで通り端末へ残る
