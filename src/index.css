@@ -189,3 +189,9 @@ body {
     font-size: 15px;
   }
 }
+
+/* 集中モードの字。Stone に寄せて、真っ白にせず少し落とす。
+   配色を固定せず、いまの字色の濃さだけを下げる。 */
+.ts-immersive [data-row-text] {
+  opacity: 0.88;
+}

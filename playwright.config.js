@@ -6,6 +6,8 @@ import process from "node:process";
 // テストが本番 Supabase に触れることはない（localStorage のみのモードで動く）。
 export default defineConfig({
   testDir: "./tests",
+  // 別のビルドや別の港で動かすものは、ここでは走らせない（専用の設定がある）
+  testIgnore: ["ink-diag.spec.js", "sketch-page.spec.js", "ink-thin.spec.js"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,

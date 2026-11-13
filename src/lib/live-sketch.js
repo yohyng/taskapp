@@ -1,7 +1,9 @@
 import { appendSketch, sketchPreviewStroke, SKETCH_HEIGHT } from "./sketch";
 
 // 表示は一枚に限定する。別レイヤーの合成やReactの再描画を待たず、同じ紙へ線を出す。
-export function createLiveSketch(canvas) {
+// onPaint … 1回の描き直しにかかった時間を知らせる口（計測ページだけが使う）。
+// 渡さなければ、これまでと同じ動きのまま何も測らない。
+export function createLiveSketch(canvas, onPaint) {
   const backing = canvas.ownerDocument.createElement("canvas");
   let active = null, frame = null, counted = 0, bounds = null;
   function extend() {
@@ -21,8 +23,10 @@ export function createLiveSketch(canvas) {
   }
   function paint(complete = false) {
     if (!active) return;
+    const started = onPaint ? performance.now() : 0;
     extend(); restore();
     appendSketch(canvas, complete ? active : sketchPreviewStroke(active), 0, complete, active.paperWidth || 600);
+    if (onPaint) onPaint({ ms: performance.now() - started, points: active.points.length, complete });
   }
   function cancelFrame() { if (frame !== null) cancelAnimationFrame(frame); frame = null; }
   return {

@@ -17,6 +17,11 @@ import Outliner, { useOutlineApi } from "./Outliner";
 import { useVoiceInput } from "./useVoiceInput";
 import SketchPad from "./SketchPad";
 import SketchBoard from "./SketchBoard";
+import StallProbe from "./StallProbe";
+import { drainMemos, queuedMemos } from "./lib/memo-queue";
+// 止まりの計測は検証ビルド（ink-diag）の ?probe=1 だけ。通常の配信では false のまま消える。
+const STALL_PROBE = import.meta.env.MODE === "ink-diag"
+  && typeof location !== "undefined" && new URLSearchParams(location.search).has("probe");
 import { readSketchDraft, sketchFile, SKETCH_DRAFT_KEY } from "./lib/sketch";
 import { hasDrive, uploadToDrive } from "./lib/drive";
 import { loadLocal, saveLocal, loadFromSupabase, saveToSupabase, getMissingOptionalColumns, optionalColumnsSql, fieldsForColumns, deleteTask as dbDeleteTask, deleteTrayItem as dbDeleteTrayItem, upsertTaskRow as dbUpsertTaskRow, upsertTrayRow as dbUpsertTrayRow, deleteProjectRule as dbDeleteProjectRule, loadSettings as dbLoadSettings, saveSetting as dbSaveSetting, rowToTask, rowToTray, subscribeRealtime } from "./lib/db";
@@ -3209,6 +3214,15 @@ function App() {
   // メモはアウトライン側に書く。木そのものは受け取らない
   //（受け取ると、アウトラインで1文字打つたびに画面ぜんたいが描き直される）。
   const outline = useOutlineApi();
+  // 手書きの画面を開いている間は、アウトラインの重い仕事を持ち越してもらう。
+  // 実機の計測で、書いている最中に画面を止めていたのは手書きではなく、
+  // 60秒ごとの読み直しと、そのあとの端末への書き戻しだった。
+  const sketching = quickAddOpen && (quickAddMode === "sketch" || sketchOpen);
+  useEffect(() => {
+    outline.quiet?.(sketching);
+    return () => outline.quiet?.(false);
+  }, [sketching, outline]);
+
   const [quickAddKind, setQuickAddKind] = useState(() => {
     if (readSketchDraft().length) return "memo";
     try { return localStorage.getItem(QUICK_ADD_KIND_KEY) === "memo" ? "memo" : "task"; } catch { return "task"; }
@@ -3268,6 +3282,28 @@ function App() {
   }
 
   // きょうの日付の行に、メモを足す
+  // 手書きのページが置いていったメモを、木へ入れる。
+  // 入れられなければ預かったままにして、次の機会に試す（取りこぼさない）。
+  useEffect(() => {
+    let alive = true, timer = null;
+    const drain = () => {
+      if (!alive) return;
+      const done = drainMemos((item) => outline.addMemo(item.date, item.text || "", item.image) !== null);
+      if (done) setToast(`手書きのメモを ${done} 件、書きとめました`);
+      if (queuedMemos().length) timer = setTimeout(drain, 3000);
+    };
+    drain();
+    const again = () => { if (document.visibilityState === "visible") drain(); };
+    document.addEventListener("visibilitychange", again);
+    window.addEventListener("focus", again);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", again);
+      window.removeEventListener("focus", again);
+    };
+  }, [outline]);
+
   function addMemo(text, image) {
     const label = toDateKey(new Date());
     if (!outline.addMemo(label, text, image)) {
@@ -3964,7 +4000,7 @@ function App() {
               <NotebookPen className="h-3.5 w-3.5 shrink-0" />
               <span className="truncate">note</span>
             </button>
-            <button type="button" data-header-sketch aria-label="sketch" title="sketch：手書きボードを開く" onClick={() => { setQuickAddMode("sketch"); setQuickAddOpen(true); }}
+            <button type="button" data-header-sketch aria-label="sketch" title="sketch：手書きのページを開く" onClick={() => { location.href = "/sketch.html"; }}
               className="relative flex min-h-9 min-w-9 items-center justify-center rounded-md border border-accent-400/40 bg-accent-500/15 px-2.5 text-accent-300 transition hover:bg-accent-500/25">
               <Pencil aria-hidden="true" className="h-3.5 w-3.5" />
               {quickAddSketch.length > 0 && <span aria-hidden="true" className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-accent-400" />}
@@ -4405,6 +4441,8 @@ function App() {
         </div>
 
         {visiblePanes.some((p) => p.mode === "tasks") && <MarqueeSelect onSelect={handleMarqueeSelect} />}
+
+        {STALL_PROBE && <StallProbe />}
 
         {(selectedIds.size > 0 || selectedTrayIds.size > 0) && (
           <>
