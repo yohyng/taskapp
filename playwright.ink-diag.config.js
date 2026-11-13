@@ -5,7 +5,7 @@ import base from './playwright.config.js';
 export default defineConfig({
   ...base,
   use: { ...base.use, serviceWorkers: 'block', baseURL: 'http://127.0.0.1:4176' },
-  workers: 1,
+  workers: 1, testIgnore: [],
   testMatch: ['ink-diag.spec.js'],
   projects: [base.projects[0]],
   webServer: {

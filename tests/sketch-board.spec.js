@@ -83,14 +83,16 @@ test('sketchは画面幅いっぱいに開き、紙を横へ広げず縦だけ�
   const metrics=()=>viewport.evaluate(el=>({width:el.clientWidth,scrollWidth:el.scrollWidth,height:el.clientHeight,scrollHeight:el.scrollHeight}));
   await expect.poll(async()=>{const m=await metrics(); return m.scrollWidth-m.width;}).toBeLessThanOrEqual(1);
   expect((await metrics()).scrollHeight).toBeGreaterThan((await metrics()).height);
-  const canvas=page.locator('[data-sketch-canvas]'); const width=await canvas.getAttribute('width');
+  const canvas=page.locator('[data-sketch-canvas]');
+  // 描く点の数は画面の大きさに合わせて変わる。紙そのもの（縦横の比）は変えない。
+  const ratio=await canvas.evaluate(el=>el.width/el.height);
   await viewport.evaluate(el=>{el.scrollTop=200;});
   expect(await viewport.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
   await page.screenshot({path:`test-results/sketch-full-width-${testInfo.project.name}.png`});
   await page.setViewportSize({width:390,height:844});
   await expect.poll(async()=>{const m=await metrics();return m.scrollWidth-m.width;}).toBeLessThanOrEqual(1);
   expect((await board.boundingBox()).width).toBeCloseTo(390,0);
-  await expect(canvas).toHaveAttribute('width',width);
+  expect(await canvas.evaluate(el=>el.width/el.height)).toBeCloseTo(ratio,2);
 });
 
 test('一画の確定では過去の線を塗り直さず、描き終えた紙をそのまま使う', async ({page}) => {

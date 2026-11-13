@@ -79,3 +79,56 @@ test("手書きから戻ったとき、黄色い帯が一瞬出ない", async ({
   expect(Math.max(0, ...seen), "鍵を取るまでの一瞬で札を出さない").toBe(0);
   await expect(page.locator("[data-outline-owner]")).toHaveCount(0);
 });
+
+test.describe("ペンの色と太さ", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/sketch.html");
+    await page.waitForSelector("[data-sketch-canvas]");
+  });
+
+  test("見本から色を選べて、最近つかった色が残る", async ({ page }) => {
+    await page.locator("[data-sketch-palette]").click();
+    await expect(page.locator("[data-sketch-palette-panel]")).toBeVisible();
+    await page.locator('[data-sketch-swatch="#7c3aed"]').click();
+    // 選んだら閉じる
+    await expect(page.locator("[data-sketch-palette-panel]")).toHaveCount(0);
+    // 描くと、その色で残る
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(r.x + 40, r.y + 40);
+    await page.mouse.down();
+    await page.mouse.move(r.x + 200, r.y + 90, { steps: 8 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1") || "[]")[0]?.color)).toBe("#7c3aed");
+    // 最近つかった色に入る
+    await page.locator("[data-sketch-palette]").click();
+    await expect(page.locator('[data-sketch-recent="#7c3aed"]')).toBeVisible();
+  });
+
+  test("最近つかった色は、開き直しても残る", async ({ page }) => {
+    await page.locator("[data-sketch-palette]").click();
+    await page.locator('[data-sketch-swatch="#0891b2"]').click();
+    await page.reload();
+    await page.waitForSelector("[data-sketch-canvas]");
+    await page.locator("[data-sketch-palette]").click();
+    await expect(page.locator('[data-sketch-recent="#0891b2"]')).toBeVisible();
+  });
+
+  test("太さは、細・中・太をすぐ押せる", async ({ page }) => {
+    await page.locator('[data-sketch-width-preset="12"]').click();
+    await expect(page.locator('[data-sketch-width-preset="12"]')).toHaveAttribute("aria-pressed", "true");
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(r.x + 40, r.y + 150);
+    await page.mouse.down();
+    await page.mouse.move(r.x + 200, r.y + 160, { steps: 6 });
+    await page.mouse.up();
+    await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1") || "[]")[0]?.width)).toBe(12);
+  });
+
+  test("紙は端末の細かさで描く（引き伸ばさない）", async ({ page }) => {
+    const got = await page.locator("[data-sketch-canvas]").evaluate((el) => ({
+      width: el.width, shown: el.getBoundingClientRect().width, dpr: window.devicePixelRatio,
+    }));
+    // 見えている幅 × 端末の細かさで描いている（引き伸ばさない）
+    expect(got.width).toBeGreaterThanOrEqual(got.shown * Math.min(3, Math.max(1, got.dpr)) * 0.95);
+  });
+});

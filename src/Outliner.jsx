@@ -2493,9 +2493,11 @@ alter table outline_nodes disable row level security;
           fontSize: `${view.immersive ? Math.max(view.fontSize, 17) : view.fontSize}px`,
           textAlign: view.align,
           ...(view.immersive ? {
+            // Stone の寸法：左に 21% ほどの余白、1行は 36 字ほどで折り返す。
+            // 画面幅いっぱいに流すと、目が端まで往復して読みにくい。
             paddingLeft: "clamp(16px, 21%, 320px)",
-            paddingRight: "clamp(16px, 8%, 160px)",
-            maxWidth: "none",
+            paddingRight: "16px",
+            maxWidth: "min(100%, calc(clamp(16px, 21%, 320px) + 36em))",
             lineHeight: 2,
           } : {}),
           // 上の行も下の行も決まった高さに来られるよう、前後に余白を置く
