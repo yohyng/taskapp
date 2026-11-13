@@ -189,6 +189,8 @@ v1.14.2 で gzip して送るようにしたので、`Utilities.ungzip` を持�
    実機での効き目の確認が残っている。
 0b. **書くことに集中するモードを Stone のようにする** … `docs/typewriter-stone.md`。
    利用者の希望。着手は後日。
+0bb. **UI ライブラリの控え** … `docs/ui-libraries.md`。利用者が見かけた一覧と、
+   この app との相性。いまはどれも入れていない。
 0c. **細い線に白い点が出る**（iPad Pro + Apple Pencil、太さ2）… `docs/ink-thin-dots.md`。
    原因の見立てまで。直し方の案あり。
 
