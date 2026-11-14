@@ -1,7 +1,7 @@
 {
   "name": "taskapp-scaffold",
   "private": true,
-  "version": "1.31.0",
+  "version": "1.31.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,9 +22,10 @@
     "@supabase/supabase-js": "^2.106.2",
     "framer-motion": "^12.40.0",
     "lucide-react": "^1.17.0",
+    "perfect-freehand": "1.2.3",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "perfect-freehand": "1.2.3"
+    "sonner": "^2.0.8"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

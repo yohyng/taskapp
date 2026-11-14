@@ -167,7 +167,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   }
   const tools = (
     <div data-sketch-tools className={standalone ? "flex w-max shrink-0 flex-nowrap items-center gap-1.5" : "mb-2 flex shrink-0 flex-wrap items-center gap-1.5"}>
-      {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => pickColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full" style={{ backgroundColor: item.color }} /></button>)}
+      {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => pickColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: item.color }} /></button>)}
       <div className="relative shrink-0">
         <button
           type="button"
@@ -178,19 +178,19 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
           onClick={() => setPaletteOpen((value) => !value)}
           className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-expanded:bg-white/10"
         >
-          <span className="h-4 w-4 rounded-full border border-white/30" style={{ backgroundColor: color }} />
+          <span className="h-4 w-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: color }} />
         </button>
         {paletteOpen && (
           <div data-sketch-palette-panel className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
             {recent.length > 0 && <>
               <div className="mb-1 text-[10px] text-neutral-500">最近つかった色</div>
               <div className="mb-2 flex flex-wrap gap-1">
-                {recent.map((value) => <button key={`recent-${value}`} type="button" data-sketch-recent={value} aria-label={`最近の色 ${value}`} onClick={() => pickColor(value)} className="h-7 w-7 rounded-full border border-white/20" style={{ backgroundColor: value }} />)}
+                {recent.map((value) => <button key={`recent-${value}`} type="button" data-sketch-recent={value} aria-label={`最近の色 ${value}`} onClick={() => pickColor(value)} className="h-7 w-7 rounded-full ring-1 ring-white/50" style={{ backgroundColor: value }} />)}
               </div>
             </>}
             <div className="mb-1 text-[10px] text-neutral-500">色</div>
             <div className="mb-2 grid grid-cols-8 gap-1">
-              {PALETTE.map((value) => <button key={value} type="button" data-sketch-swatch={value} aria-label={`色 ${value}`} aria-pressed={color === value} onClick={() => pickColor(value)} className="h-6 w-6 rounded-full border border-white/20 aria-pressed:ring-2 aria-pressed:ring-white/70" style={{ backgroundColor: value }} />)}
+              {PALETTE.map((value) => <button key={value} type="button" data-sketch-swatch={value} aria-label={`色 ${value}`} aria-pressed={color === value} onClick={() => pickColor(value)} className="h-6 w-6 rounded-full ring-1 ring-white/50 aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: value }} />)}
             </div>
             <label className="flex items-center gap-2 text-[10px] text-neutral-400">
               そのほかの色
@@ -208,7 +208,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
           aria-pressed={width === item.value}
           disabled={disabled}
           onClick={() => setWidth(item.value)}
-          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:bg-white/10 aria-pressed:ring-1 aria-pressed:ring-white/60"
+          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 text-neutral-300 aria-pressed:bg-white/10 aria-pressed:text-white aria-pressed:ring-1 aria-pressed:ring-white/60"
         >
           <span className="rounded-full bg-current" style={{ width: `${4 + item.value * 0.8}px`, height: `${4 + item.value * 0.8}px` }} />
         </button>)}
