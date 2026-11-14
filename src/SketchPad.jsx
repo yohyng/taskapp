@@ -17,6 +17,10 @@ const PALETTE = [
 const WIDTHS = [{ label: "細", value: 2 }, { label: "中", value: 6 }, { label: "太", value: 12 }];
 const COLOR_KEY = "taskspace-sketch-colors";
 const HEIGHT_KEY = "taskspace-sketch-ratio";
+// 紙は下へ伸びる。端末が持てる大きさには限りがあるので、そこで頭打ちにする。
+const PAPER_MAX = 4000;
+// 画素の持ち分。これを超えるぶんは、細かさを落として収める。
+const PIXEL_BUDGET = 12_000_000;
 function savedRatio() {
   try { const value = Number(localStorage.getItem(HEIGHT_KEY)); return value >= 0.35 && value <= 2 ? value : SKETCH_HEIGHT / SKETCH_WIDTH; } catch { return SKETCH_HEIGHT / SKETCH_WIDTH; }
 }
@@ -35,14 +39,14 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   const viewportRef = useRef(null), scaleReferenceRef = useRef(null);
   const [paperScale, setPaperScale] = useState(null);
   const [brush, setBrush] = useState("speed-extreme-v1");
-  const panRef = useRef(null), committedRef = useRef(null), scrollIntentRef = useRef(false), lastExpansionRef = useRef(null);
+  const panRef = useRef(null), committedRef = useRef(null), lastExpansionRef = useRef(null);
   const [panMode, setPanMode] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paper, setPaper] = useState(() => {
     let saved;
     try { saved = JSON.parse(localStorage.getItem("taskspace-sketch-paper-v1")); } catch { /* 古い高さ設定を引き継ぐ */ }
     return { width: Math.max(600, ...strokes.map(stroke => stroke.paperWidth || 600), Number.isFinite(saved?.width) ? Math.min(1200, Math.max(600, saved.width)) : 600),
-      height: Math.max(210, ...strokes.map(stroke => stroke.height || 360), Number.isFinite(saved?.height) ? Math.min(1200, Math.max(210, saved.height)) : Math.round(savedRatio() * 600)) };
+      height: Math.max(210, ...strokes.map(stroke => stroke.height || 360), Number.isFinite(saved?.height) ? Math.min(PAPER_MAX, Math.max(210, saved.height)) : Math.round(savedRatio() * 600)) };
   });
   // 専用画面は紙全体を横幅へ収める。note内では従来の実寸表示を保つ。
   useLayoutEffect(() => {
@@ -67,9 +71,13 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   // 線の縁がぎざつく（「がびがび」に見えるのがこれ）。
   const density = Math.min(3, Math.max(1, typeof window === "undefined" ? 2 : window.devicePixelRatio || 2));
   const shownScale = paperScale || 2;
-  // 大きすぎる紙は端末が持てないので、上限で頭打ちにする
-  const pixelWidth = Math.min(4096, Math.round(paper.width * shownScale * density));
-  const pixelHeight = Math.round(pixelWidth * (paper.height / paper.width));
+  // 大きすぎる紙は端末が持てないので、幅と画素の数の両方で頭打ちにする。
+  // 長い紙では細かさを落として収める（描けなくなるより、少し粗いほうがよい）。
+  const wanted = Math.min(4096, Math.round(paper.width * shownScale * density));
+  const ratio = paper.height / paper.width;
+  const over = Math.sqrt((wanted * wanted * ratio) / PIXEL_BUDGET);
+  const pixelWidth = Math.max(600, Math.round(over > 1 ? wanted / over : wanted));
+  const pixelHeight = Math.round(pixelWidth * ratio);
   const [color, setColor] = useState(COLORS[0].color);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [recent, setRecent] = useState(() => {
@@ -98,17 +106,32 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     paintSketch(canvas, shownStrokes, paper.width);
   }, [shownStrokes, strokes, paper.width, paper.height, pixelWidth, pixelHeight]);
   useEffect(() => () => { liveRef.current?.dispose(); liveRef.current = null; }, []);
+  // 紙が伸びた直後は、下敷き（確定した線の写し）が古い大きさのまま。
+  // 書きかけの線を取り直して、消えたように見えるのを防ぐ。
+  useLayoutEffect(() => {
+    const drawing = drawingRef.current;
+    if (drawing?.stroke?.brush && liveRef.current) liveRef.current.begin(drawing.stroke);
+  }, [pixelWidth, pixelHeight]);
+  // 書いている最中にも伸ばすので、描いているかどうかでは止めない。
+  // 同じ高さで二度伸ばさないための見張りだけ残す。
   const extendDown = useCallback(() => {
-    if (!standalone || disabled || drawingRef.current || paper.height >= 1200 || lastExpansionRef.current === paper.height) return;
-    lastExpansionRef.current = paper.height; scrollIntentRef.current = false;
-    const next = { width: paper.width, height: Math.min(1200, paper.height + 180) };
+    if (!standalone || disabled || paper.height >= PAPER_MAX || lastExpansionRef.current === paper.height) return;
+    lastExpansionRef.current = paper.height;
+    const next = { width: paper.width, height: Math.min(PAPER_MAX, paper.height + 180) };
     setPaper(next);
     try { localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify(next)); } catch { /* この画面では広げられる */ }
   }, [standalone, disabled, paper.width, paper.height]);
   const addPoints = useCallback((event, final = false) => {
     const drawing = drawingRef.current;
     const stroke = drawing.stroke, from = stroke.points.length;
+    // 紙が伸びたら枠を測り直す。古い枠のままだと、座標が下へずれていく。
+    if (drawing.paperHeight !== paper.height) {
+      drawing.rect = canvasRef.current.getBoundingClientRect();
+      drawing.paperHeight = paper.height;
+    }
     const rect = drawing.rect;
+    // 線は「書き始めの紙の高さ」で覚えてある。伸びたぶんは、そこへ直して足す。
+    const toStroke = paper.height / (stroke.height || paper.height);
     const native = event.nativeEvent || event;
     let samples = [];
     if (drawing.pen && !final) {
@@ -116,6 +139,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     }
     for (const sample of [...samples, native]) {
       const p = sketchPoint(sample, rect, stroke.pressure, final ? stroke.points.at(-1)[2] : undefined), last = stroke.points.at(-1);
+      if (toStroke !== 1) p[1] = Math.round(p[1] * toStroke * 10000) / 10000;
       if (p[0] !== last[0] || p[1] !== last[1]) {
         stroke.points.push(p);
         if (stroke.times) stroke.times.push(Math.max(stroke.times.at(-1), sample.timeStamp - drawing.started));
@@ -123,15 +147,18 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     }
     if (stroke.brush) liveRef.current.update();
     else appendSketch(canvasRef.current, stroke, from, true, stroke.paperWidth);
-  }, []);
+    // iOS のメモと同じく、下の端まで来たら紙を足す（書きながら続けられる）
+    if (!final) {
+      const atBottom = (stroke.points.at(-1)[1] * (stroke.height || paper.height)) > paper.height - 140;
+      if (atBottom) extendDown();
+    }
+  }, [paper.height, extendDown]);
   useEffect(() => {
     const canvas = canvasRef.current;
     const move = (event) => {
       const pan = panRef.current;
       if (pan && pan.id === event.pointerId) {
         event.preventDefault(); event.stopPropagation();
-        scrollIntentRef.current = true;
-        if (event.clientY < pan.y && pan.viewport.scrollTop + pan.viewport.clientHeight >= pan.viewport.scrollHeight - 8) extendDown();
         pan.viewport.scrollLeft = pan.left + pan.x - event.clientX;
         pan.viewport.scrollTop = pan.top + pan.y - event.clientY;
         return;
@@ -229,15 +256,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     </div>
     <div hidden={standalone && !settingsOpen} className="mb-1 text-[11px] text-neutral-500">ペンを使うとペン専用がオンになります。紙の端を引くと余白が増え、手のアイコンで紙を移動できます。</div>
     <div ref={scaleReferenceRef} aria-hidden="true" className="h-0 overflow-hidden border-x border-transparent" style={{ width: standalone ? "100%" : "min(100%, calc(28rem - 2rem - 2px))" }} />
-    <div ref={viewportRef} data-sketch-viewport onWheel={event => {
-      if (event.deltaY <= 0) return;
-      scrollIntentRef.current = true;
-      const viewport = event.currentTarget;
-      if (viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 8) extendDown();
-    }} onScroll={event => {
-      const viewport = event.currentTarget;
-      if (scrollIntentRef.current && viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 8) extendDown();
-    }} className={standalone ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-white/15" : "max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15"}>
+    <div ref={viewportRef} data-sketch-viewport className={standalone ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-white/15" : "max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15"}>
     <div className="relative p-4" style={{ width: standalone || paperScale === null ? "100%" : `${paper.width * paperScale + 32}px`, contain: "layout paint" }}>
     <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={pixelWidth} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : undefined, aspectRatio: `${pixelWidth} / ${pixelHeight}` }}
       onPointerDown={(event) => {
@@ -263,7 +282,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
         }
         const rect = event.currentTarget.getBoundingClientRect();
         const stroke = { color, width, height: paper.height, paperWidth: paper.width, pressure: brush === "legacy" && pen && pressure, ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [sketchPoint(event, rect, brush === "legacy" && pen && pressure)] };
-        drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp, rect };
+        drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp, rect, paperHeight: paper.height };
         if (stroke.brush) {
           if (!liveRef.current) liveRef.current = createLiveSketch(canvasRef.current);
           liveRef.current.begin(stroke);

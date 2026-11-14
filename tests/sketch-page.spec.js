@@ -147,3 +147,79 @@ test("暗い帯の中でも、色の丸と太さの丸が見える", async ({ pa
   const [r, g, b] = dot.match(/\d+/g).map(Number);
   expect((r + g + b) / 3, "太さの丸が暗すぎない").toBeGreaterThan(120);
 });
+
+test.describe("紙は下へ伸びる（iOS のメモのように）", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1000, height: 700 });
+    await page.addInitScript(() => localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify({ width: 600, height: 400 })));
+    await page.goto("/sketch.html");
+    await page.waitForSelector("[data-sketch-canvas]");
+  });
+
+  const paperHeight = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-sketch-paper-v1")).height);
+
+  test("下の端まで描くと、書いている途中で紙が足される", async ({ page }) => {
+    const before = await paperHeight(page);
+    const box = await page.locator("[data-sketch-canvas]").boundingBox();
+    // 上から下の端へ向かって引く
+    await page.mouse.move(box.x + box.width * 0.3, box.y + box.height * 0.5);
+    await page.mouse.down();
+    for (let i = 1; i <= 24; i += 1) {
+      await page.mouse.move(box.x + box.width * 0.3 + i * 4, box.y + box.height * (0.5 + 0.48 * (i / 24)));
+    }
+    // 離す前に、もう紙が伸びている
+    await expect.poll(() => paperHeight(page)).toBeGreaterThan(before);
+    await page.mouse.up();
+  });
+
+  test("伸びても、描いた線は同じ場所に残る", async ({ page }) => {
+    const box = await page.locator("[data-sketch-canvas]").boundingBox();
+    const startY = box.y + box.height * 0.5;
+    await page.mouse.move(box.x + 60, startY);
+    await page.mouse.down();
+    for (let i = 1; i <= 20; i += 1) await page.mouse.move(box.x + 60 + i * 6, startY + i * (box.height * 0.45 / 20));
+    await page.mouse.up();
+
+    const stroke = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1"))[0]);
+    // 線は「書き始めの紙の高さ」で覚える。伸びたあとも、その中に収まっている。
+    expect(stroke.height).toBeGreaterThan(0);
+    expect(Math.max(...stroke.points.map((p) => p[1]))).toBeLessThanOrEqual(1);
+    // 画面でも、線が紙の中ほどから下へ伸びている（上端に貼り付いていない）
+    const ink = await page.locator("[data-sketch-canvas]").evaluate((el) => {
+      const { data, width, height } = el.getContext("2d").getImageData(0, 0, el.width, el.height);
+      let top = -1, bottom = -1;
+      for (let y = 0; y < height; y += 2) {
+        for (let x = 0; x < width; x += 2) {
+          if (data[(y * width + x) * 4] < 150) { if (top < 0) top = y; bottom = y; break; }
+        }
+      }
+      return { top: top / height, bottom: bottom / height };
+    });
+    expect(ink.top).toBeGreaterThan(0.2);
+    expect(ink.bottom).toBeGreaterThan(ink.top);
+  });
+
+  test("長い紙でも、持てる大きさに収める", async ({ page }) => {
+    // 読み込みのたびに入れ直す（前の指定を上書きする）
+    await page.addInitScript(() => localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify({ width: 600, height: 4000 })));
+    await page.reload();
+    await page.waitForSelector("[data-sketch-canvas]");
+    const size = await page.locator("[data-sketch-canvas]").evaluate((el) => ({ w: el.width, h: el.height }));
+    expect(size.w * size.h).toBeLessThanOrEqual(12_000_000 * 1.05);
+    expect(size.h).toBeGreaterThan(size.w);
+  });
+});
+
+test("スクロールでは紙を伸ばさない（伸びるのは書いたときだけ）", async ({ page }) => {
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await page.addInitScript(() => localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify({ width: 600, height: 900 })));
+  await page.goto("/sketch.html");
+  await page.waitForSelector("[data-sketch-canvas]");
+  const height = () => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-sketch-paper-v1")).height);
+  const before = await height();
+  const viewport = page.locator("[data-sketch-viewport]");
+  await viewport.hover();
+  for (let i = 0; i < 5; i += 1) await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(400);
+  expect(await height()).toBe(before);
+});
