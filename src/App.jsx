@@ -3510,12 +3510,19 @@ function App() {
   //   into … その段の、ある列の左右へ差し込む
   //   row  … 新しい段として、ある段の上／下へ置く
   // 段は rowKey で束ね、画面の並びは配列の順で決まるので、両方を直す。
-  function placePjColumn(fromRowKey, fromCol, target) {
+  function placePjColumn(fromRowKey, fromCol, target, headId) {
     commitTasks((prev) => {
       const onBoard = (t) => t.pageId === BOARD_PAGE_ID && !t.archived && !t.parentId;
-      const movedIds = new Set(prev
-        .filter((t) => onBoard(t) && t.rowKey === fromRowKey && (t.col ?? 0) === fromCol)
-        .map((t) => t.id));
+      // その列の中身を、箱の見出しごとに区切る。動かすのは掴んだ箱だけ。
+      const inColumn = prev.filter((t) => onBoard(t) && t.rowKey === fromRowKey && (t.col ?? 0) === fromCol);
+      const isHead = (t) => t.blockType === "column" || t.style?.framed;
+      const picked = [];
+      let taking = !headId;
+      for (const t of inColumn) {
+        if (isHead(t)) taking = headId ? t.id === headId : true;
+        if (taking) picked.push(t);
+      }
+      const movedIds = new Set((picked.length ? picked : inColumn).map((t) => t.id));
       if (!movedIds.size) return prev;
 
       // 抜けたあとの段は、列番号を詰めておく（穴が空くと並べ替えが狂う）
@@ -3538,6 +3545,20 @@ function App() {
         const at = before ? marks[0] : marks[marks.length - 1] + 1;
         return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
       };
+
+      if (target.kind === "stack") {
+        // 行き先の列の末尾へ積む。列番号はその列のもの、並びもその列のすぐ後ろ。
+        let next = prev.map((t) => (movedIds.has(t.id)
+          ? { ...t, rowKey: target.rowKey, col: target.col, colWidth: null } : t));
+        next = compact(next);
+        const moving = next.filter((t) => movedIds.has(t.id));
+        const rest = next.filter((t) => !movedIds.has(t.id));
+        const marks = rest
+          .map((t, i) => (onBoard(t) && t.rowKey === target.rowKey && (t.col ?? 0) === target.col ? i : -1))
+          .filter((i) => i >= 0);
+        const at = marks.length ? marks[marks.length - 1] + 1 : rest.length;
+        return [...rest.slice(0, at), ...moving, ...rest.slice(at)];
+      }
 
       if (target.kind === "into") {
         const cols = [...new Set(prev
@@ -6607,9 +6628,10 @@ function BlockArea({
   // 帯のつまみだけで動かす（dnd-kit は中のブロック用に使っている）。
   const [pjDrag, setPjDrag] = useState(null);
   const [pjOver, setPjOver] = useState(null); // { col, after }
-  const pjRow = useRef(null);
-  function startPjDrag(rowKey, colNum, e) {
+  const pjRow = useRef(null), pjBox = useRef(null);
+  function startPjDrag(rowKey, colNum, headId, e) {
     pjRow.current = rowKey;
+    pjBox.current = headId;
     setPjDrag(colNum);
     setPjOver(null);
     // 重ねている列と、その左右どちら側に入るか。真ん中より右なら後ろに差し込む。
@@ -6630,6 +6652,11 @@ function BlockArea({
       if (Number.isNaN(n)) return null;
       const r = el.getBoundingClientRect();
       const key = el.closest("[data-row-key]")?.getAttribute("data-row-key") || rowKey;
+      // 列の下のほうへ重ねたら、その列へ積む（画像の「PRIVATE の下へ」がこれ）。
+      // 段のいちばん下の帯は「新しい段」のために空けておく（上で判じ済み）。
+      if (ev.clientY > r.top + r.height * 0.72 && !(key === rowKey && n === colNum)) {
+        return { kind: "stack", rowKey: key, col: n };
+      }
       return { kind: "into", rowKey: key, col: n, after: ev.clientX > r.left + r.width / 2 };
     };
     const move = (ev) => setPjOver(spotAt(ev));
@@ -6637,8 +6664,8 @@ function BlockArea({
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const spot = spotAt(ev);
-      if (spot?.kind === "row") onPlacePj?.(pjRow.current, colNum, spot);
-      else if (spot && spot.rowKey !== pjRow.current) onPlacePj?.(pjRow.current, colNum, spot);
+      if (spot?.kind === "row" || spot?.kind === "stack") onPlacePj?.(pjRow.current, colNum, spot, pjBox.current);
+      else if (spot && spot.rowKey !== pjRow.current) onPlacePj?.(pjRow.current, colNum, spot, pjBox.current);
       else if (spot) moveColumnTo(pjRow.current, colNum, spot.col, spot.after);
       setPjDrag(null);
       setPjOver(null);
@@ -6681,6 +6708,14 @@ function BlockArea({
               // 枠は列のどれかが持っていれば立てる。先頭に何か入っただけで
               // 枠が消えると、列を作り直したように見えてしまう。
               const framed = !row.single && colBlocks.some((x) => x.blockType === "column" || x.style?.framed);
+              // 列の中に箱がいくつも積めるよう、見出しのところで区切る。
+              // 先頭の見出しより前にあるものは、枠を付けずそのまま置く。
+              const boxes = [];
+              for (const b of colBlocks) {
+                const head = b.blockType === "column" || b.style?.framed;
+                if (head || !boxes.length) boxes.push({ head: head ? b : null, items: [] });
+                boxes[boxes.length - 1].items.push(b);
+              }
               return (
                 <div
                   key={ci}
@@ -6692,7 +6727,10 @@ function BlockArea({
                       ? "shadow-[inset_-3px_0_0_0_rgb(56_189_248)]"
                       : "shadow-[inset_3px_0_0_0_rgb(56_189_248)]"),
                     pjDrag === colNum && "opacity-50",
-                    framed && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
+                    framed && "relative flex flex-col gap-3",
+                    // 列の下側へ落とすと、その列の末尾へ積む
+                    pjDrag != null && pjOver?.kind === "stack" && pjOver.col === colNum && pjOver.rowKey === row.key
+                      && "relative rounded-lg shadow-[inset_0_-3px_0_0_rgb(56_189_248)]",
                   )}
                   // flexBasis を 0 にすると何本でも1段に詰め込んでしまう。
                   // 目安の幅を持たせて、入らないぶんは折り返させる。
@@ -6700,48 +6738,69 @@ function BlockArea({
                     flexGrow: width, flexBasis: `${PJ_BASIS * width}px`, flexShrink: 1, minWidth: PJ_MIN,
                   }}
                 >
-                  {colBlocks.map((task, i) => (
-                    <PageBlock
-                      key={task.id}
-                      task={task}
-                      depth={0}
-                      idx={blocks.indexOf(task)}
-                      siblings={blocks}
-                      // 単独行は1ブロックずつ別の行なので、そこで数えると常に 1. になる。
-                      // 段組みの中だけ列で数え、それ以外は本文全体の並びで数える。
-                      listNumber={row.single
-                        ? numberedIndex(blocks, blocks.indexOf(task))
-                        : numberedIndex(colBlocks, i)}
-                      childrenOf={childrenOf}
-                      upsertTask={upsertTask}
-                      removeTask={removeTask}
-                      toggleDone={toggleDone}
-                      setSelectedTaskId={setSelectedTaskId}
-                      ops={ops}
-                      collapsedSet={collapsed}
-                      onToggleCollapse={toggleCollapse}
-                      dayDeps={dayDeps}
-                    />
-                  ))}
-                  {/* 数と列の操作は、どちらも重ねて置く。行を増やすと見出しが浮くため。
-                      STOCK ビューと同じく、右上に中の数を出す。 */}
-                  {framed && (
-                    <span
-                      data-col-count
-                      className="pointer-events-none absolute right-2 top-1.5 z-10 text-[10px] text-neutral-500 transition group-hover/row:opacity-0"
+                  {boxes.map((box, bi) => (
+                    <div
+                      key={box.head?.id || `loose-${bi}`}
+                      data-col-box={box.head?.id || undefined}
+                      className={classNames(
+                        "min-w-0",
+                        box.head && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
+                      )}
                     >
-                      {countInColumn(colBlocks, childrenOf)}
-                    </span>
-                  )}
-                  {!row.single && (
+                      {box.items.map((task) => (
+                        <PageBlock
+                          key={task.id}
+                          task={task}
+                          depth={0}
+                          idx={blocks.indexOf(task)}
+                          siblings={blocks}
+                          // 単独行は1ブロックずつ別の行なので、そこで数えると常に 1. になる。
+                          // 段組みの中だけ列で数え、それ以外は本文全体の並びで数える。
+                          listNumber={row.single
+                            ? numberedIndex(blocks, blocks.indexOf(task))
+                            : numberedIndex(colBlocks, colBlocks.indexOf(task))}
+                          childrenOf={childrenOf}
+                          upsertTask={upsertTask}
+                          removeTask={removeTask}
+                          toggleDone={toggleDone}
+                          setSelectedTaskId={setSelectedTaskId}
+                          ops={ops}
+                          collapsedSet={collapsed}
+                          onToggleCollapse={toggleCollapse}
+                          dayDeps={dayDeps}
+                        />
+                      ))}
+                      {box.head && !row.single && (
+                        <ColumnBar
+                          floating
+                          first={ci === 0}
+                          last={ci === row.cols.length - 1}
+                          width={width}
+                          onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
+                          onWidth={(w) => setColumnWidth(row.key, colNum, w)}
+                          onGrab={(e) => startPjDrag(row.key, colNum, box.head.id, e)}
+                        />
+                      )}
+                      {box.head && (
+                        <span
+                          data-col-count
+                          className="pointer-events-none absolute right-2 top-1.5 z-10 text-[10px] text-neutral-500 transition group-hover/row:opacity-0"
+                        >
+                          {countInColumn(box.items, childrenOf)}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {/* 見出しの無い列（PJ の箱でない段組み）は、列ごとに操作を置く。
+                      箱がある列は、箱それぞれが自分の操作列を持っている。 */}
+                  {!row.single && !boxes.some((b) => b.head) && (
                     <ColumnBar
-                      floating={framed}
                       first={ci === 0}
                       last={ci === row.cols.length - 1}
                       width={width}
                       onMove={(dir) => swapColumns(row.key, colNum, row.colNums[ci + dir])}
                       onWidth={(w) => setColumnWidth(row.key, colNum, w)}
-                      onGrab={(e) => startPjDrag(row.key, colNum, e)}
+                      onGrab={(e) => startPjDrag(row.key, colNum, null, e)}
                     />
                   )}
                 </div>
