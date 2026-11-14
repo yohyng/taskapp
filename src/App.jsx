@@ -6598,25 +6598,6 @@ function BlockArea({
 
   // PJ をつかんだ位置へ入れ込む。入れ替えではなく、抜いて差し込む並べ替え。
   // 列の番号は飛んでいることがあるので、実際に使われている番号の並びで考える。
-  const moveColumnTo = useCallback((rowKey, from, to, after) => {
-    const nums = [...new Set(tasks
-      .filter((t) => t.pageId === pageId && !t.archived && t.rowKey === rowKey)
-      .map((t) => t.col ?? 0))].sort((a, b) => a - b);
-    const fromIdx = nums.indexOf(from);
-    let toIdx = nums.indexOf(to);
-    if (fromIdx < 0 || toIdx < 0) return;
-    if (after) toIdx += 1;
-    if (toIdx > fromIdx) toIdx -= 1;
-    if (toIdx === fromIdx) return;
-    const order = [...nums];
-    const [moved] = order.splice(fromIdx, 1);
-    order.splice(toIdx, 0, moved);
-    // 並べ直したあとの位置が、そのまま新しい列番号になる
-    const next = new Map(order.map((c, i) => [c, i]));
-    mapTasks((t) => (
-      t.rowKey === rowKey && next.has(t.col ?? 0) ? { ...t, col: next.get(t.col ?? 0) } : t
-    ));
-  }, [mapTasks, tasks, pageId]);
 
   // 列の取り分を変える。列の全ブロックに同じ値を書く。
   const setColumnWidth = useCallback((rowKey, col, width) => {
@@ -6636,38 +6617,36 @@ function BlockArea({
     setPjDrag(colNum);
     setPjOver(null);
     // 重ねている列と、その左右どちら側に入るか。真ん中より右なら後ろに差し込む。
-    const EDGE = 18;   // 段の上下、このぶんの帯に落とすと新しい段になる
     const spotAt = (ev) => {
       const at = document.elementFromPoint(ev.clientX, ev.clientY);
       const rowEl = at?.closest("[data-row-key]");
-      if (rowEl) {
-        const rect = rowEl.getBoundingClientRect();
-        const near = Math.min(EDGE, rect.height / 3);
-        if (ev.clientY < rect.top + near || ev.clientY > rect.bottom - near) {
-          return { kind: "row", rowKey: rowEl.getAttribute("data-row-key"), before: ev.clientY < rect.top + rect.height / 2 };
-        }
+      if (!rowEl) return null;
+      const key = rowEl.getAttribute("data-row-key");
+      // 横の位置で、どの列のところかを決める。
+      // 列より下の余白も、その列のうち（画像の「PRIVATE の下の空き」がここ）。
+      const columns = [...rowEl.querySelectorAll("[data-col-index]")]
+        .map((el) => ({ n: Number(el.getAttribute("data-col-index")), r: el.getBoundingClientRect() }))
+        .filter((c) => !Number.isNaN(c.n));
+      const hit = columns.find((c) => ev.clientX >= c.r.left && ev.clientX <= c.r.right)
+        // 列と列のあいだに落ちたときは、近いほうの列として扱う
+        || columns.reduce((best, c) => {
+          const gap = Math.min(Math.abs(ev.clientX - c.r.left), Math.abs(ev.clientX - c.r.right));
+          return !best || gap < best.gap ? { ...c, gap } : best;
+        }, null);
+      if (!hit) return null;
+      const same = key === rowKey && hit.n === colNum;
+      // その列より下、または列の下のほう → その列に積む
+      if (!same && (ev.clientY > hit.r.bottom || ev.clientY > hit.r.top + hit.r.height * 0.72)) {
+        return { kind: "stack", rowKey: key, col: hit.n };
       }
-      const el = at?.closest("[data-col-index]");
-      if (!el) return null;
-      const n = Number(el.getAttribute("data-col-index"));
-      if (Number.isNaN(n)) return null;
-      const r = el.getBoundingClientRect();
-      const key = el.closest("[data-row-key]")?.getAttribute("data-row-key") || rowKey;
-      // 列の下のほうへ重ねたら、その列へ積む（画像の「PRIVATE の下へ」がこれ）。
-      // 段のいちばん下の帯は「新しい段」のために空けておく（上で判じ済み）。
-      if (ev.clientY > r.top + r.height * 0.72 && !(key === rowKey && n === colNum)) {
-        return { kind: "stack", rowKey: key, col: n };
-      }
-      return { kind: "into", rowKey: key, col: n, after: ev.clientX > r.left + r.width / 2 };
+      return { kind: "into", rowKey: key, col: hit.n, after: ev.clientX > hit.r.left + hit.r.width / 2 };
     };
     const move = (ev) => setPjOver(spotAt(ev));
     const up = (ev) => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       const spot = spotAt(ev);
-      if (spot?.kind === "row" || spot?.kind === "stack") onPlacePj?.(pjRow.current, colNum, spot, pjBox.current);
-      else if (spot && spot.rowKey !== pjRow.current) onPlacePj?.(pjRow.current, colNum, spot, pjBox.current);
-      else if (spot) moveColumnTo(pjRow.current, colNum, spot.col, spot.after);
+      if (spot) onPlacePj?.(pjRow.current, colNum, spot, pjBox.current);
       setPjDrag(null);
       setPjOver(null);
     };
@@ -6695,10 +6674,6 @@ function BlockArea({
             // PJ は横に並べ、入りきらなくなったら下の段へ回す。
             className={classNames(
               row.single ? undefined : "group/row flex flex-col gap-x-5 gap-y-3 sm:flex-row sm:flex-wrap sm:items-start",
-              // 段の上下へ落とすと、その段の上／下に新しい段ができる
-              !row.single && pjDrag != null && pjOver?.kind === "row" && pjOver.rowKey === row.key && (pjOver.before
-                ? "shadow-[inset_0_3px_0_0_rgb(56_189_248)]"
-                : "shadow-[inset_0_-3px_0_0_rgb(56_189_248)]"),
             )}
           >
             {row.cols.map((colBlocks, ci) => {
@@ -6729,9 +6704,9 @@ function BlockArea({
                       : "shadow-[inset_3px_0_0_0_rgb(56_189_248)]"),
                     pjDrag === colNum && "opacity-50",
                     framed && "relative flex flex-col gap-3",
-                    // 列の下側へ落とすと、その列の末尾へ積む
+                    // 列の下（余白もふくむ）へ落とすと、その列の末尾へ積む
                     pjDrag != null && pjOver?.kind === "stack" && pjOver.col === colNum && pjOver.rowKey === row.key
-                      && "relative rounded-lg shadow-[inset_0_-3px_0_0_rgb(56_189_248)]",
+                      && "relative rounded-lg shadow-[0_3px_0_0_rgb(56_189_248)]",
                   )}
                   // flexBasis を 0 にすると何本でも1段に詰め込んでしまう。
                   // 目安の幅を持たせて、入らないぶんは折り返させる。

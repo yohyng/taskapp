@@ -34,59 +34,14 @@ const under = (id, title, col, n) => Array.from({ length: n }, (_, i) =>
 test.beforeEach(async ({ seed }) => {
   // 実際の板と同じく、箱には中身がある（背が低いと落とし分けが窮屈になる）
   await seed({ tasks: [
-    pj("c1", "ALPHA", 0), ...under("a", "ALPHA", 0, 6),
-    pj("c2", "BETA", 1), ...under("b", "BETA", 1, 6),
+    pj("c1", "ALPHA", 0), ...under("a", "ALPHA", 0, 12),
+    pj("c2", "BETA", 1), ...under("b", "BETA", 1, 3),
     pj("c3", "GAMMA", 2), ...under("g", "GAMMA", 2, 2),
   ] });
 });
 
-test("段の下の端へ落とすと、下に新しい段ができる", async ({ page }) => {
-  const rowBox = await page.locator("[data-row-key]").first().boundingBox();
-  await dragPj(page, "GAMMA", { x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height - 4 });
 
-  await expect.poll(async () => {
-    const list = await board(page);
-    const gamma = list.find((x) => x.title === "GAMMA");
-    const alpha = list.find((x) => x.title === "ALPHA");
-    return gamma && alpha && gamma.rowKey !== alpha.rowKey;
-  }).toBe(true);
-  // 残った段は、列番号が詰まる
-  expect((await byTitle(page, "ALPHA")).col).toBe(0);
-  expect((await byTitle(page, "BETA")).col).toBe(1);
-  expect((await byTitle(page, "GAMMA")).col).toBe(0);
-  // 画面でも、下の段に出る
-  const rows = page.locator("[data-row-key]");
-  await expect(rows).toHaveCount(2);
-  const first = await rows.nth(0).boundingBox(), second = await rows.nth(1).boundingBox();
-  expect(second.y).toBeGreaterThan(first.y);
-  await expect(rows.nth(1)).toContainText("GAMMA");
-});
 
-test("段の上の端へ落とすと、上に新しい段ができる", async ({ page }) => {
-  const rowBox = await page.locator("[data-row-key]").first().boundingBox();
-  await dragPj(page, "GAMMA", { x: rowBox.x + rowBox.width / 2, y: rowBox.y + 4 });
-
-  const rows = page.locator("[data-row-key]");
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText("GAMMA");
-  await expect(rows.nth(1)).toContainText("ALPHA");
-});
-
-test("下の段から、上の段の列のあいだへ戻せる", async ({ page }) => {
-  const rowBox = await page.locator("[data-row-key]").first().boundingBox();
-  await dragPj(page, "GAMMA", { x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height - 4 });
-  await expect(page.locator("[data-row-key]")).toHaveCount(2);
-
-  // ALPHA の左半分へ落とす＝その前に入る
-  const alpha = page.locator('[data-row-key] [data-col-index="0"]').first();
-  const box = await alpha.boundingBox();
-  await dragPj(page, "GAMMA", { x: box.x + 10, y: box.y + box.height / 2 });
-
-  await expect(page.locator("[data-row-key]")).toHaveCount(1);
-  await expect.poll(async () => (await byTitle(page, "GAMMA"))?.col).toBe(0);
-  expect((await byTitle(page, "ALPHA")).col).toBe(1);
-  expect((await byTitle(page, "BETA")).col).toBe(2);
-});
 
 test("横の並べ替えは、これまで通り", async ({ page }) => {
   const beta = page.locator('[data-row-key] [data-col-index="1"]').first();
@@ -127,21 +82,6 @@ test("積んだ箱も、それぞれ枠と数を持つ", async ({ page }) => {
   await expect(page.locator('[data-col-index="0"] [data-col-count]')).toHaveCount(2);
 });
 
-test("積んだ箱を、また別の段へ出せる", async ({ page }) => {
-  const alpha = page.locator('[data-row-key] [data-col-index="0"]').first();
-  const box = await alpha.boundingBox();
-  await dragPj(page, "GAMMA", { x: box.x + box.width / 2, y: box.y + box.height * 0.9 });
-  await expect(page.locator('[data-col-index="0"] [data-col-box]')).toHaveCount(2);
-
-  const rowBox = await page.locator("[data-row-key]").first().boundingBox();
-  await dragPj(page, "GAMMA", { x: rowBox.x + rowBox.width / 2, y: rowBox.y + rowBox.height - 4 });
-  const rows = page.locator("[data-row-key]");
-  await expect(rows).toHaveCount(2);
-  // 上の段には ALPHA が残り、GAMMA だけが下の段へ出る
-  await expect(rows.nth(0)).toContainText("ALPHA");
-  await expect(rows.nth(1)).toContainText("GAMMA");
-  await expect(rows.nth(1)).not.toContainText("ALPHA");
-});
 
 test("見出しの帯をそのまま掴んで動かせる", async ({ page }) => {
   // ⠿ を探さなくても、箱の見出しから動かせる
@@ -193,4 +133,36 @@ test("箱を掴んでいるあいだ、ブロックのドラッグや範囲選�
   // 掴んでいる箱の印だけが出ている
   await expect(page.locator('[data-col-index]').filter({ hasText: "GAMMA" }).first()).toHaveClass(/opacity-50/);
   await page.mouse.up();
+});
+
+test("列より下の空いているところへ落としても、その列に付く", async ({ page }) => {
+  // 赤線の図：PRIVATE の下の空き。列の高さより下でも、その列の続きとして扱う。
+  const beta = page.locator('[data-row-key] [data-col-index="1"]').first();
+  const col = await beta.boundingBox();
+  const row = await page.locator("[data-row-key]").first().boundingBox();
+  const below = Math.min(row.y + row.height - 6, col.y + col.height + 40);
+  expect(below, "列より下に余白がある").toBeGreaterThan(col.y + col.height);
+  await dragPj(page, "GAMMA", { x: col.x + col.width / 2, y: below });
+
+  await expect.poll(async () => (await byTitle(page, "GAMMA"))?.col).toBe(1);
+  await expect(page.locator("[data-row-key]")).toHaveCount(1);
+  const stacked = page.locator('[data-col-index="1"] [data-col-box]');
+  await expect(stacked).toHaveCount(2);
+  await expect(stacked.nth(1)).toContainText("GAMMA");
+});
+
+test("積んだ箱を、隣の列として出せる", async ({ page }) => {
+  // いったん ALPHA の下へ積み、そのあと BETA の右へ出す
+  const alpha = page.locator('[data-row-key] [data-col-index="0"]').first();
+  const first = await alpha.boundingBox();
+  await dragPj(page, "GAMMA", { x: first.x + first.width / 2, y: first.y + first.height * 0.9 });
+  await expect(page.locator('[data-col-index="0"] [data-col-box]')).toHaveCount(2);
+
+  const beta = page.locator('[data-row-key] [data-col-index="1"]').first();
+  const box = await beta.boundingBox();
+  await dragPj(page, "GAMMA", { x: box.x + box.width - 8, y: box.y + box.height * 0.3 });
+
+  await expect.poll(async () => (await byTitle(page, "GAMMA"))?.col).toBe(2);
+  await expect(page.locator('[data-col-index="0"] [data-col-box]')).toHaveCount(1);
+  await expect(page.locator("[data-row-key] [data-col-index]")).toHaveCount(3);
 });
