@@ -111,19 +111,22 @@ test('一画の確定では過去の線を塗り直さず、描き終えた紙�
   expect(work.clears).toBe(0);expect(work.fills).toBeLessThan(5);
 });
 
-test('ペンツールは保存と同じ上段にまとまり、下スクロールだけで余白が増える', async ({page}) => {
+test('ペンツールは保存と同じ上段にまとまり、紙の端まで描くと余白が増える', async ({page}) => {
   await page.setViewportSize({width:900,height:700});
-  await page.evaluate(()=>localStorage.setItem('taskspace-sketch-paper-v1',JSON.stringify({width:600,height:700})));
+  await page.addInitScript(()=>localStorage.setItem('taskspace-sketch-paper-v1',JSON.stringify({width:600,height:700})));
   await openSketch(page);
-  const board=page.locator('[data-sketch-board]'),canvas=page.locator('[data-sketch-canvas]'),viewport=page.locator('[data-sketch-viewport]');
+  const board=page.locator('[data-sketch-board]'),canvas=page.locator('[data-sketch-canvas]');
   await expect(page.locator('[data-sketch-header] [data-sketch-width]')).toHaveCount(1);
   await expect(page.locator('[data-sketch-edge]')).toHaveCount(0);
   await expect(board.locator('footer')).toHaveCount(0);
-  const before=Number(await canvas.getAttribute('height'));
-  await viewport.evaluate(el=>{el.scrollTop=el.scrollHeight;});
-  await viewport.hover(); await page.mouse.wheel(0,300);
-  await expect.poll(async()=>Number(await canvas.getAttribute('height'))).toBeGreaterThan(before);
-  expect(await viewport.evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
+  const before=await page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-sketch-paper-v1')).height);
+  // 下の端まで線を引くと、書いている途中で紙が足される
+  const r=await canvas.boundingBox();
+  await page.mouse.move(r.x+r.width*0.3,r.y+r.height*0.6); await page.mouse.down();
+  for(let i=1;i<=20;i++) await page.mouse.move(r.x+r.width*0.3+i*3,r.y+r.height*(0.6+0.39*(i/20)));
+  await page.mouse.up();
+  await expect.poll(()=>page.evaluate(()=>JSON.parse(localStorage.getItem('taskspace-sketch-paper-v1')).height)).toBeGreaterThan(before);
+  expect(await page.locator('[data-sketch-viewport]').evaluate(el=>el.scrollWidth-el.clientWidth)).toBeLessThanOrEqual(1);
 });
 
 test('ペン専用では手の接触で紙を動かさず、線も追加しない', async ({page}) => {
