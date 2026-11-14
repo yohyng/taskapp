@@ -132,3 +132,18 @@ test.describe("ペンの色と太さ", () => {
     expect(got.width).toBeGreaterThanOrEqual(got.shown * Math.min(3, Math.max(1, got.dpr)) * 0.95);
   });
 });
+
+test("暗い帯の中でも、色の丸と太さの丸が見える", async ({ page }) => {
+  await page.goto("/sketch.html");
+  await page.waitForSelector("[data-sketch-canvas]");
+  // 黒いペンの丸にも、白い縁が付いている（付いていないと帯に溶けて見えない）
+  const ring = await page.locator('[data-sketch-palette] span').first().evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { shadow: s.boxShadow, bg: s.backgroundColor };
+  });
+  expect(ring.shadow).not.toBe("none");
+  // 太さの丸は、暗くない色で描く
+  const dot = await page.locator('[data-sketch-width-preset="2"] span').evaluate((el) => getComputedStyle(el).backgroundColor);
+  const [r, g, b] = dot.match(/\d+/g).map(Number);
+  expect((r + g + b) / 3, "太さの丸が暗すぎない").toBeGreaterThan(120);
+});
