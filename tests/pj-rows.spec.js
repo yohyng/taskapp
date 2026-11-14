@@ -142,3 +142,40 @@ test("積んだ箱を、また別の段へ出せる", async ({ page }) => {
   await expect(rows.nth(1)).toContainText("GAMMA");
   await expect(rows.nth(1)).not.toContainText("ALPHA");
 });
+
+test("見出しの帯をそのまま掴んで動かせる", async ({ page }) => {
+  // ⠿ を探さなくても、箱の見出しから動かせる
+  const gammaBand = page.locator('[data-col-box="c3"]').locator("> *").first();
+  const from = await gammaBand.boundingBox();
+  const alpha = page.locator('[data-row-key] [data-col-index="0"]').first();
+  const to = await alpha.boundingBox();
+
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.85, { steps: 14 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height * 0.85, { steps: 2 });
+  await page.mouse.up();
+
+  await expect.poll(async () => (await byTitle(page, "GAMMA"))?.col).toBe(0);
+  await expect(page.locator('[data-col-index="0"] [data-col-box]')).toHaveCount(2);
+});
+
+test("見出しを押しただけなら、これまで通り名前を直せる", async ({ page }) => {
+  const band = page.locator('[data-col-box="c1"]').locator("> *").first();
+  await band.click();
+  await expect(page.locator('[data-col-box="c1"] textarea')).toBeVisible();
+  // 段も列も動いていない
+  await expect(page.locator("[data-row-key]")).toHaveCount(1);
+  expect((await byTitle(page, "ALPHA")).col).toBe(0);
+});
+
+test("⠿ は、ふだんから見えている", async ({ page }) => {
+  const grip = page.locator('[data-col-box="c1"] [data-pj-grab]').first();
+  await expect(grip).toBeVisible();
+  const look = await grip.evaluate((el) => {
+    const bar = el.closest("[data-col]");
+    return { opacity: Number(getComputedStyle(bar).opacity), w: el.getBoundingClientRect().width };
+  });
+  expect(look.opacity).toBeGreaterThan(0.3);
+  expect(look.w).toBeGreaterThanOrEqual(16);
+});

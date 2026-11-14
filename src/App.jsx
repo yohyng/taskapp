@@ -6742,9 +6742,30 @@ function BlockArea({
                     <div
                       key={box.head?.id || `loose-${bi}`}
                       data-col-box={box.head?.id || undefined}
+                      // 見出しの帯からそのまま掴める。少し動かしてから始めるので、
+                      // 押しただけのときは、これまで通り名前を直せる。
+                      onPointerDown={box.head && !row.single ? (event) => {
+                        if (event.button !== 0 || !event.isPrimary) return;
+                        const band = event.currentTarget.firstElementChild;
+                        if (!band?.contains(event.target)) return;
+                        if (event.target.closest("button, textarea, input, [data-pj-grab], [data-block-grip]")) return;
+                        const from = { x: event.clientX, y: event.clientY };
+                        const started = event;
+                        const move = (ev) => {
+                          if (Math.hypot(ev.clientX - from.x, ev.clientY - from.y) < 6) return;
+                          stop();
+                          startPjDrag(row.key, colNum, box.head.id, started);
+                        };
+                        const stop = () => {
+                          window.removeEventListener("pointermove", move);
+                          window.removeEventListener("pointerup", stop);
+                        };
+                        window.addEventListener("pointermove", move);
+                        window.addEventListener("pointerup", stop);
+                      } : undefined}
                       className={classNames(
                         "min-w-0",
-                        box.head && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5",
+                        box.head && "relative rounded-lg border border-white/10 bg-white/[0.02] [&>*:first-child]:rounded-t-lg [&>*:first-child]:border-b [&>*:first-child]:border-white/10 [&>*:first-child]:bg-white/[0.03] [&>*:first-child]:px-2 [&>*:first-child]:py-1.5 [&>*:first-child]:cursor-grab",
                       )}
                     >
                       {box.items.map((task) => (
@@ -6868,7 +6889,8 @@ function ColumnBar({ first, last, width, onMove, onWidth, onGrab, floating = fal
     <div
       data-col
       className={classNames(
-        "hidden h-4 items-center gap-0.5 opacity-0 transition group-hover/row:opacity-100 sm:flex",
+        // ふだんから薄く見せる（ホバーでしか出ないと、掴めることに気づけない）
+        "flex h-5 items-center gap-0.5 opacity-50 transition group-hover/row:opacity-100",
         // 枠つきの列では帯の中に重ねる。行を1本増やすと見出しが浮いてしまう。
         floating && "absolute right-1.5 top-1 z-20",
       )}
@@ -6893,8 +6915,8 @@ function ColumnBar({ first, last, width, onMove, onWidth, onGrab, floating = fal
         <span
           data-pj-grab
           onPointerDown={onGrab}
-          title="ドラッグでこの PJ を入れ替える"
-          className="cursor-grab select-none px-0.5 text-[10px] leading-none text-neutral-600 transition hover:text-neutral-200"
+          title="ドラッグで動かす（見出しの帯からも掴めます）"
+          className="flex h-5 w-5 cursor-grab select-none items-center justify-center rounded text-[13px] leading-none text-neutral-400 transition hover:bg-white/10 hover:text-neutral-100"
         >
           ⠿
         </span>
