@@ -179,3 +179,18 @@ test("⠿ は、ふだんから見えている", async ({ page }) => {
   expect(look.opacity).toBeGreaterThan(0.3);
   expect(look.w).toBeGreaterThanOrEqual(16);
 });
+
+test("箱を掴んでいるあいだ、ブロックのドラッグや範囲選択は走らない", async ({ page }) => {
+  const band = page.locator('[data-col-box="c3"]').locator("> *").first();
+  const from = await band.boundingBox();
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(from.x + from.width / 2 - 120, from.y + 160, { steps: 10 });
+
+  // ブロックを運んでいる印も、範囲選択の枠も出ない
+  await expect(page.locator("[data-drop-line]")).toHaveCount(0);
+  await expect(page.locator("[data-marquee]")).toHaveCount(0);
+  // 掴んでいる箱の印だけが出ている
+  await expect(page.locator('[data-col-index]').filter({ hasText: "GAMMA" }).first()).toHaveClass(/opacity-50/);
+  await page.mouse.up();
+});

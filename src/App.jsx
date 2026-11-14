@@ -6630,6 +6630,7 @@ function BlockArea({
   const [pjOver, setPjOver] = useState(null); // { col, after }
   const pjRow = useRef(null), pjBox = useRef(null);
   function startPjDrag(rowKey, colNum, headId, e) {
+    e.stopPropagation?.();
     pjRow.current = rowKey;
     pjBox.current = headId;
     setPjDrag(colNum);
@@ -6744,11 +6745,15 @@ function BlockArea({
                       data-col-box={box.head?.id || undefined}
                       // 見出しの帯からそのまま掴める。少し動かしてから始めるので、
                       // 押しただけのときは、これまで通り名前を直せる。
-                      onPointerDown={box.head && !row.single ? (event) => {
+                      // 捕まえる側で受ける。ブロックのドラッグや範囲選択より先に
+                      // 止めておかないと、掴んだ瞬間に両方が走ってしまう。
+                      onPointerDownCapture={box.head && !row.single ? (event) => {
                         if (event.button !== 0 || !event.isPrimary) return;
                         const band = event.currentTarget.firstElementChild;
                         if (!band?.contains(event.target)) return;
                         if (event.target.closest("button, textarea, input, [data-pj-grab], [data-block-grip]")) return;
+                        // ここから先は PJ の箱の操作。ほかのドラッグには渡さない。
+                        event.stopPropagation();
                         const from = { x: event.clientX, y: event.clientY };
                         const started = event;
                         const move = (ev) => {
