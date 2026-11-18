@@ -1054,7 +1054,7 @@ function load(raw) {
 
 
 // 行の文字。探しているときは当たったところに印、ふだんは #タグ を色づけ。
-function Marked({ text, query }) {
+function Marked({ text, query, onTag }) {
   if (String(query || "").trim()) {
     const parts = splitByQuery(text, query);
     if (parts.length === 1 && !parts[0].hit) return text;
@@ -1065,7 +1065,18 @@ function Marked({ text, query }) {
   const parts = splitTags(text);
   if (parts.length === 1 && !parts[0].tag) return text;
   return parts.map((p, i) => (p.tag
-    ? <span key={i} data-tag className="text-sky-300/80">{p.text}</span>
+    ? <button
+        key={i}
+        type="button"
+        data-tag={p.text.replace(/^#/, "")}
+        title={`${p.text} で絞り込む`}
+        // 行の文字を押すと書き始めてしまうので、ここで止める
+        onPointerDown={(event) => { event.preventDefault(); event.stopPropagation(); }}
+        onClick={(event) => { event.preventDefault(); event.stopPropagation(); onTag?.(p.text); }}
+        className="rounded px-px text-sky-300/80 underline-offset-2 transition hover:bg-sky-400/10 hover:text-sky-200 hover:underline"
+      >
+        {p.text}
+      </button>
     : <span key={i}>{p.text}</span>));
 }
 
@@ -1123,7 +1134,9 @@ export default function Outliner() {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState([]);     // まとめて選んだ行
   const [tagHint, setTagHint] = useState(null); // { id, items, at }  #タグの候補
-  const [band, setBand] = useState(null);       // なぞって選ぶときの枠
+  const [band, setBand] = useState(null);
+  // 触る画面で選んでいるあいだは、送りを止める（指で枠を引けるように）
+  const [bandLock, setBandLock] = useState(false);       // なぞって選ぶときの枠
   const [dateView, setDateView] = useState(false);     // 日付の順に並べて見る
   // フォーカスモード：打っているあいだは、細かい表示を引っ込める。
   // 指やマウスが動いたら、すぐ戻す（押したいものが見えないと困るので）。
@@ -1538,10 +1551,14 @@ export default function Outliner() {
     const toContentY = (clientY) => clientY - boxRect().top + box.scrollTop;
 
     const start = { x: e.clientX, y: e.clientY, contentY: toContentY(e.clientY) };
-    let acting = !fromId;      // 余白からなら、すぐ選び始める
+    // 触る画面では、押しただけで選び始めると、送れなくなる。
+    // 長く押さえたときだけ選びに入り、指が動いたら送りにまかせる。
+    const touch = e.pointerType === "touch";
+    let acting = !fromId && !touch;
     if (acting) e.preventDefault();
     let last = { x: e.clientX, y: e.clientY };
     let raf = 0;
+    let hold = 0;
 
     const rowAt = (x, y) => document.elementFromPoint(x, y)?.closest("[data-row]")?.getAttribute("data-row") || null;
 
@@ -1588,6 +1605,11 @@ export default function Outliner() {
 
     const move = (ev) => {
       last = { x: ev.clientX, y: ev.clientY };
+      if (touch && !acting) {
+        // 長押しの前に動いたら、それは送りたいということ。選びには入らない。
+        if (Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > 10) up();
+        return;
+      }
       if (!acting) {
         const far = Math.abs(ev.clientX - start.x) + Math.abs(ev.clientY - start.y) > 8;
         // 文字から始めたときは、別の行に入ったら選択に切り替える
@@ -1603,12 +1625,28 @@ export default function Outliner() {
       paint();
     };
     const up = () => {
+      clearTimeout(hold);
       cancelAnimationFrame(raf);
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
       window.removeEventListener("pointercancel", up);
+      setBandLock(false);
       setBand(null);
     };
+    if (touch) {
+      // 指を止めたまま少し待ったら、選びに入る。
+      // ここで送りを止める（動いていないので、送りはまだ始まっていない）。
+      hold = setTimeout(() => {
+        acting = true;
+        setBandLock(true);
+        try { list.setPointerCapture(e.pointerId); } catch { /* 捕まえられなくても続ける */ }
+        window.getSelection()?.removeAllRanges();
+        setEditingId(null);
+        if (fromId) anchorRef.current = fromId;
+        raf = requestAnimationFrame(tick);
+        paint();
+      }, 420);
+    }
     if (acting) raf = requestAnimationFrame(tick);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -2472,6 +2510,7 @@ alter table outline_nodes disable row level security;
       {!loading && <div
         ref={listRef}
         data-outline-list
+        data-band-lock={bandLock ? "" : undefined}
         onPointerDown={(e) => {
           // 行の中身（文字・つまみ・ボタン）の上は、それぞれの操作にまかせる
           if (e.target.closest("[data-row-text], button, textarea, [data-tag-hint]")) return;
@@ -2487,6 +2526,10 @@ alter table outline_nodes disable row level security;
           putImage(file, row ? pathTo(listed, row)?.at(-1) : null);
         }}
         style={{
+          // 指で枠を引いているあいだは、送りを止める
+          ...(bandLock ? { touchAction: "none" } : {}),
+          // 長押しで選び始めるので、長押しの吹き出しは出さない
+          WebkitTouchCallout: "none",
           // 集中モードは、一覧の字組みのままだと読みにくい。
           // Stone の録画から測った寸法に寄せる：
           //   左の余白 21%、行間 2.0、1行は 36 字ほどで折り返す
@@ -2669,7 +2712,9 @@ alter table outline_nodes disable row level security;
                 >
                   {(() => {
                     const img = imageUrlOf(node.text);
-                    if (!img) return node.text ? <Marked text={node.text} query={query} /> : "空の行";
+                    if (!img) return node.text
+                      ? <Marked text={node.text} query={query} onTag={(tag) => { setQuery(tag); setEditingId(null); clearPick(); searchRef.current?.focus(); }} />
+                      : "空の行";
                     // 画像の行。押せば、これまで通り文字（URL）を直せる。
                     return (
                       <span data-row-image-box className="relative inline-block max-w-full align-top">

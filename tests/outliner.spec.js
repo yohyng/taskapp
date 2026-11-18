@@ -1980,3 +1980,36 @@ test.describe("集中モード（Stone のような字組みと、消える UI�
     await expect.poll(async () => Math.abs(await where("n30") - 0.53) < 0.12).toBe(true);
   });
 });
+
+test.describe("#タグを押す", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("taskspace-outline-v1", JSON.stringify([
+      { id: "a", text: "買い物 #家事" },
+      { id: "b", text: "掃除 #家事" },
+      { id: "c", text: "設計レビュー #仕事" },
+    ])));
+    await page.reload();
+    await page.waitForSelector("header");
+    await open(page);
+  });
+
+  test("押すと、そのタグで絞り込む", async ({ page }) => {
+    await page.locator('[data-row="c"] [data-tag="仕事"]').click();
+    await expect(page.locator("[data-outline-search]")).toHaveValue("#仕事");
+    await expect(page.locator("[data-row]")).toHaveCount(1);
+    await expect(page.locator("[data-row]").first()).toContainText("設計レビュー");
+  });
+
+  test("別のタグを押せば、そちらへ移る", async ({ page }) => {
+    await page.locator('[data-row="a"] [data-tag="家事"]').click();
+    await expect(page.locator("[data-row]")).toHaveCount(2);
+    await page.locator("[data-search-clear]").click();
+    await page.locator('[data-row="c"] [data-tag="仕事"]').click();
+    await expect(page.locator("[data-outline-search]")).toHaveValue("#仕事");
+  });
+
+  test("タグを押しても、その行は書き始めにならない", async ({ page }) => {
+    await page.locator('[data-row="a"] [data-tag="家事"]').click();
+    await expect(page.locator("[data-row] textarea")).toHaveCount(0);
+  });
+});
