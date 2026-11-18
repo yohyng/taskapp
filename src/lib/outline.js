@@ -1021,3 +1021,19 @@ export function applyRemoteRows(nodes, rows = [], goneIds = []) {
   for (const id of goneIds) byId.delete(id);
   return buildTree([...byId.values()]);
 }
+
+// --- 受け取ったぶんを、いつ・どうやって反映するか ---
+
+// ほかの端末の変更は、1行ずつ届く。そのたびに木を作り直すと、
+// 大きな編集のあとで「1個ずつ順に増えていく」ように見える。
+//   ・少しだけ届いたとき … これまで通り、少し待ってまとめる（素早さを保つ）
+//   ・たくさん届いたとき … もう少し待って、ひとまとめにする
+//   ・あまりに多いとき  … 個別の反映はやめ、向こうを読み直して一度に差し替える
+export const INBOX_MANY = 50;     // これ以上たまったら、長めに待つ
+export const INBOX_FLOOD = 300;   // これ以上なら、読み直して一度に切り替える
+
+export function inboxPlan({ count, waited = 0 } = {}) {
+  if (count >= INBOX_FLOOD) return { mode: "reload", delay: 0 };
+  const window = count >= INBOX_MANY ? 1000 : 250;
+  return { mode: "apply", delay: Math.max(0, Math.min(window, window - waited)) };
+}

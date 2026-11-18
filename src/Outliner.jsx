@@ -9,7 +9,7 @@ import {
   flattenTree, buildTree, mergeOutline, prepareOutlineChange, outlineRowSignature,
   indentMany, outdentMany, removeMany, patchMany, textOf, rangeBetween, collectFavorites,
   collectAllTags, hashtagAtCursor, tagSuggestions, applyTag, splitTags, addMemoUnderDate,
-  groupByDate, fillDates, imageUrlOf, applyRemoteRows,
+  groupByDate, fillDates, imageUrlOf, applyRemoteRows, inboxPlan,
 } from "./lib/outline";
 import { loadOutlineRows, loadOutlineRevisions, saveOutlineRows, saveOutlineRowsCas, outlineCasChanges, recoverOutlineOperationResults, clearOutlineRows, isOutlineTableMissing, outlineTableSql, absentOutlineColumns, outlineColumnsSql, subscribeOutline, supabaseReady } from "./lib/db";
 import { readOutlineBaseline, recoverOutlineOperations } from "./lib/outline-recovery";
@@ -400,7 +400,7 @@ export function OutlineProvider({ children }) {
 
   // ほかの端末の変化を、すぐ受け取る（Supabase Realtime）。
   // 細かく届くので、少しためてから一度に入れる。
-  const inboxRef = useRef({ rows: new Map(), gone: new Set() });
+  const inboxRef = useRef({ rows: new Map(), gone: new Set(), since: 0 });
   const wakeRef = useRef(null);          // 戻ってきたときに、繋ぎ直して読む
   const cleanupRef = useRef(null);
   const inboxTimer = useRef(null);
@@ -412,7 +412,7 @@ export function OutlineProvider({ children }) {
     // 待機中に消した行も、反映する瞬間の印で止める。
     const rows = [...box.rows.values()].filter((row) => !tombRef.current.has(row.id));
     const gone = [...box.gone];
-    inboxRef.current = { rows: new Map(), gone: new Set() };
+    inboxRef.current = { rows: new Map(), gone: new Set(), since: 0 };
     if (!rows.length && !gone.length) return;
     const generation = syncGenerationRef.current;
     trackOutlineWork(workRef.current, (async () => {
@@ -455,9 +455,18 @@ export function OutlineProvider({ children }) {
       box.gone.delete(row.id);
     }
     for (const id of gone) { box.gone.add(id); box.rows.delete(id); }
+    const count = box.rows.size + box.gone.size;
+    if (!box.since) box.since = Date.now();
+    const plan = inboxPlan({ count, waited: Date.now() - box.since });
     clearTimeout(inboxTimer.current);
-    inboxTimer.current = setTimeout(takeInbox, 250);
-  }, setLink), [takeInbox]);
+    if (plan.mode === "reload") {
+      // あまりに多いときは、1行ずつ当てずに向こうを読み直して一度に差し替える
+      inboxRef.current = { rows: new Map(), gone: new Set(), since: 0 };
+      pullOnce();
+      return;
+    }
+    inboxTimer.current = setTimeout(takeInbox, plan.delay);
+  }, setLink), [takeInbox, pullOnce]);
 
   // 起き抜けの読み込み。
   //   1. この端末の控え（IndexedDB のほうが新しければ、そちら）

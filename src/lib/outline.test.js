@@ -1199,3 +1199,26 @@ describe('手元の移動と削除を同期へ渡す', () => {
     expect(prepareOutlineChange(before, before, at)).toEqual({ nodes: before, added: [], removed: [] });
   });
 });
+
+import { inboxPlan, INBOX_MANY, INBOX_FLOOD } from './outline.js'
+
+describe('届いたぶんの反映のしかた', () => {
+  it('少しだけなら、これまで通り素早く', () => {
+    expect(inboxPlan({ count: 1 })).toEqual({ mode: 'apply', delay: 250 })
+    expect(inboxPlan({ count: INBOX_MANY - 1 }).delay).toBe(250)
+  })
+
+  it('たくさん届いたら、もう少し待ってまとめる', () => {
+    expect(inboxPlan({ count: INBOX_MANY })).toEqual({ mode: 'apply', delay: 1000 })
+  })
+
+  it('待った時間のぶんは、短くなる（待ちっぱなしにしない）', () => {
+    expect(inboxPlan({ count: 60, waited: 700 }).delay).toBe(300)
+    expect(inboxPlan({ count: 60, waited: 1500 }).delay).toBe(0)
+  })
+
+  it('あまりに多いときは、読み直して一度に切り替える', () => {
+    expect(inboxPlan({ count: INBOX_FLOOD })).toEqual({ mode: 'reload', delay: 0 })
+    expect(inboxPlan({ count: 5000 }).mode).toBe('reload')
+  })
+})
