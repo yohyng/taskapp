@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { paintSketch, appendSketch, eraseAt, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
+import { paintSketch, appendSketch, eraseAt, eraseArea, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
 
 import { createPortal } from "react-dom";
 import { Hand, Settings2, Undo2, Redo2, Trash2, Eraser, Pen, Highlighter, Plus } from "lucide-react";
@@ -21,6 +21,7 @@ const HEIGHT_KEY = "taskspace-sketch-ratio";
 const PAPER_MAX = 4000;
 // 消しゴムの大きさ（紙の実寸）。触れた線を消す。
 const ERASER_RADIUS = 10;
+const ERASE_MODE_KEY = "taskspace-sketch-erase-mode";
 // 画素の持ち分。これを超えるぶんは、細かさを落として収める。
 const PIXEL_BUDGET = 12_000_000;
 function savedRatio() {
@@ -106,6 +107,16 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   };
   const [eraser, setEraser] = useState(false);
   const [marker, setMarker] = useState(false);   // 蛍光ペン：太く、薄く
+  // 消しゴムは2種類。線まるごとと、触れたところだけ。
+  const [eraseMode, setEraseMode] = useState(() => {
+    try { return localStorage.getItem(ERASE_MODE_KEY) === "area" ? "area" : "stroke"; } catch { return "stroke"; }
+  });
+  const [eraserOpen, setEraserOpen] = useState(false);
+  const pickEraseMode = (mode) => {
+    setEraseMode(mode);
+    setEraserOpen(false);
+    try { localStorage.setItem(ERASE_MODE_KEY, mode); } catch { /* 覚えられなくても使える */ }
+  };
   const [future, setFuture] = useState([]);      // 戻したぶん（やり直し用）
   // 消しゴムは続けてなぞるので、いまの線を覚えておく（毎回の再描画を待たない）
   const strokesRef = useRef(strokes);
@@ -137,13 +148,17 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   }, [standalone, disabled, paper.width, paper.height]);
   // 消しゴム。触れた線を消し、消したぶんは取り消しで戻せる。
   const eraseRef = useRef(null);
+  const eraseModeRef = useRef(eraseMode);
+  useEffect(() => { eraseModeRef.current = eraseMode; }, [eraseMode]);
   const eraseAtEvent = useCallback((event) => {
     const rub = eraseRef.current;
     if (!rub) return;
     const rect = rub.rect;
     const x = ((event.clientX - rect.left) / rect.width) * paper.width;
     const y = ((event.clientY - rect.top) / rect.height) * paper.height;
-    const left = eraseAt(strokesRef.current, x, y, ERASER_RADIUS);
+    const left = eraseModeRef.current === "area"
+      ? eraseArea(strokesRef.current, x, y, ERASER_RADIUS)
+      : eraseAt(strokesRef.current, x, y, ERASER_RADIUS);
     if (left === strokesRef.current) return;
     if (!rub.touched) { rub.touched = true; remember(strokesRef.current); }
     strokesRef.current = left;
@@ -258,7 +273,32 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
       <div className={bar}>
         {toolButton("pen", "ペン", "ペン", <Pen aria-hidden="true" className="h-4 w-4" />, () => { setEraser(false); setPanMode(false); setMarker(false); })}
         {toolButton("marker", "蛍光ペン", "蛍光ペン：太く、薄く引く", <Highlighter aria-hidden="true" className="h-4 w-4" />, () => { setEraser(false); setPanMode(false); setMarker(true); })}
-        {toolButton("eraser", "消しゴム", "消しゴム：触れた線を消します", <Eraser aria-hidden="true" className="h-4 w-4" />, () => { setEraser(true); setPanMode(false); setMarker(false); })}
+        <div className="relative shrink-0">
+          {toolButton("eraser", "消しゴム", eraseMode === "area" ? "消しゴム：触れたところだけ消します" : "消しゴム：触れた線を消します",
+            <Eraser aria-hidden="true" className="h-4 w-4" />,
+            () => {
+              // 選んでいる道具をもう一度押したら、種類を選ぶ
+              if (eraser) { setEraserOpen((value) => !value); return; }
+              setEraser(true); setPanMode(false); setMarker(false); setEraserOpen(false);
+            })}
+          {eraserOpen && (
+            <div data-sketch-eraser-panel className="absolute left-0 top-full z-50 mt-1 w-44 rounded-lg border border-white/15 ts-surface p-1 shadow-2xl">
+              {[["stroke", "線まるごと", "触れた線を1本ごと消す"], ["area", "触れたところ", "なぞったところだけ消す"]].map(([key, label, hint]) => (
+                <button
+                  key={key}
+                  type="button"
+                  data-sketch-erase-mode={key}
+                  aria-pressed={eraseMode === key}
+                  onClick={() => pickEraseMode(key)}
+                  className="block w-full rounded px-2 py-1.5 text-left text-[11px] text-neutral-300 transition hover:bg-white/10 aria-pressed:bg-white/15 aria-pressed:text-white"
+                >
+                  {label}
+                  <span className="block text-[10px] text-neutral-500">{hint}</span>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {toolButton("pan", "紙を移動", "紙を移動：指やマウスで紙をドラッグできます", <Hand aria-hidden="true" className="h-4 w-4" />, () => { setPanMode(true); setEraser(false); setMarker(false); })}
       </div>
       {divider}

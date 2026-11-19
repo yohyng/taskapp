@@ -1265,3 +1265,48 @@ describe('消しゴム', () => {
     expect(strokeTouches(tall, 300, 180, 8)).toBe(false)
   })
 })
+
+import { eraseArea } from './sketch.js'
+
+describe('部分消し', () => {
+  // 紙 600x360 を、横にまっすぐ引いた線（点は 11 個）
+  const line = {
+    color: '#202020', width: 4, paperWidth: 600, height: 360,
+    points: Array.from({ length: 11 }, (_, i) => [i / 10, 0.5]),
+    times: Array.from({ length: 11 }, (_, i) => i * 10),
+  };
+
+  it('真ん中を消すと、2本に分かれる', () => {
+    const got = eraseArea([line], 300, 180, 20)
+    expect(got).toHaveLength(2)
+    expect(got[0].points.at(-1)[0]).toBeLessThan(0.5)
+    expect(got[1].points[0][0]).toBeGreaterThan(0.5)
+  })
+
+  it('分かれた線の時刻は、その線の頭からにそろえる', () => {
+    const [, second] = eraseArea([line], 300, 180, 20)
+    expect(second.times[0]).toBe(0)
+    expect(second.times.length).toBe(second.points.length)
+  })
+
+  it('端を消すと、1本のまま短くなる', () => {
+    const got = eraseArea([line], 0, 180, 20)
+    expect(got).toHaveLength(1)
+    expect(got[0].points.length).toBeLessThan(line.points.length)
+  })
+
+  it('ぜんぶ触れたら、無くなる', () => {
+    expect(eraseArea([line], 300, 180, 400)).toHaveLength(0)
+  })
+
+  it('離れていれば、同じ配列をそのまま返す', () => {
+    const list = [line]
+    expect(eraseArea(list, 300, 350, 5)).toBe(list)
+  })
+
+  it('色や太さは、分かれたあとも引き継ぐ', () => {
+    const [first] = eraseArea([line], 300, 180, 20)
+    expect(first.color).toBe('#202020')
+    expect(first.width).toBe(4)
+  })
+})

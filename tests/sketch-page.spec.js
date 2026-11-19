@@ -347,3 +347,75 @@ test.describe("道具の並び（Samsung Notes のような形）", () => {
     await expect.poll(count).toBe(2);
   });
 });
+
+test.describe("消しゴムの種類", () => {
+  const drawLine = async (page, y) => {
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(r.x + r.width * 0.15, r.y + y);
+    await page.mouse.down();
+    for (let i = 1; i <= 12; i += 1) await page.mouse.move(r.x + r.width * (0.15 + 0.06 * i), r.y + y, { steps: 2 });
+    await page.mouse.up();
+    return r;
+  };
+  const strokes = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1") || "[]"));
+  const rub = async (page, r, x, y) => {
+    await page.mouse.move(r.x + x, r.y + y);
+    await page.mouse.down();
+    await page.mouse.move(r.x + x + 6, r.y + y, { steps: 3 });
+    await page.mouse.up();
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/sketch.html");
+    await page.waitForSelector("[data-sketch-canvas]");
+  });
+
+  test("選んでいる消しゴムをもう一度押すと、種類を選べる", async ({ page }) => {
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await expect(page.locator("[data-sketch-eraser-panel]")).toHaveCount(0);
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await expect(page.locator("[data-sketch-eraser-panel]")).toBeVisible();
+    await expect(page.locator('[data-sketch-erase-mode="stroke"]')).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("線まるごと：1本すべてが消える", async ({ page }) => {
+    const r = await drawLine(page, 140);
+    expect(await strokes(page)).toHaveLength(1);
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await rub(page, r, r.width * 0.5, 140);
+    await expect.poll(async () => (await strokes(page)).length).toBe(0);
+  });
+
+  test("触れたところ：なぞったところだけ消え、両側が残る", async ({ page }) => {
+    const r = await drawLine(page, 140);
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-erase-mode="area"]').click();
+    await rub(page, r, r.width * 0.5, 140);
+    await expect.poll(async () => (await strokes(page)).length).toBe(2);
+    const [left, right] = await strokes(page);
+    expect(Math.max(...left.points.map((p) => p[0]))).toBeLessThan(Math.min(...right.points.map((p) => p[0])));
+  });
+
+  test("選んだ種類は、開き直しても残る", async ({ page }) => {
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-erase-mode="area"]').click();
+    await page.reload();
+    await page.waitForSelector("[data-sketch-canvas]");
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await expect(page.locator('[data-sketch-erase-mode="area"]')).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("触れたところで消したぶんも、取り消しで戻る", async ({ page }) => {
+    const r = await drawLine(page, 140);
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-erase-mode="area"]').click();
+    await rub(page, r, r.width * 0.5, 140);
+    await expect.poll(async () => (await strokes(page)).length).toBe(2);
+    await page.locator("[data-sketch-undo]").click();
+    await expect.poll(async () => (await strokes(page)).length).toBe(1);
+  });
+});

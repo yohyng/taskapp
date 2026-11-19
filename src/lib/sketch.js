@@ -124,3 +124,34 @@ export function eraseAt(strokes, x, y, radius = 8) {
   const left = strokes.filter((stroke) => !strokeTouches(stroke, x, y, radius));
   return left.length === strokes.length ? strokes : left;
 }
+
+// 触れたところだけを消す（部分消し）。
+// 線は点のつらなりなので、消しゴムに入った点を落とし、
+// 残った続きぶんを別々の線として組み直す。
+export function eraseArea(strokes, x, y, radius = 8) {
+  const out = [];
+  let changed = false;
+  for (const stroke of strokes) {
+    if (!strokeTouches(stroke, x, y, radius)) { out.push(stroke); continue; }
+    changed = true;
+    const w = stroke.paperWidth || SKETCH_WIDTH;
+    const h = stroke.height || SKETCH_HEIGHT;
+    const near = radius + (stroke.width || 1) / 2;
+    const keep = stroke.points.map((p) => Math.hypot(p[0] * w - x, p[1] * h - y) > near);
+    let run = [];
+    const flush = () => {
+      // 1点だけ残っても線にならないので捨てる
+      if (run.length >= 2) {
+        out.push({
+          ...stroke,
+          points: run.map((i) => stroke.points[i]),
+          ...(stroke.times ? { times: run.map((i) => stroke.times[i] - stroke.times[run[0]]) } : {}),
+        });
+      }
+      run = [];
+    };
+    keep.forEach((alive, i) => { if (alive) run.push(i); else flush(); });
+    flush();
+  }
+  return changed ? out : strokes;
+}
