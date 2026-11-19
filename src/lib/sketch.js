@@ -83,3 +83,36 @@ export function fitSketchToPaper(strokes, paper) {
     points: stroke.points.map(point => [(point[0] * (stroke.paperWidth || SKETCH_WIDTH) + (paper.shiftX || 0)) / paper.width,
       (point[1] * (stroke.height || SKETCH_HEIGHT) + (paper.shiftY || 0)) / paper.height, ...point.slice(2)]) }));
 }
+
+// --- 消しゴム ---
+
+// 点と線分の近さ。消しゴムが線に触れたかを見るのに使う。
+function distanceToSegment(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len = dx * dx + dy * dy;
+  const t = len ? Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / len)) : 0;
+  return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
+}
+
+// その線に、消しゴムが触れているか（座標は紙の実寸）
+export function strokeTouches(stroke, x, y, radius) {
+  const w = stroke.paperWidth || SKETCH_WIDTH;
+  const h = stroke.height || SKETCH_HEIGHT;
+  const near = radius + (stroke.width || 1) / 2;
+  const at = (i) => [stroke.points[i][0] * w, stroke.points[i][1] * h];
+  if (stroke.points.length === 1) {
+    const [ax, ay] = at(0);
+    return Math.hypot(x - ax, y - ay) <= near;
+  }
+  for (let i = 1; i < stroke.points.length; i++) {
+    const [ax, ay] = at(i - 1), [bx, by] = at(i);
+    if (distanceToSegment(x, y, ax, ay, bx, by) <= near) return true;
+  }
+  return false;
+}
+
+// 触れた線を消す。消す線が無ければ、同じ配列をそのまま返す（描き直さないため）。
+export function eraseAt(strokes, x, y, radius = 8) {
+  const left = strokes.filter((stroke) => !strokeTouches(stroke, x, y, radius));
+  return left.length === strokes.length ? strokes : left;
+}

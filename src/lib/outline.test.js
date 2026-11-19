@@ -1222,3 +1222,46 @@ describe('届いたぶんの反映のしかた', () => {
     expect(inboxPlan({ count: 5000 }).mode).toBe('reload')
   })
 })
+
+import { strokeTouches, eraseAt } from './sketch.js'
+
+describe('消しゴム', () => {
+  // 紙 600x360 の上を、横にまっすぐ引いた線
+  const line = { color: '#202020', width: 4, paperWidth: 600, height: 360, points: [[0.1, 0.5], [0.9, 0.5]] };
+  const dot = { color: '#202020', width: 4, paperWidth: 600, height: 360, points: [[0.5, 0.2]] };
+
+  it('線の上なら触れている', () => {
+    expect(strokeTouches(line, 300, 180, 8)).toBe(true)
+  })
+
+  it('離れていれば触れていない', () => {
+    expect(strokeTouches(line, 300, 240, 8)).toBe(false)
+  })
+
+  it('線の太さと消しゴムの大きさを足して見る', () => {
+    expect(strokeTouches(line, 300, 189, 8)).toBe(true)    // 8 + 2 = 10 まで
+    expect(strokeTouches(line, 300, 192, 8)).toBe(false)
+  })
+
+  it('点だけの線にも触れられる', () => {
+    expect(strokeTouches(dot, 300, 72, 8)).toBe(true)
+    expect(strokeTouches(dot, 340, 72, 8)).toBe(false)
+  })
+
+  it('触れた線だけを消す', () => {
+    const got = eraseAt([line, dot], 300, 180, 8)
+    expect(got).toHaveLength(1)
+    expect(got[0]).toBe(dot)
+  })
+
+  it('何も触れていなければ、同じ配列をそのまま返す', () => {
+    const list = [line, dot]
+    expect(eraseAt(list, 10, 10, 8)).toBe(list)
+  })
+
+  it('紙の高さが違う線も、その線の寸法で見る', () => {
+    const tall = { ...line, height: 900, points: [[0.1, 0.5], [0.9, 0.5]] }
+    expect(strokeTouches(tall, 300, 450, 8)).toBe(true)
+    expect(strokeTouches(tall, 300, 180, 8)).toBe(false)
+  })
+})

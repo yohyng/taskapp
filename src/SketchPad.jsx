@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { paintSketch, appendSketch, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
+import { paintSketch, appendSketch, eraseAt, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
 
 import { createPortal } from "react-dom";
-import { Hand, Settings2, Undo2, Trash2 } from "lucide-react";
+import { Hand, Settings2, Undo2, Trash2, Eraser } from "lucide-react";
 import { createLiveSketch } from "./lib/live-sketch";
 
 // よく使う4色は出したまま。残りは押して開く見本から選ぶ（Goodnotes の鉛筆まわりに近い形）。
@@ -19,6 +19,8 @@ const COLOR_KEY = "taskspace-sketch-colors";
 const HEIGHT_KEY = "taskspace-sketch-ratio";
 // 紙は下へ伸びる。端末が持てる大きさには限りがあるので、そこで頭打ちにする。
 const PAPER_MAX = 4000;
+// 消しゴムの大きさ（紙の実寸）。触れた線を消す。
+const ERASER_RADIUS = 10;
 // 画素の持ち分。これを超えるぶんは、細かさを落として収める。
 const PIXEL_BUDGET = 12_000_000;
 function savedRatio() {
@@ -95,7 +97,14 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     });
   };
   const [width, setWidth] = useState(10);
-  const [cleared, setCleared] = useState(null);
+  // 取り消しは、直前の姿を覚えておいて戻す。
+  // 「最後の線を外す」だけだと、消しゴムや全消去が戻せない。
+  const [past, setPast] = useState([]);
+  const remember = (before) => setPast((list) => [...list, before].slice(-40));
+  const [eraser, setEraser] = useState(false);
+  // 消しゴムは続けてなぞるので、いまの線を覚えておく（毎回の再描画を待たない）
+  const strokesRef = useRef(strokes);
+  useEffect(() => { strokesRef.current = strokes; }, [strokes]);
   const [penOnly, setPenOnly] = useState(() => preference("taskspace-sketch-pen-only"));
   const [pressure, setPressure] = useState(() => preference("taskspace-sketch-pressure"));
   useLayoutEffect(() => {
@@ -121,6 +130,21 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     setPaper(next);
     try { localStorage.setItem("taskspace-sketch-paper-v1", JSON.stringify(next)); } catch { /* この画面では広げられる */ }
   }, [standalone, disabled, paper.width, paper.height]);
+  // 消しゴム。触れた線を消し、消したぶんは取り消しで戻せる。
+  const eraseRef = useRef(null);
+  const eraseAtEvent = useCallback((event) => {
+    const rub = eraseRef.current;
+    if (!rub) return;
+    const rect = rub.rect;
+    const x = ((event.clientX - rect.left) / rect.width) * paper.width;
+    const y = ((event.clientY - rect.top) / rect.height) * paper.height;
+    const left = eraseAt(strokesRef.current, x, y, ERASER_RADIUS);
+    if (left === strokesRef.current) return;
+    if (!rub.touched) { rub.touched = true; remember(strokesRef.current); }
+    strokesRef.current = left;
+    onChange(left);
+  }, [paper.width, paper.height, onChange]);
+
   const addPoints = useCallback((event, final = false) => {
     const drawing = drawingRef.current;
     const stroke = drawing.stroke, from = stroke.points.length;
@@ -163,6 +187,11 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
         pan.viewport.scrollTop = pan.top + pan.y - event.clientY;
         return;
       }
+      if (eraseRef.current?.id === event.pointerId) {
+        event.preventDefault(); event.stopPropagation();
+        eraseAtEvent(event);
+        return;
+      }
       if (!drawingRef.current || drawingRef.current.pointerId !== event.pointerId) return;
       event.preventDefault(); event.stopPropagation(); addPoints(event);
     };
@@ -174,8 +203,13 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
       canvas.removeEventListener("pointermove", move);
       for (const type of ["selectstart", "contextmenu", "touchstart", "touchmove"]) canvas.removeEventListener(type, block);
     };
-  }, [addPoints, extendDown]);
+  }, [addPoints, extendDown, eraseAtEvent]);
   function finish(event) {
+    if (eraseRef.current?.id === event.pointerId) {
+      eraseRef.current = null;
+      if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+      return;
+    }
     if (panRef.current?.id === event.pointerId) {
       panRef.current = null;
       if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
@@ -186,10 +220,10 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     if (event.type === "pointerup") addPoints(event, true);
     drawingRef.current = null;
     if (drawing.stroke.brush) liveRef.current.finish();
+    remember(strokes);
     const next = [...strokes, drawing.stroke];
     committedRef.current = { strokes: next, width: canvasRef.current.width, height: canvasRef.current.height };
     onChange(next);
-    setCleared(null);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
   const tools = (
@@ -242,9 +276,30 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
       </div>
       <select hidden={standalone && !settingsOpen} data-sketch-brush aria-label="ペンの種類" value={brush} disabled={disabled} onChange={(event) => setBrush(event.target.value)} className="h-9 rounded border border-white/15 ts-surface px-2 text-xs"><option value="speed-extreme-v1">速度ペン・強弱最大</option><option value="legacy">従来のペン</option></select>
       <label hidden={standalone && !settingsOpen} className="flex items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
+      <button
+        type="button"
+        data-sketch-eraser
+        aria-label="消しゴム"
+        title="消しゴム：触れた線を消します"
+        aria-pressed={eraser}
+        disabled={disabled}
+        onClick={() => { setEraser((value) => !value); setPanMode(false); }}
+        className="flex h-9 w-9 items-center justify-center rounded border border-white/15 text-neutral-300 aria-pressed:bg-accent-400/20 aria-pressed:text-accent-200"
+      >
+        <Eraser aria-hidden="true" className="h-4 w-4" />
+      </button>
       <button type="button" data-sketch-pan aria-label="紙を移動" title="紙を移動：オンの間は指やマウスで紙をドラッグできます" aria-pressed={panMode} disabled={disabled} onClick={() => setPanMode(value => !value)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:bg-accent-400/20 aria-pressed:text-accent-200"><Hand aria-hidden="true" className="h-4 w-4" /></button>
-      <button type="button" data-sketch-undo disabled={disabled || (!strokes.length && !cleared)} onClick={() => { onChange(strokes.length ? strokes.slice(0, -1) : cleared); setCleared(null); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-300 disabled:opacity-30" aria-label="戻す" title="戻す">{standalone ? <Undo2 aria-hidden="true" className="h-4 w-4" /> : "戻す"}</button>
-      <button type="button" data-sketch-clear disabled={disabled || !strokes.length} onClick={() => { setCleared(strokes); onChange([]); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-400 disabled:opacity-30" aria-label="全消去" title="全消去">{standalone ? <Trash2 aria-hidden="true" className="h-4 w-4" /> : "全消去"}</button>
+      <button type="button" data-sketch-undo disabled={disabled || (!past.length && !strokes.length)} onClick={() => {
+        // 覚えがあればその姿へ戻す。開き直したあとなど覚えが無いときは、
+        // これまで通り最後の線を外す。
+        if (!past.length) { onChange(strokes.slice(0, -1)); return; }
+        setPast((list) => {
+          if (!list.length) return list;
+          onChange(list[list.length - 1]);
+          return list.slice(0, -1);
+        });
+      }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-300 disabled:opacity-30" aria-label="戻す" title="戻す">{standalone ? <Undo2 aria-hidden="true" className="h-4 w-4" /> : "戻す"}</button>
+      <button type="button" data-sketch-clear disabled={disabled || !strokes.length} onClick={() => { remember(strokes); onChange([]); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-400 disabled:opacity-30" aria-label="全消去" title="全消去">{standalone ? <Trash2 aria-hidden="true" className="h-4 w-4" /> : "全消去"}</button>
     {standalone && <button type="button" data-sketch-settings aria-label="ペンの設定" aria-expanded={settingsOpen} disabled={disabled} onClick={() => setSettingsOpen(value => !value)} className="flex h-10 w-10 items-center justify-center rounded border border-white/15 text-neutral-400 hover:bg-white/10"><Settings2 aria-hidden="true" className="h-4 w-4" /></button>}
     </div>
   );
@@ -258,7 +313,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     <div ref={scaleReferenceRef} aria-hidden="true" className="h-0 overflow-hidden border-x border-transparent" style={{ width: standalone ? "100%" : "min(100%, calc(28rem - 2rem - 2px))" }} />
     <div ref={viewportRef} data-sketch-viewport className={standalone ? "min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain rounded-lg border border-white/15" : "max-h-[60dvh] overflow-auto overscroll-contain rounded-lg border border-white/15"}>
     <div className="relative p-4" style={{ width: standalone || paperScale === null ? "100%" : `${paper.width * paperScale + 32}px`, contain: "layout paint" }}>
-    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={pixelWidth} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : undefined, aspectRatio: `${pixelWidth} / ${pixelHeight}` }}
+    <canvas ref={canvasRef} data-sketch-canvas aria-label="指やペンで描く手書き欄" width={pixelWidth} height={pixelHeight} className="block w-full rounded-lg border border-white/20" style={{ touchAction: "none", userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none", cursor: panMode ? "grab" : eraser ? "cell" : undefined, aspectRatio: `${pixelWidth} / ${pixelHeight}` }}
       onPointerDown={(event) => {
         event.stopPropagation();
         if (!disabled && !drawingRef.current && !panRef.current && panMode && event.pointerType !== "pen" && event.isPrimary && event.button === 0) {
@@ -275,6 +330,11 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
         if (disabled || drawingRef.current || panRef.current || !event.isPrimary || event.button !== 0 || (penOnly && event.pointerType !== "pen")) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
+        if (eraser) {
+          eraseRef.current = { id: event.pointerId, rect: event.currentTarget.getBoundingClientRect(), touched: false };
+          eraseAtEvent(event);
+          return;
+        }
         const pen = event.pointerType === "pen";
         if (pen && !penOnly) {
           setPenOnly(true);

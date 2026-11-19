@@ -223,3 +223,74 @@ test("スクロールでは紙を伸ばさない（伸びるのは書いたと�
   await page.waitForTimeout(400);
   expect(await height()).toBe(before);
 });
+
+test.describe("消しゴム", () => {
+  const draw = async (page, y) => {
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(r.x + r.width * 0.2, r.y + y);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width * 0.8, r.y + y, { steps: 10 });
+    await page.mouse.up();
+    return r;
+  };
+  const saved = (page) => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1") || "[]").length);
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/sketch.html");
+    await page.waitForSelector("[data-sketch-canvas]");
+  });
+
+  test("触れた線だけを消す", async ({ page }) => {
+    const r = await draw(page, 120);
+    await draw(page, 260);
+    await expect.poll(() => saved(page)).toBe(2);
+
+    await page.locator("[data-sketch-eraser]").click();
+    await expect(page.locator("[data-sketch-eraser]")).toHaveAttribute("aria-pressed", "true");
+    // 上の線だけをなぞる
+    await page.mouse.move(r.x + r.width * 0.5, r.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width * 0.55, r.y + 120, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => saved(page)).toBe(1);
+  });
+
+  test("消しゴムのあいだは、線を引かない", async ({ page }) => {
+    await page.locator("[data-sketch-eraser]").click();
+    await draw(page, 150);
+    await page.waitForTimeout(300);
+    expect(await saved(page)).toBe(0);
+  });
+
+  test("消したぶんは、取り消しで戻る", async ({ page }) => {
+    const r = await draw(page, 120);
+    await expect.poll(() => saved(page)).toBe(1);
+    await page.locator("[data-sketch-eraser]").click();
+    await page.mouse.move(r.x + r.width * 0.5, r.y + 120);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width * 0.55, r.y + 120, { steps: 4 });
+    await page.mouse.up();
+    await expect.poll(() => saved(page)).toBe(0);
+
+    await page.locator("[data-sketch-undo]").click();
+    await expect.poll(() => saved(page)).toBe(1);
+  });
+
+  test("全消去も、取り消しで戻る", async ({ page }) => {
+    await draw(page, 120);
+    await draw(page, 200);
+    await expect.poll(() => saved(page)).toBe(2);
+    await page.locator("[data-sketch-clear]").click();
+    await expect.poll(() => saved(page)).toBe(0);
+    await page.locator("[data-sketch-undo]").click();
+    await expect.poll(() => saved(page)).toBe(2);
+  });
+
+  test("ペンに戻せば、また書ける", async ({ page }) => {
+    await page.locator("[data-sketch-eraser]").click();
+    await page.locator("[data-sketch-eraser]").click();
+    await expect(page.locator("[data-sketch-eraser]")).toHaveAttribute("aria-pressed", "false");
+    await draw(page, 150);
+    await expect.poll(() => saved(page)).toBe(1);
+  });
+});
