@@ -245,8 +245,8 @@ test.describe("消しゴム", () => {
     await draw(page, 260);
     await expect.poll(() => saved(page)).toBe(2);
 
-    await page.locator("[data-sketch-eraser]").click();
-    await expect(page.locator("[data-sketch-eraser]")).toHaveAttribute("aria-pressed", "true");
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await expect(page.locator('[data-sketch-tool="eraser"]')).toHaveAttribute("aria-pressed", "true");
     // 上の線だけをなぞる
     await page.mouse.move(r.x + r.width * 0.5, r.y + 120);
     await page.mouse.down();
@@ -256,7 +256,7 @@ test.describe("消しゴム", () => {
   });
 
   test("消しゴムのあいだは、線を引かない", async ({ page }) => {
-    await page.locator("[data-sketch-eraser]").click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
     await draw(page, 150);
     await page.waitForTimeout(300);
     expect(await saved(page)).toBe(0);
@@ -265,7 +265,7 @@ test.describe("消しゴム", () => {
   test("消したぶんは、取り消しで戻る", async ({ page }) => {
     const r = await draw(page, 120);
     await expect.poll(() => saved(page)).toBe(1);
-    await page.locator("[data-sketch-eraser]").click();
+    await page.locator('[data-sketch-tool="eraser"]').click();
     await page.mouse.move(r.x + r.width * 0.5, r.y + 120);
     await page.mouse.down();
     await page.mouse.move(r.x + r.width * 0.55, r.y + 120, { steps: 4 });
@@ -287,10 +287,63 @@ test.describe("消しゴム", () => {
   });
 
   test("ペンに戻せば、また書ける", async ({ page }) => {
-    await page.locator("[data-sketch-eraser]").click();
-    await page.locator("[data-sketch-eraser]").click();
-    await expect(page.locator("[data-sketch-eraser]")).toHaveAttribute("aria-pressed", "false");
+    await page.locator('[data-sketch-tool="eraser"]').click();
+    await page.locator('[data-sketch-tool="pen"]').click();
+    await expect(page.locator('[data-sketch-tool="eraser"]')).toHaveAttribute("aria-pressed", "false");
     await draw(page, 150);
     await expect.poll(() => saved(page)).toBe(1);
+  });
+});
+
+test.describe("道具の並び（Samsung Notes のような形）", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/sketch.html");
+    await page.waitForSelector("[data-sketch-canvas]");
+  });
+
+  test("ペン・蛍光ペン・消しゴム・紙を動かす、が並ぶ", async ({ page }) => {
+    for (const key of ["pen", "marker", "eraser", "pan"]) {
+      await expect(page.locator(`[data-sketch-tool="${key}"]`)).toBeVisible();
+    }
+    // はじめはペンが選ばれている
+    await expect(page.locator('[data-sketch-tool="pen"]')).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("選んだ道具だけが、押された形になる", async ({ page }) => {
+    await page.locator('[data-sketch-tool="marker"]').click();
+    await expect(page.locator('[data-sketch-tool="marker"]')).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator('[data-sketch-tool="pen"]')).toHaveAttribute("aria-pressed", "false");
+    await expect(page.locator('[data-sketch-tool="eraser"]')).toHaveAttribute("aria-pressed", "false");
+  });
+
+  test("蛍光ペンは、太く薄く引く", async ({ page }) => {
+    await page.locator('[data-sketch-tool="marker"]').click();
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    await page.mouse.move(r.x + r.width * 0.2, r.y + 160);
+    await page.mouse.down();
+    await page.mouse.move(r.x + r.width * 0.8, r.y + 160, { steps: 10 });
+    await page.mouse.up();
+    const stroke = await page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1"))[0]);
+    expect(stroke.marker).toBe(true);
+    expect(stroke.width).toBeGreaterThan(6);
+  });
+
+  test("戻すとやり直すが、ひと組で使える", async ({ page }) => {
+    const r = await page.locator("[data-sketch-canvas]").boundingBox();
+    const line = async (y) => {
+      await page.mouse.move(r.x + 60, r.y + y);
+      await page.mouse.down();
+      await page.mouse.move(r.x + 260, r.y + y, { steps: 8 });
+      await page.mouse.up();
+    };
+    await line(120); await line(200);
+    const count = () => page.evaluate(() => JSON.parse(localStorage.getItem("taskspace-quick-sketch-v1") || "[]").length);
+    await expect.poll(count).toBe(2);
+    await expect(page.locator("[data-sketch-redo]")).toBeDisabled();
+    await page.locator("[data-sketch-undo]").click();
+    await expect.poll(count).toBe(1);
+    await expect(page.locator("[data-sketch-redo]")).toBeEnabled();
+    await page.locator("[data-sketch-redo]").click();
+    await expect.poll(count).toBe(2);
   });
 });

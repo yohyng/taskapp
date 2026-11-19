@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { paintSketch, appendSketch, eraseAt, SKETCH_WIDTH, SKETCH_HEIGHT, fitSketchToPaper } from "./lib/sketch";
 
 import { createPortal } from "react-dom";
-import { Hand, Settings2, Undo2, Trash2, Eraser } from "lucide-react";
+import { Hand, Settings2, Undo2, Redo2, Trash2, Eraser, Pen, Highlighter, Plus } from "lucide-react";
 import { createLiveSketch } from "./lib/live-sketch";
 
 // よく使う4色は出したまま。残りは押して開く見本から選ぶ（Goodnotes の鉛筆まわりに近い形）。
@@ -100,8 +100,13 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
   // 取り消しは、直前の姿を覚えておいて戻す。
   // 「最後の線を外す」だけだと、消しゴムや全消去が戻せない。
   const [past, setPast] = useState([]);
-  const remember = (before) => setPast((list) => [...list, before].slice(-40));
+  const remember = (before) => {
+    setPast((list) => [...list, before].slice(-40));
+    setFuture([]);   // 新しい一手を入れたら、やり直しの控えは捨てる
+  };
   const [eraser, setEraser] = useState(false);
+  const [marker, setMarker] = useState(false);   // 蛍光ペン：太く、薄く
+  const [future, setFuture] = useState([]);      // 戻したぶん（やり直し用）
   // 消しゴムは続けてなぞるので、いまの線を覚えておく（毎回の再描画を待たない）
   const strokesRef = useRef(strokes);
   useEffect(() => { strokesRef.current = strokes; }, [strokes]);
@@ -226,81 +231,170 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
     onChange(next);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   }
+  // 道具の並びは Samsung Notes の下段を手本にする。
+  //   ［ペン｜蛍光ペン｜消しゴム｜紙を動かす］｜色｜太さ｜戻す・進む
+  // 選んでいる道具は、丸く塗ってはっきり見せる。
+  const tool = panMode ? "pan" : eraser ? "eraser" : marker ? "marker" : "pen";
+  const toolButton = (key, label, hint, icon, onPick) => (
+    <button
+      key={key}
+      type="button"
+      data-sketch-tool={key}
+      aria-label={label}
+      title={hint}
+      aria-pressed={tool === key}
+      disabled={disabled}
+      onClick={onPick}
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-300 transition hover:bg-white/10 aria-pressed:bg-white/15 aria-pressed:text-white"
+    >
+      {icon}
+    </button>
+  );
+  const bar = "flex shrink-0 items-center gap-1";
+  const divider = <span aria-hidden="true" className="mx-1 h-6 w-px shrink-0 bg-white/15" />;
+
   const tools = (
-    <div data-sketch-tools className={standalone ? "flex w-max shrink-0 flex-nowrap items-center gap-1.5" : "mb-2 flex shrink-0 flex-wrap items-center gap-1.5"}>
-      {COLORS.map((item) => <button key={item.color} type="button" aria-label={`ペンの色：${item.name}`} aria-pressed={color === item.color} disabled={disabled} onClick={() => pickColor(item.color)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:ring-1 aria-pressed:ring-white/70"><span className="h-4 w-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: item.color }} /></button>)}
-      <div className="relative shrink-0">
+    <div data-sketch-tools className={standalone ? "flex w-max shrink-0 flex-nowrap items-center gap-1" : "mb-2 flex shrink-0 flex-wrap items-center gap-1"}>
+      <div className={bar}>
+        {toolButton("pen", "ペン", "ペン", <Pen aria-hidden="true" className="h-4 w-4" />, () => { setEraser(false); setPanMode(false); setMarker(false); })}
+        {toolButton("marker", "蛍光ペン", "蛍光ペン：太く、薄く引く", <Highlighter aria-hidden="true" className="h-4 w-4" />, () => { setEraser(false); setPanMode(false); setMarker(true); })}
+        {toolButton("eraser", "消しゴム", "消しゴム：触れた線を消します", <Eraser aria-hidden="true" className="h-4 w-4" />, () => { setEraser(true); setPanMode(false); setMarker(false); })}
+        {toolButton("pan", "紙を移動", "紙を移動：指やマウスで紙をドラッグできます", <Hand aria-hidden="true" className="h-4 w-4" />, () => { setPanMode(true); setEraser(false); setMarker(false); })}
+      </div>
+      {divider}
+      <div className={bar}>
+        {COLORS.map((item) => (
+          <button
+            key={item.color}
+            type="button"
+            aria-label={`ペンの色：${item.name}`}
+            aria-pressed={color === item.color}
+            disabled={disabled}
+            onClick={() => pickColor(item.color)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition hover:bg-white/10 aria-pressed:bg-white/15"
+          >
+            <span className="h-5 w-5 rounded-full ring-1 ring-white/60" style={{ backgroundColor: item.color }} />
+          </button>
+        ))}
+        <div className="relative shrink-0">
+          <button
+            type="button"
+            data-sketch-palette
+            aria-label="ペンの色を選ぶ"
+            aria-expanded={paletteOpen}
+            disabled={disabled}
+            onClick={() => setPaletteOpen((value) => !value)}
+            className="flex h-10 w-10 items-center justify-center rounded-full transition hover:bg-white/10 aria-expanded:bg-white/15"
+          >
+            <span className="flex h-5 w-5 items-center justify-center rounded-full ring-1 ring-white/60" style={{ backgroundColor: color }}>
+              <Plus aria-hidden="true" className="h-3 w-3 text-white/70 mix-blend-difference" />
+            </span>
+          </button>
+          {paletteOpen && (
+            <div data-sketch-palette-panel className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
+              {recent.length > 0 && <>
+                <div className="mb-1 text-[10px] text-neutral-500">最近つかった色</div>
+                <div className="mb-2 flex flex-wrap gap-1">
+                  {recent.map((value) => <button key={`recent-${value}`} type="button" data-sketch-recent={value} aria-label={`最近の色 ${value}`} onClick={() => pickColor(value)} className="h-7 w-7 rounded-full ring-1 ring-white/50" style={{ backgroundColor: value }} />)}
+                </div>
+              </>}
+              <div className="mb-1 text-[10px] text-neutral-500">色</div>
+              <div className="mb-2 grid grid-cols-8 gap-1">
+                {PALETTE.map((value) => <button key={value} type="button" data-sketch-swatch={value} aria-label={`色 ${value}`} aria-pressed={color === value} onClick={() => pickColor(value)} className="h-6 w-6 rounded-full ring-1 ring-white/50 aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: value }} />)}
+              </div>
+              <label className="flex items-center gap-2 text-[10px] text-neutral-400">
+                そのほかの色
+                <input data-sketch-color-input type="color" value={color} onChange={(event) => pickColor(event.target.value)} className="h-7 w-10 rounded border border-white/15 bg-transparent" />
+              </label>
+            </div>
+          )}
+        </div>
+      </div>
+      {divider}
+      <div data-sketch-widths className={bar}>
+        {WIDTHS.map((item) => (
+          <button
+            key={item.value}
+            type="button"
+            data-sketch-width-preset={item.value}
+            aria-label={`太さ：${item.label}`}
+            aria-pressed={width === item.value}
+            disabled={disabled}
+            onClick={() => setWidth(item.value)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-300 transition hover:bg-white/10 aria-pressed:bg-white/15 aria-pressed:text-white"
+          >
+            <span className="rounded-full bg-current" style={{ width: `${4 + item.value * 0.9}px`, height: `${4 + item.value * 0.9}px` }} />
+          </button>
+        ))}
+      </div>
+      {divider}
+      <div className={bar}>
         <button
           type="button"
-          data-sketch-palette
-          aria-label="ペンの色を選ぶ"
-          aria-expanded={paletteOpen}
-          disabled={disabled}
-          onClick={() => setPaletteOpen((value) => !value)}
-          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-expanded:bg-white/10"
+          data-sketch-undo
+          disabled={disabled || (!past.length && !strokes.length)}
+          onClick={() => {
+            // 覚えがあればその姿へ戻す。開き直したあとなど覚えが無いときは、
+            // これまで通り最後の線を外す。
+            setFuture((list) => [...list, strokes].slice(-40));
+            if (!past.length) { onChange(strokes.slice(0, -1)); return; }
+            setPast((list) => {
+              if (!list.length) return list;
+              onChange(list[list.length - 1]);
+              return list.slice(0, -1);
+            });
+          }}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-300 transition hover:bg-white/10 disabled:opacity-25"
+          aria-label="戻す"
+          title="戻す"
         >
-          <span className="h-4 w-4 rounded-full ring-1 ring-white/60" style={{ backgroundColor: color }} />
+          <Undo2 aria-hidden="true" className="h-4 w-4" />
         </button>
-        {paletteOpen && (
-          <div data-sketch-palette-panel className="absolute left-0 top-full z-50 mt-1 w-56 rounded-lg border border-white/15 ts-surface p-2 shadow-2xl">
-            {recent.length > 0 && <>
-              <div className="mb-1 text-[10px] text-neutral-500">最近つかった色</div>
-              <div className="mb-2 flex flex-wrap gap-1">
-                {recent.map((value) => <button key={`recent-${value}`} type="button" data-sketch-recent={value} aria-label={`最近の色 ${value}`} onClick={() => pickColor(value)} className="h-7 w-7 rounded-full ring-1 ring-white/50" style={{ backgroundColor: value }} />)}
-              </div>
-            </>}
-            <div className="mb-1 text-[10px] text-neutral-500">色</div>
-            <div className="mb-2 grid grid-cols-8 gap-1">
-              {PALETTE.map((value) => <button key={value} type="button" data-sketch-swatch={value} aria-label={`色 ${value}`} aria-pressed={color === value} onClick={() => pickColor(value)} className="h-6 w-6 rounded-full ring-1 ring-white/50 aria-pressed:ring-2 aria-pressed:ring-white" style={{ backgroundColor: value }} />)}
-            </div>
-            <label className="flex items-center gap-2 text-[10px] text-neutral-400">
-              そのほかの色
-              <input data-sketch-color-input type="color" value={color} onChange={(event) => pickColor(event.target.value)} className="h-7 w-10 rounded border border-white/15 bg-transparent" />
-            </label>
-          </div>
+        <button
+          type="button"
+          data-sketch-redo
+          disabled={disabled || !future.length}
+          onClick={() => {
+            setFuture((list) => {
+              if (!list.length) return list;
+              setPast((before) => [...before, strokes].slice(-40));
+              onChange(list[list.length - 1]);
+              return list.slice(0, -1);
+            });
+          }}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-300 transition hover:bg-white/10 disabled:opacity-25"
+          aria-label="やり直す"
+          title="やり直す"
+        >
+          <Redo2 aria-hidden="true" className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          data-sketch-clear
+          disabled={disabled || !strokes.length}
+          onClick={() => { remember(strokes); onChange([]); }}
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-white/10 disabled:opacity-25"
+          aria-label="全消去"
+          title="全消去"
+        >
+          <Trash2 aria-hidden="true" className="h-4 w-4" />
+        </button>
+        {standalone && (
+          <button
+            type="button"
+            data-sketch-settings
+            aria-label="ペンの設定"
+            aria-expanded={settingsOpen}
+            disabled={disabled}
+            onClick={() => setSettingsOpen((value) => !value)}
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-neutral-400 transition hover:bg-white/10 aria-expanded:bg-white/15"
+          >
+            <Settings2 aria-hidden="true" className="h-4 w-4" />
+          </button>
         )}
       </div>
-      <div data-sketch-widths className="flex shrink-0 items-center gap-1">
-        {WIDTHS.map((item) => <button
-          key={item.value}
-          type="button"
-          data-sketch-width-preset={item.value}
-          aria-label={`太さ：${item.label}`}
-          aria-pressed={width === item.value}
-          disabled={disabled}
-          onClick={() => setWidth(item.value)}
-          className="flex h-9 w-9 items-center justify-center rounded border border-white/15 text-neutral-300 aria-pressed:bg-white/10 aria-pressed:text-white aria-pressed:ring-1 aria-pressed:ring-white/60"
-        >
-          <span className="rounded-full bg-current" style={{ width: `${4 + item.value * 0.8}px`, height: `${4 + item.value * 0.8}px` }} />
-        </button>)}
-      </div>
-      <select hidden={standalone && !settingsOpen} data-sketch-brush aria-label="ペンの種類" value={brush} disabled={disabled} onChange={(event) => setBrush(event.target.value)} className="h-9 rounded border border-white/15 ts-surface px-2 text-xs"><option value="speed-extreme-v1">速度ペン・強弱最大</option><option value="legacy">従来のペン</option></select>
-      <label hidden={standalone && !settingsOpen} className="flex items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
-      <button
-        type="button"
-        data-sketch-eraser
-        aria-label="消しゴム"
-        title="消しゴム：触れた線を消します"
-        aria-pressed={eraser}
-        disabled={disabled}
-        onClick={() => { setEraser((value) => !value); setPanMode(false); }}
-        className="flex h-9 w-9 items-center justify-center rounded border border-white/15 text-neutral-300 aria-pressed:bg-accent-400/20 aria-pressed:text-accent-200"
-      >
-        <Eraser aria-hidden="true" className="h-4 w-4" />
-      </button>
-      <button type="button" data-sketch-pan aria-label="紙を移動" title="紙を移動：オンの間は指やマウスで紙をドラッグできます" aria-pressed={panMode} disabled={disabled} onClick={() => setPanMode(value => !value)} className="flex h-9 w-9 items-center justify-center rounded border border-white/15 aria-pressed:bg-accent-400/20 aria-pressed:text-accent-200"><Hand aria-hidden="true" className="h-4 w-4" /></button>
-      <button type="button" data-sketch-undo disabled={disabled || (!past.length && !strokes.length)} onClick={() => {
-        // 覚えがあればその姿へ戻す。開き直したあとなど覚えが無いときは、
-        // これまで通り最後の線を外す。
-        if (!past.length) { onChange(strokes.slice(0, -1)); return; }
-        setPast((list) => {
-          if (!list.length) return list;
-          onChange(list[list.length - 1]);
-          return list.slice(0, -1);
-        });
-      }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-300 disabled:opacity-30" aria-label="戻す" title="戻す">{standalone ? <Undo2 aria-hidden="true" className="h-4 w-4" /> : "戻す"}</button>
-      <button type="button" data-sketch-clear disabled={disabled || !strokes.length} onClick={() => { remember(strokes); onChange([]); }} className="rounded border border-white/15 px-2 py-2 text-xs text-neutral-400 disabled:opacity-30" aria-label="全消去" title="全消去">{standalone ? <Trash2 aria-hidden="true" className="h-4 w-4" /> : "全消去"}</button>
-    {standalone && <button type="button" data-sketch-settings aria-label="ペンの設定" aria-expanded={settingsOpen} disabled={disabled} onClick={() => setSettingsOpen(value => !value)} className="flex h-10 w-10 items-center justify-center rounded border border-white/15 text-neutral-400 hover:bg-white/10"><Settings2 aria-hidden="true" className="h-4 w-4" /></button>}
+      <select hidden={standalone && !settingsOpen} data-sketch-brush aria-label="ペンの種類" value={brush} disabled={disabled} onChange={(event) => setBrush(event.target.value)} className="h-9 shrink-0 rounded border border-white/15 ts-surface px-2 text-xs"><option value="speed-extreme-v1">速度ペン・強弱最大</option><option value="legacy">従来のペン</option></select>
+      <label hidden={standalone && !settingsOpen} className="flex shrink-0 items-center gap-2 text-xs">太さ <input data-sketch-width aria-label="ペンの太さ" type="range" min="1" max="20" step="0.5" value={width} disabled={disabled} onChange={event => setWidth(Number(event.target.value))} className="w-24" /><output>{width}</output></label>
     </div>
   );
   return <div data-sketch-pad className={standalone ? "flex h-full min-h-0 flex-col" : "mt-2"} style={{ userSelect: "none", WebkitUserSelect: "none", WebkitTouchCallout: "none" }}>
@@ -341,7 +435,7 @@ export default function SketchPad({ strokes, onChange, disabled, onPaperSize, st
           try { localStorage.setItem("taskspace-sketch-pen-only", "true"); } catch { /* 次の手の接触はこの画面で止める */ }
         }
         const rect = event.currentTarget.getBoundingClientRect();
-        const stroke = { color, width, height: paper.height, paperWidth: paper.width, pressure: brush === "legacy" && pen && pressure, ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [sketchPoint(event, rect, brush === "legacy" && pen && pressure)] };
+        const stroke = { color, width: marker ? width * 3 : width, height: paper.height, paperWidth: paper.width, pressure: brush === "legacy" && pen && pressure, ...(marker ? { marker: true } : {}), ...(brush === "speed-extreme-v1" ? { brush, times: [0] } : {}), points: [sketchPoint(event, rect, brush === "legacy" && pen && pressure)] };
         drawingRef.current = { pointerId: event.pointerId, stroke, pen, started: event.timeStamp, rect, paperHeight: paper.height };
         if (stroke.brush) {
           if (!liveRef.current) liveRef.current = createLiveSketch(canvasRef.current);

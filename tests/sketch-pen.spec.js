@@ -140,7 +140,7 @@ test('紙の移動モードではドラッグを線として保存せず、ペ�
   await page.locator('[data-sketch-settings]').click();
   await page.locator('[data-sketch-pen-only]').check();
   await page.locator('[data-sketch-settings]').click();
-  await page.locator('[data-sketch-pan]').click();
+  await page.locator('[data-sketch-tool="pan"]').click();
   const canvas=page.locator('[data-sketch-canvas]'); await canvas.scrollIntoViewIfNeeded();
   // 手書きのページは横には広がらない。紙は縦に伸びるので、上下で確かめる。
   await page.locator('[data-sketch-viewport]').evaluate(el=>{el.scrollTop=0;});
@@ -149,7 +149,7 @@ test('紙の移動モードではドラッグを線として保存せず、ペ�
   await page.mouse.move(r.x+120,r.y+120,{steps:8}); await page.mouse.up();
   expect(await page.locator('[data-sketch-viewport]').evaluate(el=>el.scrollTop)).toBeGreaterThan(80);
   await expect(page.locator('[data-sketch-undo]')).toBeDisabled();
-  await page.locator('[data-sketch-pan]').click();
-  await expect(page.locator('[data-sketch-pan]')).toHaveAttribute('aria-pressed','false');
+  await page.locator('[data-sketch-tool="pen"]').click();
+  await expect(page.locator('[data-sketch-tool="pan"]')).toHaveAttribute('aria-pressed','false');
 });
 

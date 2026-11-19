@@ -7,7 +7,7 @@ export function readSketchDraft() {
   try {
     const strokes = JSON.parse(localStorage.getItem(SKETCH_DRAFT_KEY) || "[]");
     if (!Array.isArray(strokes)) return [];
-    return strokes.filter((stroke) => (stroke?.brush === undefined || (stroke.brush === "speed-extreme-v1" && Array.isArray(stroke.times) && stroke.times.length === stroke.points?.length && stroke.times.every((t, i) => Number.isFinite(t) && t >= 0 && (!i || t >= stroke.times[i - 1])))) && (stroke?.paperWidth === undefined || (Number.isFinite(stroke.paperWidth) && stroke.paperWidth >= 600 && stroke.paperWidth <= 1200)) && /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
+    return strokes.filter((stroke) => (stroke?.marker === undefined || typeof stroke.marker === "boolean") && (stroke?.brush === undefined || (stroke.brush === "speed-extreme-v1" && Array.isArray(stroke.times) && stroke.times.length === stroke.points?.length && stroke.times.every((t, i) => Number.isFinite(t) && t >= 0 && (!i || t >= stroke.times[i - 1])))) && (stroke?.paperWidth === undefined || (Number.isFinite(stroke.paperWidth) && stroke.paperWidth >= 600 && stroke.paperWidth <= 1200)) && /^#[0-9a-f]{6}$/i.test(stroke?.color) && (stroke.height === undefined || (Number.isFinite(stroke.height) && stroke.height >= 1 && stroke.height <= SKETCH_WIDTH * 2)) && Number.isFinite(stroke.width) && stroke.width > 0 && stroke.width <= 20 && Array.isArray(stroke.points) && stroke.points.length && stroke.points.every((point) => Array.isArray(point) && (point.length === 2 || point.length === 3) && point.every((n) => Number.isFinite(n) && n >= 0 && n <= 1)));
   } catch { return []; }
 }
 
@@ -24,6 +24,14 @@ export function sketchPreviewStroke(stroke, limit = 512) {
 // 移動中は新しく届いた線だけを描き、過去の全ストロークを走査しない。
 export function appendSketch(canvas, stroke, from = 0, complete = true, surfaceWidth = SKETCH_WIDTH) {
   const ctx = canvas.getContext("2d");
+  // 蛍光ペンは、下の線が透けるように薄く重ねる
+  if (stroke.marker) {
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    try { appendSketch(canvas, { ...stroke, marker: false }, from, complete, surfaceWidth); }
+    finally { ctx.restore(); }
+    return;
+  }
   if (stroke.brush === "speed-extreme-v1") {
     ctx.save();
     const scale = canvas.width / surfaceWidth;
